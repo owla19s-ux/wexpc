@@ -1,39 +1,39 @@
-# Windows 存储后端（待实现）
+# Windows 存储后端
 
-`wex-access-store` 的 `Store` 目前只在 Unix 上可用，原因是四处平台语义：
+`wex-access-store` 保存的是授权记录，因此它的目录/文件必须**只对当前用户**可读，替换快照必须**原子**。两套平台语义如下，均已实现。
 
-| 能力 | Unix 做法 | Windows 需要的等价物 | 状态 |
-|---|---|---|---|
-| 权限根目录 | `DirBuilder::mode(0o700)` | 显式设置只允许当前用户的 DACL | **未实现** |
-| 私密文件 | `OpenOptionsExt::mode(0o600)` | 文件级 DACL | **未实现** |
-| 根权限校验 | `permissions().mode() & 0o077 != 0` → 拒绝 | 读取 DACL，拒绝授予 `Everyone`/`Users`/`Authenticated Users` 的 ACE | **未实现** |
-| 原子替换 | 写临时文件 → `fs::rename` → 目录 `sync_all` | `MoveFileExW(MOVEFILE_REPLACE_EXISTING \| MOVEFILE_WRITE_THROUGH)` | **未实现** |
+| 能力 | Unix | Windows |
+|---|---|---|
+| 根目录 | `DirBuilder::mode(0o700)` | SDDL `D:P(A;;FA;;;<当前用户SID>)` 生成安全描述符，`CreateDirectoryW` 传入 |
+| 私密文件 | `OpenOptionsExt::mode(0o600)` | 同一 SDDL 描述符，`CreateFileW` 传入 |
+| 权限校验 | `mode() & 0o077 != 0` 即拒绝 | `GetNamedSecurityInfoW` 取 DACL，逐个 ACE 检查 |
+| 原子替换 | 写临时文件 → `rename` → 目录 `sync_all` | `MoveFileExW(REPLACE_EXISTING \| WRITE_THROUGH)` |
 
-## 为什么没有顺手"近似实现"
+## 为什么没有用默认 ACL 凑合
 
-删掉 `cfg(unix)` 判断、让文件以默认 ACL 创建，会让"只有当前用户可读写"这条性质**在没有提示的情况下失效**，而它正是 `Store` 保存授权记录的前提。按 WEX 的规则（不得为跨平台削弱现有安全语义），这属于必须显式决策的变更。
+删掉平台判断、让文件以继承 ACL 创建，代码能跑、测试也容易过，但“只有当前用户可读写”这条性质会**静默消失**——而这正是 `Store` 的前提。按 WEX 的规则（不得为跨平台削弱现有安全语义），必须显式实现。
 
-## 两个可选方案
+## Windows 的权限校验具体在查什么
 
-**A. 显式 DACL（推荐）**
+Windows 没有 `group/other` 位，判定规则是：
 
-建目录/文件时用 `SetNamedSecurityInfoW` 写入只含当前用户 SID 的 DACL；校验时用 `GetNamedSecurityInfoW` 枚举 ACE，存在 `Everyone` / `Users` / `Authenticated Users` 的允许项即失败关闭。
+1. DACL 为空（NULL）→ **拒绝**（等价于 Everyone 全通）
+2. 任何允许型 ACE 的 SID 属于 `Everyone` / `BUILTIN\Users` / `Authenticated Users` / `INTERACTIVE` / `ANONYMOUS LOGON` → **拒绝**
+3. 其余情况通过（当前用户 SID、SYSTEM、Administrators 保留）
 
-- 与 Unix `0700/0600` 语义等价，校验可测
-- 约 150–200 行 FFI，需要 ACL 测试
+测试 `broad_ace_on_the_root_is_rejected` 用 `icacls /grant *S-1-1-0` 人为放宽权限，验证 `Store::open` 失败关闭。
 
-**B. 依赖继承 ACL + 位置约束**
+## 已知差异（必须在契约里写明）
 
-要求 `Store` 根位于 `%LOCALAPPDATA%` 之下，只校验没有宽泛 ACE，不主动设置 DACL。
+| 项 | 差异 |
+|---|---|
+| 崩溃一致性 | `MOVEFILE_WRITE_THROUGH` 只保证重命名元数据刷盘，**不等价于** Unix 的目录 `fsync`；Windows 上断电窗口略大 |
+| 加锁 | 仍用 `grants.lock` 的独占创建（`CREATE_NEW`），与 Unix 同构；不是跨进程字节锁 |
 
-- 改动小，但语义弱于 Unix；根放到公共目录时只能拒绝
+## 测试
 
-## 原子替换
+`crates/wex-access-store/tests/windows_store.rs`：
 
-两种方案都需要实现，且不能用 `fs::rename`（Windows 上目标存在时失败）：
-
-```
-写 grants.tmp → FlushFileBuffers → MoveFileExW(tmp, grants.json, REPLACE_EXISTING | WRITE_THROUGH)
-```
-
-`MOVEFILE_WRITE_THROUGH` 只保证重命名元数据落盘，**不等价于** Unix 的目录 fsync；上层契约应明确写"Windows 崩溃一致性弱于 Unix"。
+- `open_creates_a_private_root` —— 建根后重开，`verify_root` 仍通过（证明没有继承宽泛 ACE）
+- `set_persists_through_atomic_replacement` —— 连续两次写入，第二次走 `MoveFileExW` 覆盖既有快照
+- `broad_ace_on_the_root_is_rejected` —— 放宽 ACL 后失败关闭

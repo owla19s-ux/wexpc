@@ -5,7 +5,9 @@ mod read_session;
 pub use read_session::ReadSession;
 
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File, OpenOptions};
+
+mod platform;
+use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use wex_core::access::{decide_local_access, Access, Decision, DirectoryGrant, LocalTarget};
@@ -115,14 +117,7 @@ fn valid_id(id: &str) -> bool {
 }
 
 fn private_create(path: &Path) -> std::io::Result<File> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    options.open(path)
+    platform::create_private_file(path)
 }
 
 impl Store {
@@ -147,27 +142,14 @@ impl Store {
                 return Err(StoreError::Unavailable);
             }
         }
-        if !cfg!(unix) {
-            // Private ACLs and atomic replacement need a platform adapter.
+        if !platform::supported() {
             return Err(StoreError::Unavailable);
         }
         let root = root.as_ref();
         if !root.is_absolute() {
             return Err(StoreError::Unavailable);
         }
-        // The mode is Unix-only; Windows inherits the parent ACL.
-        #[cfg_attr(not(unix), allow(unused_mut))]
-        let mut builder = fs::DirBuilder::new();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
-        }
-        match builder.create(root) {
-            Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(StoreError::Unavailable),
-        }
+        platform::create_private_dir(root).map_err(|_| StoreError::Unavailable)?;
         let store = Self {
             root: root.to_path_buf(),
             internal_roots: std::iter::once(root.to_path_buf())
@@ -183,12 +165,8 @@ impl Store {
         if !metadata.is_dir() || metadata.file_type().is_symlink() {
             return Err(StoreError::Unavailable);
         }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            if metadata.permissions().mode() & 0o077 != 0 {
-                return Err(StoreError::Unavailable);
-            }
+        if !platform::is_private(&self.root) {
+            return Err(StoreError::Unavailable);
         }
         Ok(())
     }
@@ -295,7 +273,7 @@ impl Store {
         drop(file);
         // Never delete the old snapshot to emulate replacement on a platform
         // where atomic replacement is unavailable.
-        fs::rename(&temporary.0, self.root.join("grants.json"))
+        platform::replace_file(&temporary.0, &self.root.join("grants.json"))
             .map_err(|_| StoreError::Unavailable)?;
         #[cfg(unix)]
         File::open(&self.root)

@@ -40,8 +40,8 @@ Windows 文件系统实现
 | Windows 全量 `cargo test` | 通过（核心 55 项 + 本 crate 9 项） |
 | Linux 目标编译 | 通过（`cargo check --target x86_64-unknown-linux-gnu`） |
 | 真机/真实文件系统边界验收 | **未做** |
-| `ReadSession` 平台判定 | 改为能力查询 `platform_supported()`，不再写死 `cfg!(` | 
-| `wex-access-store` Store 的私密 ACL / 原子替换 | **未做**，见 `docs/PLATFORM-STORAGE.md` |
+| `ReadSession` 平台判定 | 改为能力查询 `platform_supported()`，不再写死 `cfg!` |
+| `wex-access-store` 私密 ACL + 原子替换 | 已实现（SDDL `D:P(A;;FA;;;<SID>)` + `MoveFileExW`），见 `docs/PLATFORM-STORAGE.md` |
 | `bridge/flutter-rust` `local_read` ABI | **未做** |
 
 ## 来源
