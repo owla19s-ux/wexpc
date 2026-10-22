@@ -14,6 +14,13 @@ use std::os::fd::{AsRawFd, FromRawFd};
 
 pub(super) fn open_directory(path: &Path) -> Result<File, ResourceError> {
     use std::os::unix::fs::OpenOptionsExt;
+    // Reject non-directories (FIFOs, sockets, devices, symlinks) before any
+    // open: opening a FIFO would block, and the error code must stay
+    // UnsupportedTarget rather than collapsing into Unavailable.
+    let metadata = fs::symlink_metadata(path).map_err(|_| ResourceError::Unavailable)?;
+    if !metadata.is_dir() || is_link(&metadata) {
+        return Err(ResourceError::UnsupportedTarget);
+    }
     // Kernel-enforced type/no-follow also covers a replacement after stat.
     fs::OpenOptions::new()
         .read(true)
