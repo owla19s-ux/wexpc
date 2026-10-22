@@ -1,0 +1,12 @@
+[package]
+name = "wex-local-resources"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+publish = false
+
+[dependencies]
+wex-core = { path = "../wex-core" }
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+libc = "=0.2.177"

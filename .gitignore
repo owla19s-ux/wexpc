@@ -1,0 +1,38 @@
+# Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+coverage/
+**/generated_plugin_registrant.dart
+
+# Rust
+target/
+**/target/
+
+# IDE & OS
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# Local credentials / generated artifacts
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.apk
+*.aab
+*.ipa
+*.msix
+*.exe
+*.dll
+*.so
+*.dylib
