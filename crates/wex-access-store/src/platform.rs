@@ -215,6 +215,11 @@ mod imp {
     /// Owner-only, inheritance-protected DACL descriptor.
     fn private_descriptor() -> io::Result<*mut c_void> {
         let sid = current_user_sid()?;
+        // The SID string is embedded into an SDDL document, so only the
+        // characters a SID may contain are accepted.
+        if sid.is_empty() || !sid.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+            return Err(io::Error::other("unexpected SID rendering"));
+        }
         let sddl: Vec<u16> = OsStr::new(&format!("D:P(A;;FA;;;{sid})"))
             .encode_wide()
             .chain(std::iter::once(0))
@@ -327,11 +332,22 @@ mod imp {
         }
         let acl = dacl as *const AclHeader;
         let count = unsafe { (*acl).ace_count } as usize;
-        let mut ace = unsafe { (dacl as *const u8).add(std::mem::size_of::<AclHeader>()) };
+        let acl_size = unsafe { (*acl).size } as usize;
+        let mut offset = std::mem::size_of::<AclHeader>();
         let mut private = true;
         for _ in 0..count {
+            // Stay inside the buffer the API allocated: a corrupted or hostile
+            // ACL must not be able to walk the pointer past its own end.
+            if offset + std::mem::size_of::<AceHeader>() > acl_size {
+                private = false;
+                break;
+            }
+            let ace = unsafe { (dacl as *const u8).add(offset) };
             let header = unsafe { &*(ace as *const AceHeader) };
-            if header.ace_size < 8 {
+            let ace_size = header.ace_size as usize;
+            // An access-allowed ACE is a header, a mask and a SID; the smallest
+            // SID is 8 bytes, so anything shorter cannot be inspected safely.
+            if ace_size < std::mem::size_of::<AceHeader>() + 4 + 8 || offset + ace_size > acl_size {
                 private = false;
                 break;
             }
@@ -360,7 +376,7 @@ mod imp {
                     break;
                 }
             }
-            ace = unsafe { ace.add(header.ace_size as usize) };
+            offset += ace_size;
         }
         unsafe { LocalFree(descriptor) };
         private
