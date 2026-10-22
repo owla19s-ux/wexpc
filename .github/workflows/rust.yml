@@ -59,3 +59,6 @@ jobs:
       - name: Analyze
         working-directory: apps/wex
         run: flutter analyze --no-pub
+      - name: Pure Dart widget tests
+        working-directory: apps/wex
+        run: flutter test --no-pub test/extensions test/platform test/shell_test.dart
