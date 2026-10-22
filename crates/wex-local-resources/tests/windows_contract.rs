@@ -156,3 +156,33 @@ fn check_allows_a_registered_leaf_with_a_grant() {
         .unwrap();
     assert_eq!(decision, Decision::Allowed);
 }
+
+#[test]
+fn internal_roots_are_rejected_by_identity_not_by_text_prefix() {
+    let root = Sandbox::new();
+    let internal = root.0.join("docs").join("store");
+    fs::create_dir_all(&internal).unwrap();
+    let mut registry = DirectoryRegistry::new();
+    // The chosen directory contains the Host's internal root.
+    assert_eq!(
+        registry.register_with_exclusions(root.docs(), Protection::General, &[&internal]),
+        Err(ResourceError::InternalDirectory)
+    );
+}
+
+#[test]
+fn disjoint_internal_root_is_allowed() {
+    let root = Sandbox::new();
+    let internal = root.0.join("store");
+    fs::create_dir_all(&internal).unwrap();
+    let mut registry = DirectoryRegistry::new();
+    let id = registry
+        .register_with_exclusions(root.docs(), Protection::General, &[&internal])
+        .expect("register");
+    assert_eq!(id.len(), 64);
+}
+
+#[test]
+fn platform_backend_is_reported_as_available() {
+    assert!(wex_local_resources::platform_supported());
+}

@@ -602,6 +602,8 @@ impl OrganizationStore {
         {
             return Err(OrganizationError::Unavailable);
         }
+        // The mode is Unix-only; Windows inherits the parent ACL.
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut builder = fs::DirBuilder::new();
         #[cfg(unix)]
         {

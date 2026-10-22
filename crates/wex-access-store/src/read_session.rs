@@ -18,7 +18,7 @@ impl ReadSession {
         authority_root: impl AsRef<Path>,
         internal_roots: &[&Path],
     ) -> Result<Self, StoreError> {
-        if internal_roots.is_empty() || !cfg!(any(target_os = "linux", target_os = "android")) {
+        if internal_roots.is_empty() || !wex_local_resources::platform_supported() {
             return Err(StoreError::Unavailable);
         }
         let store = Store::open_with_internal_roots(authority_root, internal_roots)?;

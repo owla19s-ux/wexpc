@@ -6,6 +6,12 @@ mod platform;
 mod read;
 pub use read::FileReadError;
 
+/// Whether a platform backend exists for this target. Callers that compose
+/// local resources must fail closed instead of assuming Unix.
+pub fn platform_supported() -> bool {
+    platform::supported()
+}
+
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 use wex_core::access::{
