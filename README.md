@@ -42,7 +42,7 @@ Windows 文件系统实现
 | 真机/真实文件系统边界验收 | **未做** |
 | `ReadSession` 平台判定 | 改为能力查询 `platform_supported()`，不再写死 `cfg!` |
 | `wex-access-store` 私密 ACL + 原子替换 | 已实现（SDDL `D:P(A;;FA;;;<SID>)` + `MoveFileExW`），见 `docs/PLATFORM-STORAGE.md` |
-| `bridge/flutter-rust` `local_read` ABI | **未做** |
+| `bridge/flutter-rust` `local_read` ABI | 已实现：路径校验改为平台无关，7 项 ABI 契约测试在 Windows 通过 |
 
 ## 来源
 

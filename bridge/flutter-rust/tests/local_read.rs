@@ -1,4 +1,4 @@
-#![cfg(any(target_os = "linux", target_os = "android"))]
+//! Local read ABI contract tests (platform neutral).
 use serde_json::{json, Value};
 use std::fs;
 use std::path::PathBuf;

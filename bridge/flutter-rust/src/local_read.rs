@@ -2,7 +2,7 @@
 use serde::Deserialize;
 use std::collections::BTreeMap;
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::{Mutex, TryLockError};
 use std::{ptr, slice};
 use wex_access_store::{ReadSession, RegisteredReadError, StoreError};
@@ -57,14 +57,17 @@ fn read_error(reason: RegisteredReadError) -> i32 {
         },
     }
 }
+/// Absolute, NUL-free and free of `.`/`..` components. Platform neutral:
+/// the Host supplies a normal OS path, so both `/a/b` and `C:\\a\\b` qualify.
 fn absolute(path: &str) -> bool {
-    path.starts_with('/')
-        && path.len() <= 4096
-        && !path.contains('\0')
-        && !path
-            .split('/')
-            .skip(1)
-            .any(|p| p.is_empty() || p == "." || p == "..")
+    if path.is_empty() || path.len() > 4096 || path.contains('\0') {
+        return false;
+    }
+    let candidate = Path::new(path);
+    candidate.is_absolute()
+        && !candidate
+            .components()
+            .any(|component| matches!(component, Component::CurDir | Component::ParentDir))
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -80,7 +83,10 @@ impl Layout {
             && self.internal_roots.iter().all(|p| absolute(p))
             && !(self.internal_roots.len() == 2 && self.internal_roots[0] == self.internal_roots[1])
             && absolute(&self.private_root)
-            && self.private_root == format!("{}/files/access-grants", self.internal_roots[0])
+            && Path::new(&self.private_root)
+                == Path::new(&self.internal_roots[0])
+                    .join("files")
+                    .join("access-grants")
     }
 }
 #[no_mangle]
@@ -274,7 +280,6 @@ pub extern "C" fn wex_local_read_close(handle: u64) -> i32 {
 mod tests {
     use super::*;
     #[test]
-    #[cfg(any(target_os = "linux", target_os = "android"))]
     fn contention_keeps_a_live_handle_usable_until_successful_close() {
         let base = std::env::temp_dir().join(format!("wex-read-busy-{}", std::process::id()));
         std::fs::create_dir_all(base.join("private/files")).unwrap();
