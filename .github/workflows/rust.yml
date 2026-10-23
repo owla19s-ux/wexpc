@@ -54,11 +54,11 @@ jobs:
           channel: stable
           cache: true
       - name: Resolve packages
-        working-directory: apps/wex
+        working-directory: reference/flutter-android
         run: flutter pub get
       - name: Analyze
-        working-directory: apps/wex
+        working-directory: reference/flutter-android
         run: flutter analyze --no-pub
       - name: Pure Dart widget tests
-        working-directory: apps/wex
+        working-directory: reference/flutter-android
         run: flutter test --no-pub test/extensions test/platform test/shell_test.dart
