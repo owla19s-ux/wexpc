@@ -80,6 +80,14 @@ DSH 参考的是“模型 API → Agent 工具调用 → 本地文件/终端执�
 - Tauri 的系统 WebView、打包、更新、无障碍和画布性能必须在 PC-0 实测；若存在不可接受的硬性阻碍，再基于证据评估 Electron。
 - Rust 是领域主语言不意味着所有平台 API 都用纯 Rust 实现；OS 特有能力通过小而明确的 Host/Adapter 封装。
 - 不同时维护两套 PC UI 技术路线，不提前为所有平台做抽象而拖慢首版。
+- 架构和交互细化应按适用范围回查 WEX Android 的已确认设计、代码与实际验证，以及 APS 的原始产品动机和历史方案。旧 Android 交付延期、Flutter 页面与 APS 已降级的 Dispatcher 草案不得直接成为 PC 范围、运行时或 UI 选型；可复用语义须逐项映射并留下来源。
+
+### 3.3 同机 DeepSeek Harness 接入（可行性已核对，产品归属待确认）
+
+若用户所指为 DeepSeek Harness（DSH，区别于 Nous Research 的 Hermes Agent），同机安装后可通过其公开 ACP stdio 服务将 DSH 作为 WEXPC 的**可选外部 Agent 执行者**：WEXPC 启动/连接对应进程、建立与项目工作区关联的独立会话，提交已分配任务，接收消息、工具生命周期、权限请求、取消和完成状态，并将可核对的文件 Diff、测试与 Commit 归入 WEXPC 项目记录。官方还提供 headless 和 SDK stdio 路径，具体选型需在 Windows 上实测兼容与恢复。参见 [DSH CLI](https://github.com/deepseek-ai/deepseek-harness/blob/master/docs/cli-help.md)、[ACP 协议实现说明](https://github.com/deepseek-ai/deepseek-harness/blob/master/packages/acp/acp/README.md)。
+
+同机安装**不等于自动接入或共享 WEX 权限**。DSH 的工作区、环境、MCP/插件、凭证及执行策略需要与 WEX 的项目范围和授权对齐；多 Agent 并发的工作区隔离、重叠写入阻止、集成、权威状态和证据核验仍由 WEXPC 管理。ACP 支持会话恢复但不重放旧 UI 更新，且只提供标准语义事件；WEXPC 不能依赖其会话记录代替自己的项目历史。是否将 DSH 适配列为 0.1.1 的具体交付项、安装与配置体验、Windows 支持和权限事件映射，仍需单独确认与原型验证；0.1.1 的多 Agent 能力不以用户额外安装 DSH 为前提。
+
 
 ## 4. 领域架构与状态边界
 
@@ -134,6 +142,8 @@ DSH 参考的是“模型 API → Agent 工具调用 → 本地文件/终端执�
 - 顶层设计与 Connection/Dispatcher：`owla19s-ux/WEX/docs/WEX-DESIGN-BASELINE-2026-10-17.md`。
 - PC 原交互、自由画布、秘书、不同工作模式和跨设备设计：`owla19s-ux/WEX/docs/UI/PC/README.md`（持续讨论中设计基线，非冻结视觉稿）。
 - 产品内项目主 AI、施工 AI、审查 AI、调度与证据：`owla19s-ux/WEX/docs/architecture/CONTEXT-LEAD-AI-DISPATCHER-BASELINE-2026-10-18.md`；其最小交接协议仍是草案，未冻结 DTO/ABI。
+- WEX Android 的 `docs/WEX-DESIGN-BASELINE-2026-10-17.md`、`docs/architecture/PLATFORM-TOOL-ACCESS-LAYER.md` 与 `STATE-OWNERSHIP.md` 提供 Connection/Dispatcher/PTAL、权限、回执和唯一状态写入的设计来源；其中 Android 首期限定及候选技术不可照搬 PC。
+- APS 的 `docs/architecture/AI-DISPATCHER-DESIGN.md` 保留轻量 Dispatcher 与 Connection 动机，但文件明确标为待重新设计，不能把旧“拆分→做→审查”认知流程塞进通用 Dispatcher；其他 APS 设计需按现行状态逐项核对。
 - 产品通用功能：`owla19s-ux/WEX/docs/PRODUCT-SPEC.md` 及 `docs/baselines/WEX-0.1.1-{PRODUCT-FEATURE,API-CONNECTOR,UI-INTERACTION}-MATRIX.md`；三表仅用于追溯**已确认的功能行为**，不能继承 Android 0.1.1 的交付批次、移动导航和阶段删减。
 - 三域边界：`owla19s-ux/WEX/docs/WEX-THREE-DOMAIN-BOUNDARY-2026-10-20.md`。P=通用产品能力，M=WEX **产品内部**可选的软件开发协作模式，D=**当前开发 WEX 的工程流程**；三者不得互相替代。
 
