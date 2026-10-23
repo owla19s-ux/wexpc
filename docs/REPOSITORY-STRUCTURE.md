@@ -10,9 +10,9 @@
 | `bridge/flutter-rust` | 旧 Flutter FFI，仍属于现有 Cargo workspace | 保留可编译参考；未来桌面 Host 的边界单独设计，不能直接当作 Tauri 接线 |
 | `reference/flutter-android` | 从 WEX 迁入的 Flutter/Dart UI、连接器与测试快照 | 历史参考，不是 PC 桌面应用或最终 UI；CI 的 Flutter job 只验证此参考资产 |
 | `.github/workflows/rust.yml` | Rust 与参考 Flutter 检查 | Windows job 只验证现有后端；没有桌面安装包/实机验收 |
-| `docs/PC-PRODUCT-AND-TECH-BASELINE.md` | 当前产品与技术主基线 | PC-0/PC-1 分批及未验证选型保持相应状态 |
+| `docs/PC-PRODUCT-AND-TECH-BASELINE.md` | 当前产品与技术主基线 | 0.1.1 首版结果与建议施工批次、未验证选型分开记录 |
 | `docs/DEVELOPMENT-WORKFLOW.md`、`AGENTS.md` | 当前开发和 GitHub 操作 | 属工程 D 域，不定义产品内任务/施工卡机制 |
 
-当前没有 Tauri/React 桌面应用。待 PC-0 验证后再建立 `apps/desktop` 及相应 Host/前端目录，不创建空壳宣称选型已验证。新增模块按真实依赖与运行路径组织；迁入代码要标明复用、适配、替换或仅参考。
+当前没有 Tauri/React 桌面应用。在 0.1.1 的 Windows 技术验证落实时建立 `apps/desktop` 及相应 Host/前端目录，不创建空壳宣称选型已验证。新增模块按真实依赖与运行路径组织；迁入代码要标明复用、适配、替换或仅参考。
 
 结构调整只把旧 Flutter 工程从 `apps/wex` 归入 `reference/flutter-android`，并同步 CI 工作目录。Rust crate 与 Bridge 未迁移，以保持 Cargo workspace 路径及现有测试契约；后续修改它们要先审接口、调用方和 Windows 运行路径。
