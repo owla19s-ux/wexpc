@@ -4,6 +4,13 @@ WEX 的 **PC 优先工程仓库**，首期交付目标为 Windows。它与 `WEX`
 
 > **当前产品方向已调整：PC 优先。** Android 是架构、功能、业务规则和已验证实现的参考来源，不再定义产品交付顺序，也不约束 PC UI 技术选型。PC 产品、功能和技术权威基线见 [PC 产品、功能与技术基线](docs/PC-PRODUCT-AND-TECH-BASELINE.md)。
 
+## 先读这些文件
+
+1. [PC 产品、功能与技术基线](docs/PC-PRODUCT-AND-TECH-BASELINE.md)：产品目标、已确认边界、待验证选型与阶段建议。
+2. [仓库结构与代码状态](docs/REPOSITORY-STRUCTURE.md)：当前目录职责、历史参考代码与未来 PC Host 的位置。
+3. [开发及 GitHub 操作](docs/DEVELOPMENT-WORKFLOW.md)：开工核对、分支/PR、Actions 成本和证据纪律。
+4. [AGENTS.md](AGENTS.md)：给进入仓库施工的 AI 的简明入口。
+
 ## 仓库职责
 
 - 以 PC/Windows 为第一交付目标，验证并建设桌面端所需的本地文件、进程、Git、连接器和安全能力。
@@ -37,19 +44,19 @@ WEX 的 **PC 优先工程仓库**，首期交付目标为 Windows。它与 `WEX`
 | Windows 全量 `cargo test` | 已通过（核心 55 项 + 本 crate 9 项，按既有记录） |
 | Linux 目标编译 | 已通过（`cargo check --target x86_64-unknown-linux-gnu`，按既有记录） |
 | `wex-access-store` 私密 ACL + 原子替换 | 已实现，见 [平台存储说明](docs/PLATFORM-STORAGE.md) |
-| `bridge/flutter-rust` `local_read` ABI | 已实现，7 项 ABI 契约测试在 Windows 通过（按既有记录） |
+| `bridge/flutter-rust` `local_read` ABI（旧 Flutter 适配，PC Host 不直接沿用） | 已实现，7 项 ABI 契约测试在 Windows 通过（按既有记录） |
 | 完整 PC UI 与桌面安装包 | 尚不能由上述后端测试证明 |
 | 真实文件系统边界、用户目录权限与故障恢复验收 | 尚未完成 |
 | AI API、GitHub、本地 Git、构建/测试的完整 PC 闭环 | 尚不能由当前状态表证明 |
 
-## PC 交付阶段
+## PC 交付阶段（以下分批建议尚未获用户确认）
 
 - **PC-0：技术验证** — 验证 Tauri 2 + React + TypeScript + Rust、画布持久化、SQLite、AI API 流式响应、受限目录访问、受控进程生命周期和 Windows 打包。
 - **PC-1：首个可用版本** — 统一工作对象与关系、自由画布、多视图、AI 秘书/API、本地 Git、GitHub 真实读写、构建/测试/打包和操作回执/核验。
 - **PC-1.1：开发环境扩展** — 国内托管服务、远程开发、容器与 CI，逐个连接器单独验收。
 - **PC-2：跨设备与更多工作模式** — 手机配对、选择性同步、手机遥控 PC、更多领域工作模式。
 
-阶段标签是计划，不是发布日期承诺。只有通过 PC-0 的关键验证后，才能冻结 PC-1 最终范围。
+阶段标签是待确认的规划建议，不是已批准的交付范围或发布日期承诺。项目持续开发属于 PC 优先调整的关键目标，不得因表中未列全而默认推迟到 PC-2。
 
 ## 来源与关系
 
