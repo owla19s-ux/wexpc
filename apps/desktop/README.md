@@ -27,7 +27,7 @@ API Key 保存在 Windows Credential Manager，SQLite 仅存不透明引用。�
 | 普通 API 文本对话 | Rust HTTP 请求/回复、错误、历史持久化已实现；本地 HTTP 测试覆盖请求格式，不等于真实 DeepSeek 验收 |
 | 原 Rust Catalog | 正式服务调用其目录恢复、连接启停、模型/会话选择校验，无双写旧 CatalogStore |
 | 原权限/操作生命周期和 Windows 文件后端 | 原样保留，等待本地工具批按接口接入；本批未绕过它们直接给模型文件/命令工具 |
-| Windows 凭证库与 Tauri Host | 已实现，待 Windows 编译和实机验证；Linux 无凭证后端时明确拒绝保存，不降级明文 |
+| Windows 凭证库与 Tauri Host | Windows Host `cargo check`、服务测试与前端构建已通过；凭证真实读写和桌面实机运行尚未验证。Linux 无凭证后端时明确拒绝保存，不降级明文 |
 | 完整 Agent/Dispatcher | 未实现工具循环、范围占用、并发派工、结果集成、自动验证/审查/修复流转 |
 | GitHub、本地文件/Git/终端、Android 模拟器 | 未接通桌面正式路径，继续保留 0.1.1 要求 |
 | API 流式、模型目录/参数细化、追加排队、语音、最终 UI | 后续批次；本批文本请求不代表完整 API 模块交付 |
@@ -44,4 +44,6 @@ npm run build
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-本环境已执行 Linux Rust 全量测试、clippy、格式检查和前端生产构建。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡；未宣称 Windows 可运行、凭证库可用或真实服务通过。桌面 Windows 检查只在相关源码/工作流 PR 或按需手动触发，验证 Host 编译与前端，不构建安装包。
+2026-10-24 已验证代码提交 `1b5319a8b605a66f1be55f63da9100c087b77af6`：Linux 全量 Rust 测试 230 项、clippy、格式检查和前端生产构建通过；[Linux/Windows Rust CI](https://github.com/owla19s-ux/wexpc/actions/runs/40023876374) 与 [Windows 桌面 Host/前端检查](https://github.com/owla19s-ux/wexpc/actions/runs/40023876304) 均通过。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡，Windows 编译证据来自上述 CI。
+
+这份记录之后的文档提交不改变已验证的源码。未构建安装包，未调用真实 API 服务商，未验证凭证库真实读写或 Windows 窗口体验。桌面 Windows 检查只在相关源码/工作流 PR 或按需手动触发，不在本批构建安装包。
