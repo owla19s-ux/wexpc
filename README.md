@@ -51,9 +51,9 @@ WEX 的 **PC 优先工程仓库**，首期交付目标为 Windows。它与 `WEX`
 
 ## WEXPC 0.1.1 首版与施工批次
 
-首版目标是让用户在 Windows 上用 WEXPC **持续开发 WEX Android 版与 PC 版**：配置 AI API，授权真实项目，Agent 读写多处代码、调用本地或外置环境运行/测试/编译，读取反馈继续修复，使用本地 Git 与 GitHub，并保存进度供重启后接续。完整验收见 [PC 基线 §5](docs/PC-PRODUCT-AND-TECH-BASELINE.md)。
+首版目标是让用户在 Windows 上用 WEXPC **持续开发 WEX Android 版与 PC 版**：配置 AI API，授权真实项目，Agent 读写多处代码、调用本地或外置环境运行/测试/编译，读取反馈继续修复，使用本地 Git 与 GitHub，以轻量项目管理保存目标、任务、进度和证据，由多个 Agent 分工施工并交接结果，供重启后接续。完整验收见 [PC 基线 §5](docs/PC-PRODUCT-AND-TECH-BASELINE.md)。
 
-A（Windows 基础和恢复）、B（本地 Agent 工具链）、C（Git/GitHub 与持续开发）、D（集成与 Windows 验收）是同一 0.1.1 的建议施工顺序，不是四个缩水产品版本。首版不以多 AI 并行、多个项目同时自治施工、自由画布或多视图接线为门槛；这些能力保留在完整产品目标中，后续版本归属待确认。
+A（Windows 基础和恢复）、B（本地 Agent 工具链）、C（Git/GitHub 与持续开发）、D（集成与 Windows 验收）是同一 0.1.1 的建议施工顺序，不是四个缩水产品版本。轻量项目管理、Agent 和多 Agent 施工是首版门槛。多个项目同时自治施工、自由画布和多视图接线可后置；并发规模与独立 AI 审查深度仍需明确。
 
 ## 版本功能规划
 
