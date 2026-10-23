@@ -38,6 +38,8 @@ WEX 的 **PC 优先工程仓库**，首期交付目标为 Windows。它与 `WEX`
 
 ## 当前实现与验证状态
 
+PC 桌面首批源码已开始落地于 [`apps/desktop`](apps/desktop/README.md)：Tauri/React → Rust 服务，项目、AI 成员与模型绑定、任务草案、普通 API 文本对话可沿正式命令调用。Rust Catalog 规则已在该服务实际复用。当前仍缺完整工具循环、并发施工、审查验证流转与 Android 模拟器接线；Windows 构建及实机尚未验收，不能称为 0.1.1 完整交付。
+
 | 项 | 状态 |
 |---|---|
 | `wex-local-resources` Windows 后端 | 已实现，9 项契约测试通过 |

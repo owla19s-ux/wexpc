@@ -1,5 +1,6 @@
 [workspace]
-members = ["crates/wex-core", "crates/wex-access-store", "crates/wex-local-resources", "crates/wex-protocol", "crates/wex-workspace-store", "bridge/flutter-rust"]
+members = ["crates/wex-core", "crates/wex-access-store", "crates/wex-local-resources", "crates/wex-protocol", "crates/wex-workspace-store", "crates/wex-desktop-service", "bridge/flutter-rust"]
+exclude = ["apps/desktop/src-tauri"]
 resolver = "2"
 
 [profile.dev]
