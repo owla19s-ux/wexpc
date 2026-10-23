@@ -1,6 +1,11 @@
-name: desktop (manual Windows check)
+name: desktop (Windows check)
 
 on:
+  pull_request:
+    paths:
+      - 'apps/desktop/**'
+      - 'crates/wex-desktop-service/**'
+      - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
 permissions:

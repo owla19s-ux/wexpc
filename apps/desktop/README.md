@@ -44,4 +44,4 @@ npm run build
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-本环境已执行 Linux Rust 全量测试、clippy、格式检查和前端生产构建。Host 检查受 Linux glib/WebKit/pkg-config 缺失阻挡；未宣称 Windows 可运行、凭证库可用或真实服务通过。桌面 Windows 验证工作流按需手动触发，不在每次中间提交构建安装包。
+本环境已执行 Linux Rust 全量测试、clippy、格式检查和前端生产构建。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡；未宣称 Windows 可运行、凭证库可用或真实服务通过。桌面 Windows 检查只在相关源码/工作流 PR 或按需手动触发，验证 Host 编译与前端，不构建安装包。

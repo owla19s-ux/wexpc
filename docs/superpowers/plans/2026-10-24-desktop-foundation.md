@@ -45,7 +45,7 @@
 - 实际运行 `cargo test --workspace`：230 项通过，其中新服务 10 项；`cargo clippy --workspace --all-targets -- -D warnings`、两处 Rust 格式检查和 `npm run build` 通过。
 - HTTP 使用本地真实测试服务器验证请求/回复和错误脱敏；未使用真实 DeepSeek/OpenAI 凭证，未宣称服务商验收。
 - 独立代码审查发现结果落盘失败会锁住对话，已补内存结果保留与只重试保存的 UI/Host/服务链，并用 SQLite 写入故障注入验证恢复。旧快照不覆盖新 revision；请求未被接收时保留输入草稿。
-- Windows Host 尚未编译；本环境 Linux 检查因缺少 pkg-config/glib/WebKit 系统依赖而停止。未构建安装包，未运行 Windows 凭证库或实机验证。按需手动桌面工作流已准备。
+- 本环境 Linux Host 检查因缺少 pkg-config/glib/WebKit 系统依赖而停止。Windows Host 由相关 PR 的桌面工作流验证编译，结果以对应提交的实际 Actions 为准；未运行 Windows 凭证库或实机验收，不构建安装包。
 - 决策：当前 app identifier `app.wex.pc`、图标是开发工程占位，不代表正式安装包、签名或最终 UI 定稿。
 - 决策：已返回但落盘失败的结果暂存于本进程内存，允许原请求重试保存而不重复调用 API；关闭进程后失去尚未落盘的结果，重启显示中断，不伪造恢复成功。
 - 完整多 Agent 并发施工、工具权限/执行、任务发布/依赖/范围互斥、验证审查/修复流转与 Android 模拟器均保留为 0.1.1 后续批次，不因本批基础服务完成而关闭。
