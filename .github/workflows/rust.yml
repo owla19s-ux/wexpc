@@ -1,15 +1,15 @@
 name: rust
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
   pull_request:
-    paths-ignore:
-      - 'docs/**'
-      - '**/*.md'
+    paths:
+      - 'crates/**'
+      - 'bridge/**'
+      - 'apps/desktop/**'
+      - 'tests/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/rust.yml'
   workflow_dispatch:
 
 permissions:
@@ -49,7 +49,8 @@ jobs:
         run: cargo test -p wex-access-store --test windows_store -- --nocapture
 
   flutter:
-    name: flutter (analyze)
+    if: github.event_name == 'workflow_dispatch'
+    name: flutter reference (manual analyze)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
