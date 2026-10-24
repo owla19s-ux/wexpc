@@ -3,6 +3,7 @@
 //! Space / directory-group / Context identities are organizational only:
 //! never filesystem paths, Connector access, approvals, or AI grants.
 //! Only a trusted Host supplies the private storage root.
+pub mod agent_dispatch;
 pub mod catalog;
 pub mod operations;
 pub mod tasks;
