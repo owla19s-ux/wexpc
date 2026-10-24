@@ -56,7 +56,11 @@ fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<S
     }
     let parent = path.parent().ok_or_else(|| ServiceError::new("INVALID_INPUT", "文件目录无效"))?;
     let mut registry = DirectoryRegistry::new();
-    let directory_id = registry.register(parent, Protection::General)
+    let internal = app.path().app_data_dir()
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法确定应用数据目录"))?;
+    let directory_id = registry.register_with_exclusions(
+        parent, Protection::Protected, &[internal.as_path()],
+    )
         .map_err(|_| ServiceError::new("RESOURCE_UNAVAILABLE", "无法安全注册所选目录"))?;
     let operation_id = format!("op_{}", uuid::Uuid::new_v4().simple());
     let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
@@ -81,7 +85,7 @@ fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<S
     // A durable "in flight" marker must exist BEFORE touching the file.
     journal(app, &attempt_id, &operation_id, "in_flight", None)?;
     let grants = [DirectoryGrant {
-        directory_id: &directory_id, access: Access::Read, explicit_personal: false,
+        directory_id: &directory_id, access: Access::Read, explicit_personal: true,
     }];
     let content = read_approved_file(&dispatch, &registry, leaf, true, &grants);
     let receipt_digest = content.as_ref().ok()
