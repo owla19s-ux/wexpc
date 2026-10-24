@@ -312,3 +312,48 @@ fn both_transports_encode_the_same_ordered_transcript() {
     assert_eq!(complete_body["messages"][0]["role"], "system");
     assert_eq!(complete_body["messages"][2]["role"], "assistant");
 }
+
+#[test]
+fn non_streaming_rejects_truncated_reply_even_with_text() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"finish_reason":"length","message":{"content":"unfinished"}}]}"#,
+    );
+    let error = execute_chat(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "API_RESPONSE_INCOMPLETE");
+}
+
+#[test]
+fn non_streaming_rejects_tool_finish_reason_without_tool_payload() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"finish_reason":"tool_calls","message":{"content":"not a final reply"}}]}"#,
+    );
+    let error = execute_chat(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "TOOLS_NOT_CONNECTED");
+}
+
+#[test]
+fn non_streaming_rejects_multiple_candidates_and_unknown_finish_reason() {
+    for body in [
+        r#"{"choices":[{"message":{"content":"one"}},{"message":{"content":"two"}}]}"#,
+        r#"{"choices":[{"finish_reason":"unexpected","message":{"content":"one"}}]}"#,
+    ] {
+        let (url, handle) = server("200 OK", body);
+        let error = execute_chat(&request(url), "secret-key").unwrap_err();
+        handle.join().unwrap();
+        assert_eq!(error.code, "API_RESPONSE_ERROR");
+    }
+}
+
+#[test]
+fn non_streaming_accepts_explicit_stop_finish_reason() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"finish_reason":"stop","message":{"content":"complete"}}]}"#,
+    );
+    assert_eq!(execute_chat(&request(url), "secret-key").unwrap(), "complete");
+    handle.join().unwrap();
+}
