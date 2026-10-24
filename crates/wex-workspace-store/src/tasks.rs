@@ -342,7 +342,9 @@ impl TaskStore {
         for task in &current.tasks {
             board.insert(task.clone()).map_err(TaskStoreError::Domain)?;
         }
-        let task = board.get(&link.task_id).ok_or(TaskStoreError::Link(LinkError::MissingTask))?;
+        let task = board
+            .get(&link.task_id)
+            .ok_or(TaskStoreError::Link(LinkError::MissingTask))?;
         if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed) {
             return Err(TaskStoreError::Domain(TaskError::InvalidTransition));
         }
@@ -360,7 +362,9 @@ impl TaskStore {
         }
         let mut index = TaskOperationIndex::restore(current.links, &board, ledger)
             .map_err(TaskStoreError::Link)?;
-        index.attach(link, &board, ledger).map_err(TaskStoreError::Link)?;
+        index
+            .attach(link, &board, ledger)
+            .map_err(TaskStoreError::Link)?;
         let revision = expected_revision
             .checked_add(1)
             .ok_or(OrganizationError::RevisionExhausted)?;
