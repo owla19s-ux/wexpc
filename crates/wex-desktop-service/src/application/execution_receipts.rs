@@ -242,4 +242,49 @@ mod tests {
         assert_eq!(app.member_brief(&agent.id).unwrap().execution_receipts.len(), 1);
     }
 
+    #[test]
+    fn storage_failure_does_not_create_ghost_receipt_and_allows_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("receipt-failure.sqlite");
+        let mut app = DesktopService::open(&path).unwrap();
+        let project = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+        let connection = app.add_connection(NewConnection {
+            name: "API".into(),
+            base_url: "https://api.deepseek.com".into(),
+            models: vec!["deepseek-chat".into()],
+        }, "vault".into()).unwrap();
+        let agent = app.add_agent(NewAgent {
+            project_id: project.id.clone(),
+            name: "Worker".into(),
+            role: AgentRole::Worker,
+            connection_id: connection.id,
+            model_id: "deepseek-chat".into(),
+        }).unwrap();
+        let task = app.create_task(NewTask {
+            project_id: project.id,
+            title: "Persist".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![agent.id.clone()],
+        }).unwrap();
+        let outcome = || ExecutorOutcome {
+            task_id: task.id.clone(),
+            agent_id: agent.id.clone(),
+            tool_name: "fixture".into(),
+            invocation_id: "failed-write".into(),
+            succeeded: false,
+            summary: "simulated failure".into(),
+        };
+        let before = app.snapshot().unwrap().revision;
+        let db = rusqlite::Connection::open(&path).unwrap();
+        db.execute_batch("CREATE TRIGGER reject_receipt BEFORE UPDATE ON desktop_state BEGIN SELECT RAISE(ABORT, 'disk failure'); END;").unwrap();
+        assert_eq!(app.record_executor_outcome(outcome()).unwrap_err().code, "STORAGE_ERROR");
+        assert_eq!(app.snapshot().unwrap().revision, before);
+        assert!(app.snapshot().unwrap().execution_receipts.is_empty());
+        db.execute_batch("DROP TRIGGER reject_receipt;").unwrap();
+        app.record_executor_outcome(outcome()).unwrap();
+        assert_eq!(app.snapshot().unwrap().execution_receipts.len(), 1);
+    }
+
 }
