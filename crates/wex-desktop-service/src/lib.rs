@@ -10,3 +10,5 @@ pub use connectors::openai_compatible::{
     chat_endpoint, execute_chat, execute_chat_stream, execute_chat_stream_with_progress,
 };
 pub use domain::*;
+pub use connectors::tool_proposals::ToolProposal;
+pub use connectors::tool_round::{committed_tool_messages, drive_tool_rounds, execute_model_step, ModelStep};
