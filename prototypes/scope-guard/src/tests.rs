@@ -128,3 +128,20 @@ fn reservation_release_is_scoped_to_the_correct_handle() {
     drop(second);
     assert_eq!(registry.active_count(), Ok(1));
 }
+
+#[test]
+fn out_of_order_release_does_not_reuse_reservation_identity() {
+    let registry = super::ScopeRegistry::default();
+    let first = registry.reserve(&["C:/a".into()]).unwrap();
+    let middle = registry.reserve(&["C:/b".into()]).unwrap();
+    let last = registry.reserve(&["C:/c".into()]).unwrap();
+    drop(middle);
+    let replacement = registry.reserve(&["C:/b".into()]).unwrap();
+    drop(last);
+    assert_eq!(registry.active_count(), Ok(2));
+    assert!(matches!(registry.reserve(&["C:/b/sub".into()]), Err(super::ReservationError::Conflict)));
+    drop(first);
+    assert_eq!(registry.active_count(), Ok(1));
+    drop(replacement);
+    assert_eq!(registry.active_count(), Ok(0));
+}
