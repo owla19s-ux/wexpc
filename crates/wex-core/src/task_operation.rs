@@ -93,10 +93,8 @@ impl TaskOperationIndex {
         }
         match record.state {
             OperationState::Succeeded { evidence_ref, .. } => {
-                if task.status == TaskStatus::Running {
-                    tasks.transition(&link.task_id, TaskStatus::Blocked, Some(evidence_ref))
-                        .map_err(LinkError::Task)?;
-                }
+                tasks.record_evidence(&link.task_id, evidence_ref)
+                    .map_err(LinkError::Task)?;
             }
             OperationState::Failed { evidence_ref, .. } => {
                 if task.status == TaskStatus::Running {
