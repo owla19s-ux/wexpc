@@ -166,6 +166,15 @@ fn update_task(
 }
 
 #[tauri::command]
+fn append_task_record(
+    state: State<'_, Shared>,
+    revision: u64,
+    input: NewTaskRecord,
+) -> Result<TaskRecord> {
+    locked(&state)?.append_task_record(revision, input)
+}
+
+#[tauri::command]
 fn retry_chat_result(state: State<'_, Shared>, turn_id: String) -> Result<()> {
     locked(&state)?.retry_chat_result(&turn_id)
 }
@@ -235,6 +244,7 @@ fn main() {
             add_agent,
             create_task,
             update_task,
+            append_task_record,
             create_conversation,
             send_message,
             retry_chat_result,

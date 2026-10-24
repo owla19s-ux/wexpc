@@ -4,7 +4,7 @@
 
 正式服务已按 `domain` / `application` / `infrastructure` / `connectors` 分责，保持 React → Tauri → Rust 的同一调用路径。Space 与上下文入口支持创建空间、可选分组、通用 Context 及移动位置；项目详情可显式关联/解除 Context。位置独立保存，移动不改变 Context ID/资料、不移动外部文件、不添加工具授权。
 
-SQLite schema 从 1 升级到 2，保留原 payload，旧项目无 `context_id` 时保持未关联，不猜测类别；版本门槛防止旧二进制打开新数据后把组织字段丢掉。基础 UI 未冻结；组织删除/共享/权限继承、Context 自身对话绑定和完整对象图仍未实现。
+SQLite 当前 schema 为 4，可从 1/2/3 保留原 payload 升级。旧项目/对话缺少 `context_id` 时保持未关联，旧数据缺少任务记录时视为空，不猜测类别或伪造历史。版本门槛防止旧二进制写回时丢掉新增字段。普通对话与项目可分别关联 Context；基础 UI 未冻结，组织删除/共享/权限继承和完整对象图仍未实现。
 
 正式路径：React → Tauri command → `wex-desktop-service` → SQLite / reqwest。普通 API 对话不调用 Flutter FFI。界面为基础功能入口，视觉与后续交互未冻结。
 
@@ -30,6 +30,7 @@ API Key 保存在 Windows Credential Manager，SQLite 仅存不透明引用。�
 | 项目 | 本批实际状态 |
 | --- | --- |
 | 项目、关联资料、成员/模型绑定、任务草案 | Rust 持久化与桌面命令/UI 已接线；Linux 服务测试覆盖恢复和关联校验 |
+| 任务进展、阻碍与交接 | 桌面任务详情可追加手动记录及引用；保留当时任务快照并在重启后恢复。引用未自动核验，不改变任务草案状态；成员对话带入当前分派任务记录，普通对话不自动带入 |
 | 普通 API 文本对话 | Rust HTTP 请求/回复、错误、历史持久化已实现；本地 HTTP 测试覆盖请求格式，不等于真实 DeepSeek 验收 |
 | 原 Rust Catalog | 正式服务调用其目录恢复、连接启停、模型/会话选择校验，无双写旧 CatalogStore |
 | 原权限/操作生命周期和 Windows 文件后端 | 原样保留，等待本地工具批按接口接入；本批未绕过它们直接给模型文件/命令工具 |
@@ -50,7 +51,7 @@ npm run build
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-2026-10-24 已验证代码提交 `1b5319a8b605a66f1be55f63da9100c087b77af6`：Linux 全量 Rust 测试 230 项、clippy、格式检查和前端生产构建通过；[Linux/Windows Rust CI](https://github.com/owla19s-ux/wexpc/actions/runs/40023876374) 与 [Windows 桌面 Host/前端检查](https://github.com/owla19s-ux/wexpc/actions/runs/40023876304) 均通过。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡，Windows 编译证据来自上述 CI。
+早期源码验证证据（不替代后续提交）：2026-10-24 代码提交 `1b5319a8b605a66f1be55f63da9100c087b77af6`：Linux 全量 Rust 测试 230 项、clippy、格式检查和前端生产构建通过；[Linux/Windows Rust CI](https://github.com/owla19s-ux/wexpc/actions/runs/40023876374) 与 [Windows 桌面 Host/前端检查](https://github.com/owla19s-ux/wexpc/actions/runs/40023876304) 均通过。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡，Windows 编译证据来自上述 CI。
 
 这份记录之后的文档提交不改变已验证的源码。未构建安装包，未调用真实 API 服务商，未验证凭证库真实读写或 Windows 窗口体验。桌面 Windows 检查只在相关源码/工作流 PR 或按需手动触发，不在本批构建安装包。
 
@@ -60,3 +61,12 @@ Space/分组可重命名，Context/项目可编辑名称、目标和资料引用
 
 
 任务草案编辑接续批（2026-10-24）：项目 → 任务卡 → 编辑任务与分配，可修改目标、范围、验收和成员；保持任务身份和项目归属，保存仍不启动施工。保存采用打开表单时的修订号，冲突拒绝覆盖并保留输入；可重新读取，收起后核对最新内容再编辑。此批不包含施工调度、范围锁、实际验证/审查流转。
+
+
+## 任务接续记录
+
+项目 → 任务卡 →「添加进展或交接」：选择进展、阻碍或交接，填写说明，可逐行附 Commit/Run 地址或日志路径。引用仅保存和展示，不会读取或授予资源权限。可展开「记录时的任务内容」查看旧目标、范围和验收条件；任务以后编辑不改写既有记录，需要更正时可另加说明。
+
+记录标为用户手动填写、未自动核验，不是执行回执、完成状态或验证结果。当前分配成员的后续工作对话可获得这些资料，但旧会话历史不会因重新分配自动清除；这是上下文组织，不是新的权限机制。打开表单时捕获修订，冲突/失败保留输入，保存期间禁用重复提交；追加记录不调用 API、不改变成员分派，也不启动施工。
+
+本接续批本地验证：全量 Rust 244 项通过（新增7项记录/迁移/上下文用例）、clippy、根及 Host 格式检查、前端构建通过。对应提交、Windows CI 与审查证据记录在 PR #4；未执行 Windows 实机交互、真实服务或模拟器。完整任务调度、范围占用、工具证据及独立验证审查仍未接通。

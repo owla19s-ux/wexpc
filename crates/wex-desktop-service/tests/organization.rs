@@ -98,7 +98,7 @@ fn pre_organization_snapshot_is_upgraded_without_inventing_containers_or_links()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        version, 3,
+        version, 4,
         "previous binaries must refuse organization snapshots"
     );
 }

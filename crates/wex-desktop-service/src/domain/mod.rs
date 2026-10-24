@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 mod organization;
 pub use organization::*;
+mod task_records;
+pub use task_records::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceError {
@@ -160,6 +162,8 @@ pub struct DesktopSnapshot {
     pub projects: Vec<Project>,
     pub agents: Vec<Agent>,
     pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub task_records: Vec<TaskRecord>,
     pub conversations: Vec<Conversation>,
     pub turns: Vec<ChatTurn>,
     /// Runtime-only pending settlements, populated in the returned projection.

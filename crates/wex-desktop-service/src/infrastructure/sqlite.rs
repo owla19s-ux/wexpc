@@ -39,7 +39,7 @@ impl DesktopStore {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if version > 3 {
+        if version > 4 {
             return Err(ServiceError::new(
                 "UNSUPPORTED_VERSION",
                 "数据由更新版本创建，请使用相应版本打开",
@@ -55,10 +55,10 @@ impl DesktopStore {
                 [serde_json::to_string(&DesktopSnapshot::default()).map_err(storage)?],
             )
             .map_err(storage)?;
-            tx.pragma_update(None, "user_version", 3).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 4).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
-        if version == 1 || version == 2 {
+        if (1..=3).contains(&version) {
             let tx = db
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
@@ -70,9 +70,9 @@ impl DesktopStore {
             let _: DesktopSnapshot = serde_json::from_str(&body).map_err(|_| {
                 ServiceError::new("INVALID_SNAPSHOT", "旧项目数据无法迁移，未覆盖原数据")
             })?;
-            // Defaulted organization fields are read additively. Keep the exact
-            // old payload, but fence out v1 binaries before any new data write.
-            tx.pragma_update(None, "user_version", 3).map_err(storage)?;
+            // Defaulted fields are read additively. Keep the exact old payload,
+            // but fence out older binaries before any write can erase records.
+            tx.pragma_update(None, "user_version", 4).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
         Ok(Self {

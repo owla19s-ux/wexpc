@@ -33,3 +33,22 @@
 
 
 审查记录：独立审查未发现核心/事务/IPC 问题；指出保存期间收起再打开同任务可能被旧请求关闭新草稿。本批按用户输入丢失风险处理，在保存期间禁用表单编辑/收起/重复提交，失败解除禁用并保留草稿。UI 尚未执行浏览器或 Windows 自动化交互验收。实际本地验证：237 项 Rust 测试通过、clippy 无警告、根及 Host fmt 检查和前端构建通过。
+
+## 接续批：任务进展、阻碍与交接记录（2026-10-24）
+
+依据：PC 基线 §5/§6.3 已确认持久进度、阻碍、交接与中断接续；当前仅任务草案可编辑，没有记录入口。用户已授权持续施工及技术细节自主实施，沿现有实现推进，不重开产品/UI 选型。
+
+技术设计：新建独立 TaskRecord，类型为 progress/blocker/handoff，内容与引用只作用户手动记录，不是程序核验的执行/测试/审查证据。由服务在唯一 SQLite 事务中附上原任务快照及追加时的全局 revision；不可由调用方注入作者/成功状态。记录只追加，后续编辑任务不改写既有记录。以打开表单时 revision 拒绝过时记录，失败保留草稿。追加记录不发模型请求、不改任务状态/成员/权限。采用独立记录数组，避免扩充 Task 导致旧任务反序列化失败；SQLite 升至 schema 4，旧 1/2/3 精确保留原 payload 后更新版本，阻止旧程序写回时丢掉新记录。
+
+### 单批实施与验证
+
+- [x] 在 `tests/task_records.rs` 先写恢复/快照不变、错误/冲突原子拒绝、旧版本迁移保留 payload、未来版本/损坏拒绝、成员对话只带当前分派任务记录的测试；运行确认新增接口缺失。
+- [x] 在 `domain/task_records.rs` 定义 NewTaskRecord、TaskRecordKind、TaskRecord（含 task_snapshot 和 recorded_revision），`domain/mod.rs` 只追加默认 task_records 数组；`application/task_records.rs` 实现 `append_task_record(revision, input) -> Result<TaskRecord>`，不改 API 执行器。复用文本检查、revision 和唯一 Store。
+- [x] `sqlite.rs` 版本升4；更新旧迁移断言。`prepare_chat` 只注入当前分配任务的记录，明确人工来源与未核验，重跑协议/持久化相关测试。
+- [x] Tauri 注册 `append_task_record`；`types.ts` 对齐 DTO，新增 `TaskJournal.tsx` 并从 `Projects.tsx` 任务详情进入。表单绑定打开时 revision，提交时禁用，失败保留输入；引用仅文本显示，不访问外部文件/URL。显示记录时任务快照，避免旧说明误配到新目标。
+- [ ] 独立审查整个批次；集中运行 workspace 测试、fmt、clippy、前端构建，提交原 PR 并验证对应 Windows Host CI。自动化只证明本批，真实服务、Windows 交互、完整调度和模拟器另列未执行。
+
+未覆盖完整任务状态机、工具回执/Evidence、自动任务发布、范围占用与执行隔离、独立审查验证调度；它们仍属0.1.1目标。引用 Commit/Run 不自动成为经过核验的证据。
+
+
+执行记录：首轮记录测试因新增类型/接口缺失失败；实现后7项记录回归及全部244项 Rust 测试通过，fmt/clippy/前端构建通过。独立审查未发现阻塞项。Minor（延后）：成功后立即重开表单可能在刷新返回前捕获旧修订，触发安全冲突提示；不会覆盖或错配历史快照，输入会保留。浏览器/Windows 交互尚未实际执行。当前系统上下文只注入现有分派记录，但旧会话历史中的既往讨论不会因重新分派而清除，不宣称它是权限撤销机制。
