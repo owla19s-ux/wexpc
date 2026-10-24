@@ -25,6 +25,7 @@ pub fn read_approved_file(
     {
         return Err(ServiceError::new("INVALID_INPUT", "仅支持授权目录内的单个文件名"));
     }
+    super::intent_binding::verify_arguments(dispatch, &[leaf.as_bytes()])?;
     let bytes = registry.read_file(
         &dispatch.intent.resource_id,
         leaf,
