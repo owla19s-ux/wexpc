@@ -3,7 +3,7 @@
 /// No Space/project association can grant access. Nothing is auto-retried.
 use std::{fs, io::Write};
 use tauri::{AppHandle, Manager};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use wex_api::ToolDefinition;
 use wex_core::{
     access::{Access, DirectoryGrant},
@@ -11,7 +11,7 @@ use wex_core::{
 };
 use wex_desktop_service::{
     digest_arguments, drive_tool_rounds, read_approved_file, PreparedChat,
-    Result, ServiceError,
+    Result, ServiceError, ToolProposal,
 };
 use wex_local_resources::{DirectoryRegistry, Protection};
 
@@ -21,8 +21,24 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
         parameters_json: r#"{"type":"object","properties":{"file_name":{"type":"string"}},"required":["file_name"],"additionalProperties":false}"#.into(),
     };
-    drive_tool_rounds(chat, key, vec![tool], |calls| {
+    let mut tools = vec![tool];
+    if crate::github_config::status(app)?.enabled {
+        tools.push(ToolDefinition {
+            name: "github_read_file".into(),
+            description: "Read a GitHub file only after explicit user confirmation.".into(),
+            parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"}},"required":["owner","repo","path"],"additionalProperties":false}"#.into(),
+        });
+        tools.push(ToolDefinition {
+            name: "github_write_file".into(),
+            description: "Update an existing GitHub text file with its exact current blob SHA; user must review and approve all bytes.".into(),
+            parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"sha":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","sha","content"],"additionalProperties":false}"#.into(),
+        });
+    }
+    drive_tool_rounds(chat, key, tools, |calls| {
         calls.iter().map(|call| {
+            if call.name == "github_read_file" || call.name == "github_write_file" {
+                return Ok((call.id.clone(), review_github(app, chat, call)?));
+            }
             if call.name != "read_file" {
                 return Err(ServiceError::new("TOOL_UNSUPPORTED", "模型请求了未提供的工具"));
             }
