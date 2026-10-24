@@ -117,25 +117,13 @@ pub fn decode_chat_response(value: &serde_json::Value) -> Result<ChatResponse> {
 }
 
 pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
-    let choice = value.get("choices").and_then(|v| v.as_array()).and_then(|v| v.first())
-        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效候选回复"))?;
-    let message = choice.get("message")
-        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效消息"))?;
-    if message
-        .get("tool_calls")
-        .and_then(|v| v.as_array())
-        .is_some_and(|v| !v.is_empty())
-    {
-        return Err(ServiceError::new(
+    match decode_chat_response(value)? {
+        ChatResponse::Text(content) => Ok(content),
+        ChatResponse::ToolCalls(_) => Err(ServiceError::new(
             "TOOLS_NOT_CONNECTED",
-            "本批尚未接入工具执行，未执行服务商提出的工具调用",
-        ));
+            "工具调用已解析，但执行器尚未连接；没有执行任何工具",
+        )),
     }
-    message["content"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))
 }
 
 #[cfg(test)]
