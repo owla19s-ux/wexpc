@@ -266,7 +266,10 @@ fn reassigned_task_reopens_with_historical_link_without_old_receipt_projection()
         .recover_and_commit(reassigned.revision, &ledger)
         .unwrap();
     assert_eq!(recovered.revision, reassigned.revision);
-    assert_eq!(recovered.tasks[0].assigned_agent.as_deref(), Some("agent_2"));
+    assert_eq!(
+        recovered.tasks[0].assigned_agent.as_deref(),
+        Some("agent_2")
+    );
     assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
     assert!(recovered.tasks[0].evidence_refs.is_empty());
     assert_eq!(recovered.links, reassigned.links);
