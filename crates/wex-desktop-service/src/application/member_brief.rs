@@ -19,10 +19,11 @@ pub(super) fn build(s: &DesktopSnapshot, agent_id: &str) -> Result<MemberWorkBri
         .filter(|t| t.project_id == project.id && (lead || t.agent_ids.contains(&member.id)))
         .cloned()
         .collect();
+    let task_ids: std::collections::HashSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
     let task_records = s
         .task_records
         .iter()
-        .filter(|r| tasks.iter().any(|t| t.id == r.task_id))
+        .filter(|r| task_ids.contains(r.task_id.as_str()))
         .cloned()
         .collect();
     let members = s
