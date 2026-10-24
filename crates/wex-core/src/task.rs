@@ -37,7 +37,9 @@ pub struct TaskBoard {
 fn valid_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64
-        && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+        && id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 
 fn valid(task: &Task) -> bool {
@@ -71,11 +73,19 @@ impl TaskBoard {
     }
 
     pub fn tasks_for_project(&self, project_id: &str) -> Vec<Task> {
-        self.tasks.values().filter(|task| task.project_id == project_id).cloned().collect()
+        self.tasks
+            .values()
+            .filter(|task| task.project_id == project_id)
+            .cloned()
+            .collect()
     }
 
     pub fn tasks_for_agent(&self, agent_id: &str) -> Vec<Task> {
-        self.tasks.values().filter(|task| task.assigned_agent.as_deref() == Some(agent_id)).cloned().collect()
+        self.tasks
+            .values()
+            .filter(|task| task.assigned_agent.as_deref() == Some(agent_id))
+            .cloned()
+            .collect()
     }
 
     pub fn snapshot(&self) -> Vec<Task> {
@@ -154,8 +164,12 @@ mod tests {
     use super::*;
     fn task(id: &str) -> Task {
         Task {
-            id: id.into(), project_id: "wexpc".into(), objective: "Implement adapter".into(),
-            assigned_agent: None, status: TaskStatus::Queued, evidence_refs: vec![],
+            id: id.into(),
+            project_id: "wexpc".into(),
+            objective: "Implement adapter".into(),
+            assigned_agent: None,
+            status: TaskStatus::Queued,
+            evidence_refs: vec![],
         }
     }
     #[test]
@@ -167,7 +181,9 @@ mod tests {
         board.assign("b", "agent_two".into()).unwrap();
         board.transition("a", TaskStatus::Running, None).unwrap();
         board.transition("b", TaskStatus::Running, None).unwrap();
-        board.transition("a", TaskStatus::Completed, Some("commit_1".into())).unwrap();
+        board
+            .transition("a", TaskStatus::Completed, Some("commit_1".into()))
+            .unwrap();
         let snapshot = board.snapshot();
         assert_eq!(snapshot[0].evidence_refs, vec!["commit_1"]);
         assert_eq!(snapshot[1].assigned_agent.as_deref(), Some("agent_two"));
@@ -201,7 +217,9 @@ mod tests {
         board.insert(task("b")).unwrap();
         board.assign("a", "agent_one".into()).unwrap();
         board.transition("a", TaskStatus::Running, None).unwrap();
-        board.transition("a", TaskStatus::Completed, Some("commit_a".into())).unwrap();
+        board
+            .transition("a", TaskStatus::Completed, Some("commit_a".into()))
+            .unwrap();
         board.assign("b", "agent_two".into()).unwrap();
         board.transition("b", TaskStatus::Running, None).unwrap();
         let restored = TaskBoard::restore(board.snapshot()).unwrap();
@@ -213,7 +231,10 @@ mod tests {
     fn restore_rejects_unassigned_running_task_before_recovery() {
         let mut t = task("a");
         t.status = TaskStatus::Running;
-        assert!(matches!(TaskBoard::restore(vec![t]), Err(TaskError::InvalidInput)));
+        assert!(matches!(
+            TaskBoard::restore(vec![t]),
+            Err(TaskError::InvalidInput)
+        ));
     }
 
     #[test]
@@ -223,7 +244,9 @@ mod tests {
         board.record_evidence("a", "log_a".into()).unwrap();
         board.record_evidence("a", "log_a".into()).unwrap();
         board.assign("a", "agent_a".into()).unwrap();
-        board.transition("a", TaskStatus::Running, Some("log_a".into())).unwrap();
+        board
+            .transition("a", TaskStatus::Running, Some("log_a".into()))
+            .unwrap();
         assert_eq!(board.get("a").unwrap().evidence_refs, vec!["log_a"]);
     }
     #[test]
@@ -231,7 +254,13 @@ mod tests {
         let mut board = TaskBoard::default();
         board.insert(task("a")).unwrap();
         assert_eq!(board.insert(task("a")), Err(TaskError::AlreadyExists));
-        assert_eq!(board.transition("a", TaskStatus::Completed, None), Err(TaskError::InvalidTransition));
-        assert_eq!(board.transition("a", TaskStatus::Running, None), Err(TaskError::InvalidTransition));
+        assert_eq!(
+            board.transition("a", TaskStatus::Completed, None),
+            Err(TaskError::InvalidTransition)
+        );
+        assert_eq!(
+            board.transition("a", TaskStatus::Running, None),
+            Err(TaskError::InvalidTransition)
+        );
     }
 }

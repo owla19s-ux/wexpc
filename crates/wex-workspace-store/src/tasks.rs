@@ -3,9 +3,9 @@
 use super::{OrganizationError, OrganizationStore, SNAPSHOT_LIMIT};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use wex_core::operation::OperationLedger;
 use wex_core::task::{Task, TaskBoard, TaskError, TaskStatus};
 use wex_core::task_operation::{LinkError, TaskOperationIndex, TaskOperationLink};
-use wex_core::operation::OperationLedger;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TaskStoreError {
@@ -16,7 +16,9 @@ pub enum TaskStoreError {
     UnsupportedVersion,
 }
 impl From<OrganizationError> for TaskStoreError {
-    fn from(e: OrganizationError) -> Self { Self::Storage(e) }
+    fn from(e: OrganizationError) -> Self {
+        Self::Storage(e)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,7 +30,13 @@ pub struct TaskStoreView {
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Status { Queued, Running, Blocked, Completed, Failed }
+enum Status {
+    Queued,
+    Running,
+    Blocked,
+    Completed,
+    Failed,
+}
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -43,7 +51,9 @@ struct TaskWire {
 impl From<Task> for TaskWire {
     fn from(t: Task) -> Self {
         Self {
-            id: t.id, project_id: t.project_id, objective: t.objective,
+            id: t.id,
+            project_id: t.project_id,
+            objective: t.objective,
             assigned_agent: t.assigned_agent,
             status: match t.status {
                 TaskStatus::Queued => Status::Queued,
@@ -59,7 +69,9 @@ impl From<Task> for TaskWire {
 impl From<TaskWire> for Task {
     fn from(t: TaskWire) -> Self {
         Self {
-            id: t.id, project_id: t.project_id, objective: t.objective,
+            id: t.id,
+            project_id: t.project_id,
+            objective: t.objective,
             assigned_agent: t.assigned_agent,
             status: match t.status {
                 Status::Queued => TaskStatus::Queued,
@@ -81,12 +93,20 @@ struct LinkWire {
 }
 impl From<TaskOperationLink> for LinkWire {
     fn from(l: TaskOperationLink) -> Self {
-        Self { task_id: l.task_id, operation_id: l.operation_id, agent_id: l.agent_id }
+        Self {
+            task_id: l.task_id,
+            operation_id: l.operation_id,
+            agent_id: l.agent_id,
+        }
     }
 }
 impl From<LinkWire> for TaskOperationLink {
     fn from(l: LinkWire) -> Self {
-        Self { task_id: l.task_id, operation_id: l.operation_id, agent_id: l.agent_id }
+        Self {
+            task_id: l.task_id,
+            operation_id: l.operation_id,
+            agent_id: l.agent_id,
+        }
     }
 }
 #[derive(Serialize, Deserialize)]
@@ -98,44 +118,71 @@ struct Snapshot {
     links: Vec<LinkWire>,
 }
 #[derive(Deserialize)]
-struct Version { schema_version: u64 }
+struct Version {
+    schema_version: u64,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskChange {
     Insert(Task),
-    Assign { task_id: String, agent_id: String },
-    Transition { task_id: String, status: TaskStatus, evidence: Option<String> },
-    RecordEvidence { task_id: String, evidence_ref: String },
+    Assign {
+        task_id: String,
+        agent_id: String,
+    },
+    Transition {
+        task_id: String,
+        status: TaskStatus,
+        evidence: Option<String>,
+    },
+    RecordEvidence {
+        task_id: String,
+        evidence_ref: String,
+    },
 }
 
 fn apply_task_change(board: &mut TaskBoard, change: TaskChange) -> Result<(), TaskError> {
     match change {
         TaskChange::Insert(task) => board.insert(task),
         TaskChange::Assign { task_id, agent_id } => board.assign(&task_id, agent_id),
-        TaskChange::Transition { task_id, status, evidence } =>
-            board.transition(&task_id, status, evidence),
-        TaskChange::RecordEvidence { task_id, evidence_ref } =>
-            board.record_evidence(&task_id, evidence_ref),
+        TaskChange::Transition {
+            task_id,
+            status,
+            evidence,
+        } => board.transition(&task_id, status, evidence),
+        TaskChange::RecordEvidence {
+            task_id,
+            evidence_ref,
+        } => board.record_evidence(&task_id, evidence_ref),
     }
 }
 
 #[derive(Debug)]
-pub struct TaskStore { io: OrganizationStore }
+pub struct TaskStore {
+    io: OrganizationStore,
+}
 impl TaskStore {
     /// Root must be chosen by a trusted Host, never supplied by an AI.
     pub fn open(root: impl AsRef<Path>) -> Result<Self, TaskStoreError> {
-        Ok(Self { io: OrganizationStore::open_named(root, "agent-tasks")? })
+        Ok(Self {
+            io: OrganizationStore::open_named(root, "agent-tasks")?,
+        })
     }
 
     fn read_locked(&self) -> Result<TaskStoreView, TaskStoreError> {
         let Some(bytes) = self.io.read_bytes_locked()? else {
-            return Ok(TaskStoreView { revision: 0, tasks: vec![], links: vec![] });
+            return Ok(TaskStoreView {
+                revision: 0,
+                tasks: vec![],
+                links: vec![],
+            });
         };
-        let version: Version = serde_json::from_slice(&bytes)
-            .map_err(|_| TaskStoreError::InvalidSnapshot)?;
-        if version.schema_version != 1 { return Err(TaskStoreError::UnsupportedVersion); }
-        let snapshot: Snapshot = serde_json::from_slice(&bytes)
-            .map_err(|_| TaskStoreError::InvalidSnapshot)?;
+        let version: Version =
+            serde_json::from_slice(&bytes).map_err(|_| TaskStoreError::InvalidSnapshot)?;
+        if version.schema_version != 1 {
+            return Err(TaskStoreError::UnsupportedVersion);
+        }
+        let snapshot: Snapshot =
+            serde_json::from_slice(&bytes).map_err(|_| TaskStoreError::InvalidSnapshot)?;
         if snapshot.revision == u64::MAX {
             return Err(TaskStoreError::InvalidSnapshot);
         }
@@ -187,15 +234,21 @@ impl TaskStore {
         if recovered.tasks == current.tasks && recovered.links == current.links {
             return Ok(current);
         }
-        let next = current.revision.checked_add(1)
+        let next = current
+            .revision
+            .checked_add(1)
             .ok_or(OrganizationError::RevisionExhausted)?;
-        let view = TaskStoreView { revision: next, ..recovered };
+        let view = TaskStoreView {
+            revision: next,
+            ..recovered
+        };
         let bytes = serde_json::to_vec(&Snapshot {
             schema_version: 1,
             revision: next,
             tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
             links: view.links.clone().into_iter().map(Into::into).collect(),
-        }).map_err(|_| OrganizationError::Unavailable)?;
+        })
+        .map_err(|_| OrganizationError::Unavailable)?;
         if bytes.len() as u64 > SNAPSHOT_LIMIT {
             return Err(OrganizationError::LimitExceeded.into());
         }
@@ -225,17 +278,22 @@ impl TaskStore {
             live.insert(task).map_err(TaskStoreError::Domain)?;
         }
         apply_task_change(&mut live, change).map_err(TaskStoreError::Domain)?;
-        let next = expected_revision.checked_add(1)
+        let next = expected_revision
+            .checked_add(1)
             .ok_or(OrganizationError::RevisionExhausted)?;
         let view = TaskStoreView {
-            revision: next, tasks: live.snapshot(), links: current.links,
+            revision: next,
+            tasks: live.snapshot(),
+            links: current.links,
         };
         Self::validate_links(&view, ledger)?;
         let bytes = serde_json::to_vec(&Snapshot {
-            schema_version: 1, revision: next,
+            schema_version: 1,
+            revision: next,
             tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
             links: view.links.clone().into_iter().map(Into::into).collect(),
-        }).map_err(|_| OrganizationError::Unavailable)?;
+        })
+        .map_err(|_| OrganizationError::Unavailable)?;
         if bytes.len() as u64 > SNAPSHOT_LIMIT {
             return Err(OrganizationError::LimitExceeded.into());
         }
@@ -260,16 +318,23 @@ impl TaskStore {
         if current.revision != expected_revision {
             return Err(OrganizationError::Conflict.into());
         }
-        let next = current.revision.checked_add(1)
+        let next = current
+            .revision
+            .checked_add(1)
             .ok_or(OrganizationError::RevisionExhausted)?;
-        let view = TaskStoreView { revision: next, tasks, links };
+        let view = TaskStoreView {
+            revision: next,
+            tasks,
+            links,
+        };
         Self::validate_links(&view, ledger)?;
         let bytes = serde_json::to_vec(&Snapshot {
             schema_version: 1,
             revision: next,
             tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
             links: view.links.clone().into_iter().map(Into::into).collect(),
-        }).map_err(|_| OrganizationError::Unavailable)?;
+        })
+        .map_err(|_| OrganizationError::Unavailable)?;
         if bytes.len() as u64 > SNAPSHOT_LIMIT {
             return Err(OrganizationError::LimitExceeded.into());
         }
@@ -288,12 +353,12 @@ impl TaskStore {
         ledger: &OperationLedger,
     ) -> Result<TaskStoreView, TaskStoreError> {
         let recovered = Self::recover(view)?;
-        let mut board = TaskBoard::restore(recovered.tasks)
-            .map_err(TaskStoreError::Domain)?;
+        let mut board = TaskBoard::restore(recovered.tasks).map_err(TaskStoreError::Domain)?;
         let index = TaskOperationIndex::restore(recovered.links.clone(), &board, ledger)
             .map_err(TaskStoreError::Link)?;
         for link in index.snapshot() {
-            index.reconcile(&link.operation_id, &mut board, ledger)
+            index
+                .reconcile(&link.operation_id, &mut board, ledger)
                 .map_err(TaskStoreError::Link)?;
         }
         Ok(TaskStoreView {
@@ -306,7 +371,11 @@ impl TaskStore {
     /// Cold recovery must not silently resume a previously running task.
     pub fn recover(view: TaskStoreView) -> Result<TaskStoreView, TaskStoreError> {
         let board = TaskBoard::restore(view.tasks).map_err(TaskStoreError::Domain)?;
-        Ok(TaskStoreView { revision: view.revision, tasks: board.snapshot(), links: view.links })
+        Ok(TaskStoreView {
+            revision: view.revision,
+            tasks: board.snapshot(),
+            links: view.links,
+        })
     }
 }
 
@@ -316,16 +385,21 @@ mod tests {
 
     fn task(status: TaskStatus) -> Task {
         Task {
-            id: "task_a".into(), project_id: "project_a".into(),
-            objective: "Build and test".into(), assigned_agent: Some("agent_a".into()),
-            status, evidence_refs: vec!["log_a".into()],
+            id: "task_a".into(),
+            project_id: "project_a".into(),
+            objective: "Build and test".into(),
+            assigned_agent: Some("agent_a".into()),
+            status,
+            evidence_refs: vec!["log_a".into()],
         }
     }
 
     #[test]
     fn cold_recovery_blocks_interrupted_work_and_preserves_evidence() {
         let view = TaskStoreView {
-            revision: 3, tasks: vec![task(TaskStatus::Running)], links: vec![],
+            revision: 3,
+            tasks: vec![task(TaskStatus::Running)],
+            links: vec![],
         };
         let recovered = TaskStore::recover(view).unwrap();
         assert_eq!(recovered.revision, 3);
@@ -336,15 +410,22 @@ mod tests {
     #[test]
     fn completed_task_remains_completed_on_recovery() {
         let view = TaskStoreView {
-            revision: 4, tasks: vec![task(TaskStatus::Completed)], links: vec![],
+            revision: 4,
+            tasks: vec![task(TaskStatus::Completed)],
+            links: vec![],
         };
-        assert_eq!(TaskStore::recover(view).unwrap().tasks[0].status, TaskStatus::Completed);
+        assert_eq!(
+            TaskStore::recover(view).unwrap().tasks[0].status,
+            TaskStatus::Completed
+        );
     }
 
     #[test]
     fn cold_recovery_with_empty_ledger_preserves_unlinked_tasks() {
         let view = TaskStoreView {
-            revision: 7, tasks: vec![task(TaskStatus::Running)], links: vec![],
+            revision: 7,
+            tasks: vec![task(TaskStatus::Running)],
+            links: vec![],
         };
         let result = TaskStore::recover_with_ledger(view, &OperationLedger::default()).unwrap();
         assert_eq!(result.tasks[0].status, TaskStatus::Blocked);
@@ -355,11 +436,19 @@ mod tests {
     fn trusted_task_changes_preserve_other_running_tasks() {
         let mut board = TaskBoard::default();
         board.insert(task(TaskStatus::Running)).unwrap();
-        apply_task_change(&mut board, TaskChange::RecordEvidence {
-            task_id: "task_a".into(), evidence_ref: "build_2".into(),
-        }).unwrap();
+        apply_task_change(
+            &mut board,
+            TaskChange::RecordEvidence {
+                task_id: "task_a".into(),
+                evidence_ref: "build_2".into(),
+            },
+        )
+        .unwrap();
         assert_eq!(board.get("task_a").unwrap().status, TaskStatus::Running);
-        assert_eq!(board.get("task_a").unwrap().evidence_refs, vec!["log_a", "build_2"]);
+        assert_eq!(
+            board.get("task_a").unwrap().evidence_refs,
+            vec!["log_a", "build_2"]
+        );
     }
 
     #[test]
@@ -367,9 +456,16 @@ mod tests {
         let mut board = TaskBoard::default();
         board.insert(task(TaskStatus::Running)).unwrap();
         let before = board.snapshot();
-        assert_eq!(apply_task_change(&mut board, TaskChange::Assign {
-            task_id: "task_a".into(), agent_id: "agent_b".into(),
-        }), Err(TaskError::InvalidTransition));
+        assert_eq!(
+            apply_task_change(
+                &mut board,
+                TaskChange::Assign {
+                    task_id: "task_a".into(),
+                    agent_id: "agent_b".into(),
+                }
+            ),
+            Err(TaskError::InvalidTransition)
+        );
         assert_eq!(board.snapshot(), before);
     }
 

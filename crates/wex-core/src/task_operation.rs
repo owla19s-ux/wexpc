@@ -30,7 +30,9 @@ pub struct TaskOperationIndex {
 fn valid_link_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 64
-        && value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
 }
 
 impl TaskOperationIndex {
@@ -58,7 +60,10 @@ impl TaskOperationIndex {
         tasks: &TaskBoard,
         ledger: &OperationLedger,
     ) -> Result<(), LinkError> {
-        if !valid_link_id(&link.task_id) || !valid_link_id(&link.operation_id) || !valid_link_id(&link.agent_id) {
+        if !valid_link_id(&link.task_id)
+            || !valid_link_id(&link.operation_id)
+            || !valid_link_id(&link.agent_id)
+        {
             return Err(LinkError::InvalidLink);
         }
         if self.links.contains_key(&link.operation_id) {
@@ -68,7 +73,10 @@ impl TaskOperationIndex {
         if task.assigned_agent.as_deref() != Some(&link.agent_id) {
             return Err(LinkError::AgentMismatch);
         }
-        let record = ledger.view().records.into_iter()
+        let record = ledger
+            .view()
+            .records
+            .into_iter()
             .find(|record| record.intent.id == link.operation_id)
             .ok_or(LinkError::MissingOperation)?;
         if record.intent.actor_id != link.agent_id {
@@ -86,8 +94,14 @@ impl TaskOperationIndex {
         tasks: &mut TaskBoard,
         ledger: &OperationLedger,
     ) -> Result<(), LinkError> {
-        let link = self.links.get(operation_id).ok_or(LinkError::MissingOperation)?;
-        let record = ledger.view().records.into_iter()
+        let link = self
+            .links
+            .get(operation_id)
+            .ok_or(LinkError::MissingOperation)?;
+        let record = ledger
+            .view()
+            .records
+            .into_iter()
             .find(|record| record.intent.id == operation_id)
             .ok_or(LinkError::MissingOperation)?;
         if record.intent.actor_id != link.agent_id {
@@ -100,21 +114,25 @@ impl TaskOperationIndex {
         let status = task.status.clone();
         match record.state {
             OperationState::Succeeded { evidence_ref, .. } => {
-                tasks.record_evidence(&link.task_id, evidence_ref)
+                tasks
+                    .record_evidence(&link.task_id, evidence_ref)
                     .map_err(LinkError::Task)?;
             }
             OperationState::Failed { evidence_ref, .. } => {
                 if status != TaskStatus::Completed {
-                    tasks.record_evidence(&link.task_id, evidence_ref)
+                    tasks
+                        .record_evidence(&link.task_id, evidence_ref)
                         .map_err(LinkError::Task)?;
                 }
                 if status == TaskStatus::Running {
-                    tasks.transition(&link.task_id, TaskStatus::Failed, None)
+                    tasks
+                        .transition(&link.task_id, TaskStatus::Failed, None)
                         .map_err(LinkError::Task)?;
                 }
             }
             OperationState::OutcomeUnknown { .. } if status == TaskStatus::Running => {
-                tasks.transition(&link.task_id, TaskStatus::Blocked, None)
+                tasks
+                    .transition(&link.task_id, TaskStatus::Blocked, None)
                     .map_err(LinkError::Task)?;
             }
             _ => {}
@@ -131,31 +149,51 @@ mod tests {
 
     fn setup() -> (TaskBoard, OperationLedger) {
         let mut tasks = TaskBoard::default();
-        tasks.insert(Task {
-            id: "task_1".into(), project_id: "pc".into(),
-            objective: "Build project".into(), assigned_agent: Some("agent_a".into()),
-            status: TaskStatus::Running, evidence_refs: vec![],
-        }).unwrap();
+        tasks
+            .insert(Task {
+                id: "task_1".into(),
+                project_id: "pc".into(),
+                objective: "Build project".into(),
+                assigned_agent: Some("agent_a".into()),
+                status: TaskStatus::Running,
+                evidence_refs: vec![],
+            })
+            .unwrap();
         let mut ledger = OperationLedger::default();
         let intent = OperationIntent {
-            id: "op_1".into(), actor_id: "agent_a".into(),
-            conversation_id: "chat_1".into(), context_id: None,
-            connection_id: "local".into(), capability_id: "build".into(),
-            resource_id: "project".into(), action: Action::Write,
-            expected_version: None, intent_digest: "a".repeat(64),
+            id: "op_1".into(),
+            actor_id: "agent_a".into(),
+            conversation_id: "chat_1".into(),
+            context_id: None,
+            connection_id: "local".into(),
+            capability_id: "build".into(),
+            resource_id: "project".into(),
+            action: Action::Write,
+            expected_version: None,
+            intent_digest: "a".repeat(64),
         };
         ledger.propose(intent.clone()).unwrap();
         ledger.approve("op_1", &intent, 1).unwrap();
-        ledger.begin("op_1", "attempt_1", ExecutionChecks {
-            authority_revision: 1, connection_enabled: true, authenticated: true,
-            platform_available: true, resource_allowed: true,
-        }).unwrap();
+        ledger
+            .begin(
+                "op_1",
+                "attempt_1",
+                ExecutionChecks {
+                    authority_revision: 1,
+                    connection_enabled: true,
+                    authenticated: true,
+                    platform_available: true,
+                    resource_allowed: true,
+                },
+            )
+            .unwrap();
         (tasks, ledger)
     }
 
     fn link() -> TaskOperationLink {
         TaskOperationLink {
-            task_id: "task_1".into(), operation_id: "op_1".into(),
+            task_id: "task_1".into(),
+            operation_id: "op_1".into(),
             agent_id: "agent_a".into(),
         }
     }
@@ -165,9 +203,15 @@ mod tests {
         let (mut tasks, mut ledger) = setup();
         let mut index = TaskOperationIndex::default();
         index.attach(link(), &tasks, &ledger).unwrap();
-        ledger.finish("op_1", "attempt_1", Outcome::Succeeded {
-            evidence_ref: "build_log_1".into(),
-        }).unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Succeeded {
+                    evidence_ref: "build_log_1".into(),
+                },
+            )
+            .unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         let task = tasks.get("task_1").unwrap();
@@ -179,7 +223,9 @@ mod tests {
     fn unknown_outcome_blocks_task_without_false_success() {
         let (mut tasks, mut ledger) = setup();
         let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
-        ledger.finish("op_1", "attempt_1", Outcome::Unknown).unwrap();
+        ledger
+            .finish("op_1", "attempt_1", Outcome::Unknown)
+            .unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Blocked);
         assert!(tasks.get("task_1").unwrap().evidence_refs.is_empty());
@@ -189,19 +235,30 @@ mod tests {
     fn failed_receipt_is_recorded_once_and_marks_running_task_failed() {
         let (mut tasks, mut ledger) = setup();
         let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
-        ledger.finish("op_1", "attempt_1", Outcome::Failed {
-            evidence_ref: "error_log_1".into(),
-        }).unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Failed {
+                    evidence_ref: "error_log_1".into(),
+                },
+            )
+            .unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Failed);
-        assert_eq!(tasks.get("task_1").unwrap().evidence_refs, vec!["error_log_1"]);
+        assert_eq!(
+            tasks.get("task_1").unwrap().evidence_refs,
+            vec!["error_log_1"]
+        );
     }
 
     #[test]
     fn restored_completed_task_retains_historical_operation_link() {
         let (mut tasks, ledger) = setup();
-        tasks.transition("task_1", TaskStatus::Completed, Some("review_a".into())).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Completed, Some("review_a".into()))
+            .unwrap();
         let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
         assert_eq!(index.snapshot().len(), 1);
     }
@@ -212,8 +269,14 @@ mod tests {
         let mut index = TaskOperationIndex::default();
         let mut wrong = link();
         wrong.agent_id = "agent_b".into();
-        assert_eq!(index.attach(wrong, &tasks, &ledger), Err(LinkError::AgentMismatch));
+        assert_eq!(
+            index.attach(wrong, &tasks, &ledger),
+            Err(LinkError::AgentMismatch)
+        );
         index.attach(link(), &tasks, &ledger).unwrap();
-        assert_eq!(index.attach(link(), &tasks, &ledger), Err(LinkError::DuplicateOperation));
+        assert_eq!(
+            index.attach(link(), &tasks, &ledger),
+            Err(LinkError::DuplicateOperation)
+        );
     }
 }
