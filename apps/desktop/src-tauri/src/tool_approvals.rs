@@ -1,7 +1,7 @@
 //! Trusted desktop-only approval bridge for the initial local read tool.
 /// Selecting the exact file in a native picker is the per-call user approval.
 /// No Space/project association can grant access. Nothing is auto-retried.
-use std::{fs, io::Write, path::Path};
+use std::{fs, io::Write};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::DialogExt;
 use wex_api::ToolDefinition;
@@ -11,7 +11,7 @@ use wex_core::{
 };
 use wex_desktop_service::{
     digest_arguments, drive_tool_rounds, read_approved_file, PreparedChat,
-    Result, ServiceError, ToolProposal,
+    Result, ServiceError,
 };
 use wex_local_resources::{DirectoryRegistry, Protection};
 
@@ -111,7 +111,8 @@ fn journal(app: &AppHandle, attempt: &str, operation: &str, status: &str, digest
     fs::create_dir_all(&root)
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法创建工具回执目录"))?;
     let temp = root.join(format!("{attempt}_{}.tmp", uuid::Uuid::new_v4().simple()));
-    let destination = root.join(format!("{attempt}.json"));
+    // Append-only state markers avoid replacing a receipt file on Windows.
+    let destination = root.join(format!("{attempt}_{status}.json"));
     let value = serde_json::json!({
         "operation_id":operation, "attempt_id":attempt, "state":status,
         "content_digest":digest,
