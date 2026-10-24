@@ -42,7 +42,7 @@ pub fn read_approved_github_file(
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 GitHub 请求"))?;
     let response = client.get(url)
         .header("User-Agent", "WEXPC/0.1.1")
-        .header("Accept", "application/vnd.github.raw+json")
+        .header("Accept", "application/vnd.github+json")
         .bearer_auth(token)
         .send()
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "GitHub 读取失败，未自动重试"))?;
@@ -50,13 +50,42 @@ pub fn read_approved_github_file(
         return Err(ServiceError::new("GITHUB_HTTP_ERROR", "GitHub 未返回成功结果，未执行其他操作"));
     }
     let mut bytes = Vec::new();
-    response.take(64 * 1024 + 1).read_to_end(&mut bytes)
+    response.take(512 * 1024 + 1).read_to_end(&mut bytes)
         .map_err(|_| ServiceError::new("GITHUB_RESPONSE_ERROR", "GitHub 内容读取失败"))?;
-    if bytes.len() > 64 * 1024 {
+    if bytes.len() > 512 * 1024 {
+        return Err(ServiceError::new("TOOL_OUTPUT_LIMIT", "GitHub 文件元数据超过上限"));
+    }
+    decode_file_content(&bytes)
+}
+
+fn decode_file_content(bytes: &[u8]) -> Result<String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|_| ServiceError::new("GITHUB_RESPONSE_ERROR", "GitHub 内容响应格式无效"))?;
+    if value["type"].as_str() != Some("file") {
+        return Err(ServiceError::new("TOOL_UNSUPPORTED_CONTENT", "GitHub 目标不是普通文件"));
+    }
+    let sha = value["sha"].as_str()
+        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or_else(|| ServiceError::new("GITHUB_RESPONSE_ERROR", "GitHub 未返回有效文件版本"))?;
+    if value["encoding"].as_str() != Some("base64") {
+        return Err(ServiceError::new("TOOL_UNSUPPORTED_CONTENT", "不支持 GitHub 文件编码"));
+    }
+    let encoded = value["content"].as_str()
+        .ok_or_else(|| ServiceError::new("GITHUB_RESPONSE_ERROR", "GitHub 文件内容缺失"))?;
+    if encoded.len() > 128 * 1024 {
+        return Err(ServiceError::new("TOOL_OUTPUT_LIMIT", "GitHub 文件内容超过上限"));
+    }
+    let compact: String = encoded.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    let raw = STANDARD.decode(compact)
+        .map_err(|_| ServiceError::new("GITHUB_RESPONSE_ERROR", "GitHub 文件内容无法解码"))?;
+    if raw.len() > 64 * 1024 {
         return Err(ServiceError::new("TOOL_OUTPUT_LIMIT", "GitHub 文件超过回执上限"));
     }
-    String::from_utf8(bytes)
-        .map_err(|_| ServiceError::new("TOOL_UNSUPPORTED_CONTENT", "GitHub 文件不是 UTF-8 文本"))
+    let text = String::from_utf8(raw)
+        .map_err(|_| ServiceError::new("TOOL_UNSUPPORTED_CONTENT", "GitHub 文件不是 UTF-8 文本"))?;
+    serde_json::to_string(&serde_json::json!({"sha":sha,"content":text}))
+        .map_err(|_| ServiceError::new("GITHUB_RESPONSE_ERROR", "无法编码 GitHub 读取结果"))
 }
 
 
