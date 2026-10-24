@@ -721,3 +721,23 @@ fn member_brief_does_not_expose_unrelated_execution_receipts() {
     assert!(app.member_brief(&agent.id).unwrap().execution_receipts.is_empty());
     assert!(app.member_brief(&agent.id).unwrap().tasks.iter().all(|t| t.id != b.id));
 }
+
+#[test]
+fn schema_four_upgrades_to_five_without_losing_existing_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("schema-four.sqlite");
+    let mut app = DesktopService::open(&path).unwrap();
+    let t = task(&mut app, "Upgrade");
+    let rev = app.snapshot().unwrap().revision;
+    app.append_task_record(rev, note(&t.id, TaskRecordKind::Handoff, "kept"))
+        .unwrap();
+    drop(app);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.pragma_update(None, "user_version", 4).unwrap();
+    drop(db);
+    let app = DesktopService::open(&path).unwrap();
+    assert_eq!(app.snapshot().unwrap().task_records[0].body, "kept");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, 5);
+}
