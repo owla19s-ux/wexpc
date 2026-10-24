@@ -540,3 +540,20 @@ fn review_acceptance_and_rework_are_explicit_actions() {
     app.accept_task_review(revision, &t.id).unwrap();
     assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Completed);
 }
+
+#[test]
+fn manual_review_note_does_not_complete_task() {
+    let mut app = DesktopService::memory().unwrap();
+    let t = task(&mut app, "Review note");
+    let revision = app.snapshot().unwrap().revision;
+    let note = app.append_review_note(revision, NewReviewNote {
+        task_id: t.id.clone(),
+        body: "需要复核真实构建".into(),
+        references: vec!["commit:unverified".into()],
+    }).unwrap();
+    assert_eq!(note.source, TaskRecordSource::User);
+    assert_eq!(note.kind, TaskRecordKind::Handoff);
+    let snapshot = app.snapshot().unwrap();
+    assert_eq!(snapshot.tasks[0].status, TaskStatus::Draft);
+    assert_eq!(snapshot.task_records.len(), 1);
+}
