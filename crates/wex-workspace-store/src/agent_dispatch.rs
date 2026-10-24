@@ -74,26 +74,31 @@ pub fn begin_linked_operation(
     attempt_id: &str,
     checks: ExecutionChecks,
 ) -> Result<CommittedDispatch, AgentDispatchError> {
-    let operation_view = operations.load()?;
-    if operation_view.revision != expected_operation_revision {
-        return Err(AgentDispatchError::Operation(OperationStoreError::Storage(
-            crate::OrganizationError::Conflict,
-        )));
-    }
-    let ledger = OperationLedger::from_trusted_view(operation_view.ledger)
-        .map_err(|_| AgentDispatchError::InvalidLedger)?;
-    let task_view = tasks.load()?;
-    if task_view.revision != expected_task_revision {
-        return Err(AgentDispatchError::Task(TaskStoreError::Storage(
-            crate::OrganizationError::Conflict,
-        )));
-    }
-    validate_linked_dispatch(&task_view, &ledger, operation_id)?;
-    // The only point at which an external dispatch becomes eligible.
-    // OperationStore::begin persists InFlight before returning.
-    operations
-        .begin(expected_operation_revision, operation_id, attempt_id, checks)
-        .map_err(Into::into)
+    // Keep the task lock until InFlight is durably committed. Concurrent
+    // task transitions through this store cannot invalidate preflight.
+    // The trusted Host must use the same lock ordering for all cross-store
+    // operations: task first, then operation.
+    tasks.with_locked_view(|task_view| {
+        if task_view.revision != expected_task_revision {
+            return Err(AgentDispatchError::Task(TaskStoreError::Storage(
+                crate::OrganizationError::Conflict,
+            )));
+        }
+        let operation_view = operations.load()?;
+        if operation_view.revision != expected_operation_revision {
+            return Err(AgentDispatchError::Operation(OperationStoreError::Storage(
+                crate::OrganizationError::Conflict,
+            )));
+        }
+        let ledger = OperationLedger::from_trusted_view(operation_view.ledger)
+            .map_err(|_| AgentDispatchError::InvalidLedger)?;
+        validate_linked_dispatch(&task_view, &ledger, operation_id)?;
+        // OperationStore::begin rechecks revision, approval and authority
+        // and persists InFlight before releasing the dispatch.
+        operations
+            .begin(expected_operation_revision, operation_id, attempt_id, checks)
+            .map_err(Into::into)
+    })
 }
 
 #[cfg(test)]
