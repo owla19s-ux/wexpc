@@ -105,6 +105,14 @@ pub fn execute_chat_stream(request: &PreparedChat, key: &str) -> Result<String> 
     if !response.status().is_success() {
         return Err(protocol_error(wex_api::error_for_status(response.status().as_u16(), None)));
     }
+    let is_sse = response.headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .is_some_and(|value| value.trim().eq_ignore_ascii_case("text/event-stream"));
+    if !is_sse {
+        return Err(ServiceError::new("API_RESPONSE_ERROR", "流式请求未返回 SSE 内容类型"));
+    }
     let mut decoder = Decoder::new(options);
     let mut chunk = [0u8; 8192];
     loop {
