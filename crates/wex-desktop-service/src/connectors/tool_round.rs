@@ -142,6 +142,24 @@ mod tests {
         assert!(matches!(parse_model_step(&value).unwrap(), ModelStep::Proposal { .. }));
     }
     #[test]
+    fn escaped_tool_output_can_exceed_plain_file_byte_limit() {
+        let calls = vec![ToolProposal {
+            id: "a".into(), name: "github_read_file".into(), arguments_json: "{}".into(),
+        }];
+        let output = serde_json::json!({"content": "\\n".repeat(40_000)}).to_string();
+        assert!(output.len() > 64 * 1024);
+        assert!(output.len() < 512 * 1024);
+        let result = committed_tool_messages(&calls, &[("a".into(), output)], None);
+        assert!(result.is_ok());
+        let oversized = "a".repeat(512 * 1024 + 1);
+        assert_eq!(
+            committed_tool_messages(&calls, &[("a".into(), oversized)], None)
+                .unwrap_err().code,
+            "INVALID_INPUT"
+        );
+    }
+
+    #[test]
     fn tool_receipt_ids_must_match_exactly() {
         let calls = vec![ToolProposal{id:"x".into(), name:"read_file".into(),arguments_json:"{}".into()}];
         assert_eq!(committed_tool_messages(&calls, &[("y".into(), "ok".into())], None).unwrap_err().code, "INVALID_INPUT");
