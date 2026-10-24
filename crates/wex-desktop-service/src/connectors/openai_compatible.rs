@@ -73,7 +73,10 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
 }
 
 pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
-    let message = &value["choices"][0]["message"];
+    let choice = value.get("choices").and_then(|v| v.as_array()).and_then(|v| v.first())
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效候选回复"))?;
+    let message = choice.get("message")
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效消息"))?;
     if message
         .get("tool_calls")
         .and_then(|v| v.as_array())
