@@ -383,3 +383,54 @@ fn failed_storage_write_leaves_no_partial_record_and_can_retry_without_dispatch(
     assert_eq!(s.task_records[0].body, "保留待重试内容");
     assert!(s.turns.is_empty());
 }
+
+#[test]
+fn duplicate_agents_cannot_be_assigned_to_one_task() {
+    let mut app = DesktopService::memory().unwrap();
+    let project = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+    let connection = app.add_connection(NewConnection {
+        name: "API".into(),
+        base_url: "https://api.deepseek.com".into(),
+        models: vec!["deepseek-chat".into()],
+    }, "vault".into()).unwrap();
+    let agent = app.add_agent(NewAgent {
+        project_id: project.id.clone(),
+        name: "Worker".into(),
+        role: AgentRole::Worker,
+        connection_id: connection.id,
+        model_id: "deepseek-chat".into(),
+    }).unwrap();
+    let duplicate = vec![agent.id.clone(), agent.id.clone()];
+    let before = app.snapshot().unwrap().revision;
+    let result = app.create_task(NewTask {
+        project_id: project.id.clone(),
+        title: "任务".into(),
+        goal: "".into(),
+        scope: vec![],
+        acceptance: "".into(),
+        agent_ids: duplicate.clone(),
+    });
+    assert_eq!(result.unwrap_err().code, "INVALID_BINDING");
+    assert_eq!(app.snapshot().unwrap().revision, before);
+    let task = app.create_task(NewTask {
+        project_id: project.id.clone(),
+        title: "任务".into(),
+        goal: "".into(),
+        scope: vec![],
+        acceptance: "".into(),
+        agent_ids: vec![agent.id],
+    }).unwrap();
+    let revision = app.snapshot().unwrap().revision;
+    let result = app.update_task(revision, &task.id, NewTask {
+        project_id: project.id,
+        title: "新名称".into(),
+        goal: "".into(),
+        scope: vec![],
+        acceptance: "".into(),
+        agent_ids: duplicate,
+    });
+    assert_eq!(result.unwrap_err().code, "INVALID_BINDING");
+    let snapshot = app.snapshot().unwrap();
+    assert_eq!(snapshot.revision, revision);
+    assert_eq!(snapshot.tasks[0].title, "任务");
+}
