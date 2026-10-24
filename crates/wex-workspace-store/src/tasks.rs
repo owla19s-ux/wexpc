@@ -304,6 +304,61 @@ impl TaskStore {
         Ok(view)
     }
 
+    /// Persist the task-to-operation relationship before allowing dispatch.
+    /// The Host must first durably propose the operation, then call this method,
+    /// and only after success call OperationStore::begin. A failed/uncertain
+    /// link write must never be followed by external dispatch.
+    ///
+    /// This is not a cross-store transaction: a crash after the operation
+    /// proposal but before this link commit leaves an unlinked, unstarted
+    /// operation requiring explicit reconciliation.
+    pub fn attach_operation(
+        &self,
+        expected_revision: u64,
+        link: TaskOperationLink,
+        ledger: &OperationLedger,
+    ) -> Result<TaskStoreView, TaskStoreError> {
+        let mut lock = self.io.lock()?;
+        let current = self.read_locked()?;
+        if current.revision != expected_revision {
+            return Err(OrganizationError::Conflict.into());
+        }
+        let mut board = TaskBoard::default();
+        for task in &current.tasks {
+            board.insert(task.clone()).map_err(TaskStoreError::Domain)?;
+        }
+        let task = board.get(&link.task_id).ok_or(TaskStoreError::Link(LinkError::MissingTask))?;
+        if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed) {
+            return Err(TaskStoreError::Domain(TaskError::InvalidTransition));
+        }
+        let mut index = TaskOperationIndex::restore(current.links, &board, ledger)
+            .map_err(TaskStoreError::Link)?;
+        index.attach(link, &board, ledger).map_err(TaskStoreError::Link)?;
+        let revision = expected_revision
+            .checked_add(1)
+            .ok_or(OrganizationError::RevisionExhausted)?;
+        let view = TaskStoreView {
+            revision,
+            tasks: board.snapshot(),
+            links: index.snapshot(),
+        };
+        let bytes = serde_json::to_vec(&Snapshot {
+            schema_version: 1,
+            revision,
+            tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
+            links: view.links.clone().into_iter().map(Into::into).collect(),
+        })
+        .map_err(|_| OrganizationError::Unavailable)?;
+        if bytes.len() as u64 > SNAPSHOT_LIMIT {
+            return Err(OrganizationError::LimitExceeded.into());
+        }
+        if let Err(error) = self.io.save_bytes_locked(&bytes) {
+            lock.release = false;
+            return Err(error.into());
+        }
+        Ok(view)
+    }
+
     /// Compare-and-swap a complete task+link snapshot. This is atomic only
     /// within the task store, NOT with the separate operation store.
     pub fn replace(
