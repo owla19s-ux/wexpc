@@ -234,9 +234,9 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
         platform_available: true, resource_allowed: true,
     }).map_err(|_| core_failure())?;
     journal(app, &attempt_id, &operation_id, "in_flight", Some(&intent.intent_digest))?;
-    let outcome: Result<(bool, String)> = if call.name == "git_status" {
+    let outcome: Result<(bool, Option<i32>, String)> = if call.name == "git_status" {
         wex_desktop_service::approved_git_status(&dispatch, &resource_id, &root)
-            .map(|text| (true, text))
+            .map(|text| (true, None, text))
     } else {
         let task = if call.name == "cargo_test" {
             wex_desktop_service::TerminalTask::CargoTest
@@ -245,15 +245,15 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
         };
         wex_desktop_service::execute_approved_terminal_report(
             &dispatch, &resource_id, &root, task
-        ).map(|report| (report.success, report.output))
+        ).map(|report| (report.success, report.exit_code, report.output))
     };
     let status = match &outcome {
-        Ok((true, _)) => "succeeded",
-        Ok((false, _)) => "failed",
+        Ok((true, _, _)) => "succeeded",
+        Ok((false, _, _)) => "failed",
         Err(e) if e.code == "OUTCOME_UNKNOWN" || e.code == "TOOL_TIMEOUT" => "unknown",
         Err(_) => "failed",
     };
-    let evidence_hash = outcome.as_ref().ok().map(|(_, value)|
+    let evidence_hash = outcome.as_ref().ok().map(|(_, _, value)|
         digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()])
     );
     journal(app, &attempt_id, &operation_id, status, evidence_hash.as_deref())?;
@@ -263,8 +263,8 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
         _ => Outcome::Failed { evidence_ref: evidence_id.clone() },
     };
     ledger.finish(&operation_id, &attempt_id, core_outcome).map_err(|_| core_failure())?;
-    let (success, result) = outcome?;
-    Ok(serde_json::json!({"evidence_ref":evidence_id,"success":success,"output":result}).to_string())
+    let (success, exit_code, result) = outcome?;
+    Ok(serde_json::json!({"evidence_ref":evidence_id,"success":success,"exit_code":exit_code,"output":result}).to_string())
 }
 
 /// Approval always displays the exact repo/path and, for writes, every byte
