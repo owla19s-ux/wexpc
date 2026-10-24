@@ -63,6 +63,18 @@ impl TaskBoard {
         Ok(board)
     }
 
+    pub fn get(&self, id: &str) -> Option<&Task> {
+        self.tasks.get(id)
+    }
+
+    pub fn tasks_for_project(&self, project_id: &str) -> Vec<Task> {
+        self.tasks.values().filter(|task| task.project_id == project_id).cloned().collect()
+    }
+
+    pub fn tasks_for_agent(&self, agent_id: &str) -> Vec<Task> {
+        self.tasks.values().filter(|task| task.assigned_agent.as_deref() == Some(agent_id)).cloned().collect()
+    }
+
     pub fn snapshot(&self) -> Vec<Task> {
         self.tasks.values().cloned().collect()
     }
@@ -150,6 +162,35 @@ mod tests {
         t.status = TaskStatus::Running;
         let board = TaskBoard::restore(vec![t]).unwrap();
         assert_eq!(board.snapshot()[0].status, TaskStatus::Blocked);
+    }
+    #[test]
+    fn project_and_agent_views_are_isolated() {
+        let mut board = TaskBoard::default();
+        let mut other = task("b");
+        other.project_id = "android".into();
+        board.insert(task("a")).unwrap();
+        board.insert(other).unwrap();
+        board.assign("a", "agent_one".into()).unwrap();
+        board.assign("b", "agent_two".into()).unwrap();
+        assert_eq!(board.tasks_for_project("wexpc").len(), 1);
+        assert_eq!(board.tasks_for_project("android").len(), 1);
+        assert_eq!(board.tasks_for_agent("agent_one")[0].id, "a");
+        assert_eq!(board.get("b").unwrap().project_id, "android");
+    }
+    #[test]
+    fn cold_restore_preserves_evidence_and_blocks_only_inflight_work() {
+        let mut board = TaskBoard::default();
+        board.insert(task("a")).unwrap();
+        board.insert(task("b")).unwrap();
+        board.assign("a", "agent_one".into()).unwrap();
+        board.transition("a", TaskStatus::Running, None).unwrap();
+        board.transition("a", TaskStatus::Completed, Some("commit_a".into())).unwrap();
+        board.assign("b", "agent_two".into()).unwrap();
+        board.transition("b", TaskStatus::Running, None).unwrap();
+        let restored = TaskBoard::restore(board.snapshot()).unwrap();
+        assert_eq!(restored.get("a").unwrap().status, TaskStatus::Completed);
+        assert_eq!(restored.get("a").unwrap().evidence_refs, vec!["commit_a"]);
+        assert_eq!(restored.get("b").unwrap().status, TaskStatus::Blocked);
     }
     #[test]
     fn invalid_transitions_and_duplicate_ids() {
