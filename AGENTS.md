@@ -2,7 +2,7 @@
 
 **临时 CI 暂停（用户2026-10-24明确要求）**：北京时间2026-10-24起至2026-10-31结束，不触发、重跑或手动派发 GitHub Actions。所有提交带 `[skip ci]`；源码先在当前本地环境验证，手机可测部分由大肥鱼本地验证，无法验证的完成代码并按提交登记 NOT_RUN。2026-11-01以后再按实际改动合批评估云端验证，不自动恢复/触发；此限制只适用本次暂停期，不删减Windows/真实服务/模拟器验收要求。当前开发分支工作流临时仅保留手动入口；仓库级全局停用尚未完成，其他施工分支也须遵守。
 
-先读 [PC 产品与技术基线](docs/PC-PRODUCT-AND-TECH-BASELINE.md)、[仓库结构](docs/REPOSITORY-STRUCTURE.md) 和 [开发及 GitHub 操作](docs/DEVELOPMENT-WORKFLOW.md)，再核对目标分支、源码、PR、提交与必要 Actions。产品内软件开发模式 M 与当前开发 WEXPC 的工程方法 D 分开。
+先读[项目共识说明](docs/PROJECT-CONSENSUS.md)，并在共同日志提交自己的理解/疑问回执；该说明解释现行需求，不替代基线或代签双方共识。再读 [PC 产品与技术基线](docs/PC-PRODUCT-AND-TECH-BASELINE.md)、[仓库结构](docs/REPOSITORY-STRUCTURE.md) 和 [开发及 GitHub 操作](docs/DEVELOPMENT-WORKFLOW.md)，再核对目标分支、源码、PR、提交与必要 Actions。产品内软件开发模式 M 与当前开发 WEXPC 的工程方法 D 分开。
 
 - WEXPC 是当前施工仓库；原 WEX 仓库只作已确认需求、设计与可复用代码的追溯来源。旧 Android 版本阶段、UI、权限简化和工程规则不能自动覆盖 PC 基线。
 - 迁入 Rust/Flutter 需按当前用例快速判断复用；不做无目标的全量旧代码审查。Tauri/React 与新桌面 Rust 服务已落地首批，Windows 编译检查不等于实机或完整产品完成。
