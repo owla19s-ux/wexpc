@@ -473,3 +473,28 @@ fn cancelled_task_cannot_be_restarted_implicitly() {
         "INVALID_TASK_TRANSITION");
     assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Cancelled);
 }
+
+#[test]
+fn closed_tasks_reject_definition_edits() {
+    let mut app = DesktopService::memory().unwrap();
+    let task = task(&mut app, "Closed");
+    let mut step = |status| {
+        let rev = app.snapshot().unwrap().revision;
+        app.transition_task(rev, &task.id, status).unwrap();
+    };
+    step(TaskStatus::Ready);
+    step(TaskStatus::InProgress);
+    step(TaskStatus::InReview);
+    step(TaskStatus::Completed);
+    let revision = app.snapshot().unwrap().revision;
+    let result = app.update_task(revision, &task.id, NewTask {
+        project_id: task.project_id,
+        title: "Changed".into(),
+        goal: "".into(),
+        scope: vec![],
+        acceptance: "".into(),
+        agent_ids: vec![],
+    });
+    assert_eq!(result.unwrap_err().code, "TASK_CLOSED");
+    assert_eq!(app.snapshot().unwrap().revision, revision);
+}
