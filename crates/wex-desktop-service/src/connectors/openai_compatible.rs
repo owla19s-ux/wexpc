@@ -223,6 +223,14 @@ fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
             ));
         }
     }
+    // Older OpenAI-compatible providers may send a legacy function_call
+    // without the modern tool_calls array. Never persist it as plain text.
+    if message.get("function_call").is_some_and(|v| !v.is_null()) {
+        return Err(ServiceError::new(
+            "TOOLS_NOT_CONNECTED",
+            "服务商返回旧版函数调用，尚未接入执行",
+        ));
+    }
     match choice.get("finish_reason").and_then(|v| v.as_str()) {
         Some("tool_calls" | "function_call") => {
             return Err(ServiceError::new("TOOLS_NOT_CONNECTED", "服务商要求工具调用，尚未接入执行"))
