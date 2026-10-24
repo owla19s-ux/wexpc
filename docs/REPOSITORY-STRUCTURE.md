@@ -59,11 +59,11 @@ Space 基础批增加可操作组织入口：创建空间、可选分组和 Cont
 
 ### DeepSeek 待领取任务 API-PC-01
 
-状态：交接已准备，尚未派发。当前会话未发现 DeepSeek 专用工具、`DEEPSEEK_API_KEY` 或 DSH/Hermes 可执行入口；没有实际调用 DeepSeek。不得把其他模型的输出标作 DeepSeek 编写。
+状态：复用范围与本批验收已梳理；可编码接口、独立 `crates/wex-api` 起点及 `feat/api-protocol` 分支尚未建立，尚未正式派发。大肥鱼可先配置手机工具链，环境结果待其实际报告。Work当前未发现可直接调用DeepSeek的入口/凭证；大肥鱼在独立手机环境施工与Work直接调用DeepSeek是两件事，不得互相冒称。具体双环境交接以[工程操作](DEVELOPMENT-WORKFLOW.md)为准。
 
-目标：在现有 Rust 连接器上补齐 OpenAI-compatible/DeepSeek Chat Completions 的流式协议执行能力；先维护正式协议适配层，不把 SDK 依赖存在当作完整接入。完整 Provider/模型参数、Responses 等仍属产品目标，另批实现。
+目标：从现有Rust连接器与相关规则抽取可在手机独立验证的API模块，补齐 OpenAI-compatible/DeepSeek Chat Completions 的流式协议执行能力；先维护正式协议适配层，不把 SDK 依赖存在当作完整接入。完整 Provider/模型参数、Responses 等仍属产品目标，另批实现。
 
-施工所有权：DeepSeek 独占 `crates/wex-desktop-service/src/connectors/` 中的 API 实现与相应协议测试。主 AI 负责接口整合、任务分配、Core/Host 接线；验证与审查在该提交完成后进行。同一文件不得并发修改。确需改 Cargo 依赖或公共接口时，先提交明确变更清单，由主 AI 串行整合；不得顺手重写 application、SQLite、Vault 或 UI。
+施工所有权（本次双环境安排替代旧目录分工）：正式交接后，大肥鱼独占 `crates/wex-api/**` 的API实现和模块测试；Work负责现有桌面 `connectors` 薄适配、Core/应用状态、Host/Vault/UI、共享工作区与锁文件。Work先准备可运行起点，交接后不并发改鱼所持目录。API只产出协议事件/调用意图，不执行或授权工具；依赖/接口变更提交清单由所有者串行整合。当前不存在独立crate，不把目录规划当作代码完成。
 
 输入：当前 `connectors/openai_compatible.rs`、`application` 的请求/完成接口、上述固定提交的两个 Android 文件与 `ai_extension_stream_test.dart`、`ai_extension_test.dart`。只参考相关 API 用例，不迁入整个 Android 工程。
 
@@ -73,6 +73,6 @@ Space 基础批增加可操作组织入口：创建空间、可选分组和 Cont
 3. 取消或流中断保留已收到文本，不能把部分输出当作完整答案进入重放历史。DeepSeek reasoning 续传按连接、会话和本轮完整工具 ID 集隔离，禁止跨会话串用。
 4. 延续禁止凭证请求重定向、响应/帧/缓冲上限、超时及脱敏。认证、429、服务端/协议错误不回显响应正文，不自动重试生成或工具写入。
 5. 模拟服务验证正常文本/工具、多片参数、usage 尾帧、重复/冲突终态、无终态、非法参数、200 内错误、断流、取消、超限、连接隔离与无重定向。连接停用后的落库/派发复核由应用层保持权威，不能由连接器缓存绕过。
-6. 主 AI 整合后验证 Rust 测试、fmt、clippy 和桌面 Host 编译。真实 DeepSeek 调用、Windows 运行与模拟器验证分别记录；模拟 HTTP 测试不替代真实服务证据。
+6. 大肥鱼先在手机提供模块实际测试证据；Work整合后本地验证Rust/fmt/clippy/前端，当前不能运行的Windows Host/平台验证按Commit登记，11月1日以后再评估云端检查。真实DeepSeek、Windows运行与模拟器分别记录；模拟HTTP测试不替代真实服务。
 
 此交接不阻塞 Space/Context 和轻项目管理的独立施工；API 实际执行者接入前，不擅自把指定给 DeepSeek 的新增实现改交其他模型。
