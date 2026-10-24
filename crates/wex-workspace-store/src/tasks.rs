@@ -120,8 +120,7 @@ impl TaskStore {
         let tasks: Vec<Task> = snapshot.tasks.into_iter().map(Into::into).collect();
         // Validate all identities and task state, but preserve live state until
         // the Host explicitly requests cold recovery.
-        let board = TaskBoard::restore(tasks.clone()).map_err(|_| TaskStoreError::InvalidSnapshot)?;
-        let _ = board;
+        TaskBoard::restore(tasks.clone()).map_err(|_| TaskStoreError::InvalidSnapshot)?;
         Ok(TaskStoreView {
             revision: snapshot.revision,
             tasks,
@@ -184,5 +183,45 @@ impl TaskStore {
     pub fn recover(view: TaskStoreView) -> Result<TaskStoreView, TaskStoreError> {
         let board = TaskBoard::restore(view.tasks).map_err(TaskStoreError::Domain)?;
         Ok(TaskStoreView { revision: view.revision, tasks: board.snapshot(), links: view.links })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn task(status: TaskStatus) -> Task {
+        Task {
+            id: "task_a".into(), project_id: "project_a".into(),
+            objective: "Build and test".into(), assigned_agent: Some("agent_a".into()),
+            status, evidence_refs: vec!["log_a".into()],
+        }
+    }
+
+    #[test]
+    fn cold_recovery_blocks_interrupted_work_and_preserves_evidence() {
+        let view = TaskStoreView {
+            revision: 3, tasks: vec![task(TaskStatus::Running)], links: vec![],
+        };
+        let recovered = TaskStore::recover(view).unwrap();
+        assert_eq!(recovered.revision, 3);
+        assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
+        assert_eq!(recovered.tasks[0].evidence_refs, vec!["log_a"]);
+    }
+
+    #[test]
+    fn completed_task_remains_completed_on_recovery() {
+        let view = TaskStoreView {
+            revision: 4, tasks: vec![task(TaskStatus::Completed)], links: vec![],
+        };
+        assert_eq!(TaskStore::recover(view).unwrap().tasks[0].status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn snapshot_wire_roundtrip_preserves_status_and_fields() {
+        let task = task(TaskStatus::Failed);
+        let encoded = serde_json::to_vec(&TaskWire::from(task.clone())).unwrap();
+        let decoded: TaskWire = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(Task::from(decoded), task);
     }
 }
