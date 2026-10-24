@@ -147,6 +147,31 @@ mod response_tests {
     }
 
     #[test]
+    fn structured_tool_call_preserves_provider_arguments() {
+        let value = serde_json::json!({"choices":[{"message":{
+            "tool_calls":[{"id":"call_1","type":"function",
+                "function":{"name":"github_read","arguments":"{\\"path\\":\\"README.md\\"}"}}]
+        }}]});
+        assert_eq!(decode_chat_response(&value).unwrap(),
+            ChatResponse::ToolCalls(vec![ProposedToolCall {
+                id: "call_1".into(),
+                name: "github_read".into(),
+                arguments_json: r#"{"path":"README.md"}"#.into(),
+            }]));
+    }
+
+    #[test]
+    fn malformed_tool_calls_are_rejected_before_dispatch() {
+        for value in [
+            serde_json::json!({"choices":[{"message":{"tool_calls":[]}}]}),
+            serde_json::json!({"choices":[{"message":{"tool_calls":[{"id":"a","type":"function","function":{"name":"read"}}]}}]}),
+            serde_json::json!({"choices":[{"message":{"tool_calls":[{"id":"","type":"function","function":{"name":"read","arguments":"{}"}}]}}]})
+        ] {
+            assert_eq!(decode_chat_response(&value).unwrap_err().code, "API_RESPONSE_ERROR");
+        }
+    }
+
+    #[test]
     fn malformed_reply_does_not_succeed() {
         for value in [serde_json::json!({}), serde_json::json!({"choices":[]}),
             serde_json::json!({"choices":[{"message":{"content":null}}]})] {
