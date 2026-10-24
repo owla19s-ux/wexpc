@@ -39,9 +39,6 @@ impl DesktopService {
             if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) {
                 return Err(ServiceError::new("TASK_CLOSED", "已关闭任务不能新增施工报告"));
             }
-            if !matches!(task.status, TaskStatus::InProgress | TaskStatus::Blocked | TaskStatus::InReview) {
-                return Err(ServiceError::new("INVALID_TASK_STATUS", "任务尚未进入施工或审核阶段"));
-            }
             if !s.agents.iter().any(|agent| agent.id == input.agent_id && agent.project_id == task.project_id) {
                 return Err(ServiceError::new("INVALID_BINDING", "报告成员与任务项目不一致"));
             }
