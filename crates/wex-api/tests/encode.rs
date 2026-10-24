@@ -253,3 +253,22 @@ fn provider_codes_classify_stably() {
         ErrorKind::Protocol
     );
 }
+
+#[test]
+fn stream_options_cannot_override_usage_policy() {
+    let mut req = request();
+    req.parameters_json = r#"{"stream_options":{"include_usage":false}}"#.into();
+    assert_eq!(
+        encode_request(&req, EncodeOptions::default())
+            .expect_err("stream options reserved")
+            .kind,
+        ErrorKind::InvalidRequest
+    );
+}
+
+#[test]
+fn retry_after_is_bounded_at_error_mapping_boundary() {
+    let error = error_for_status(429, Some(Duration::from_secs(86_400)));
+    assert_eq!(error.retry_after, Some(Duration::from_secs(3_600)));
+    assert_eq!(error_for_status(429, None).retry_after, None);
+}
