@@ -188,3 +188,27 @@ fn streaming_adapter_rejects_missing_credential_before_network() {
         .unwrap_err();
     assert_eq!(error.code, "CREDENTIAL_UNAVAILABLE");
 }
+
+#[test]
+fn streaming_adapter_redacts_provider_http_errors() {
+    let (url, handle) = server(
+        "429 Too Many Requests",
+        r#"{"error":{"message":"secret-key provider echo"}}"#,
+    );
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "RATE_LIMITED");
+    assert!(!error.message.contains("secret-key"));
+}
+
+#[test]
+fn streaming_adapter_rejects_incomplete_tool_calls() {
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\"}}]}}]}\n\n".into(),
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n".into(),
+        "data: [DONE]\n\n".into(),
+    ]);
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "PROTOCOL");
+}
