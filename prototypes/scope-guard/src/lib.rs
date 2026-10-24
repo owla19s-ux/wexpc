@@ -40,7 +40,10 @@ impl ScopePath {
         }
         let mut segments = Vec::new();
         for seg in path[3..].split('\\') {
-            if seg.is_empty() { continue; }
+            if seg.is_empty() {
+                if path.len() == 3 { continue; }
+                return Err(ScopeError::Unsupported);
+            }
             if seg == "." || seg == ".." { return Err(ScopeError::Traversal); }
             // Windows device names and non-ASCII case folding require native path resolution.
             if !seg.is_ascii() { return Err(ScopeError::Unsupported); }
