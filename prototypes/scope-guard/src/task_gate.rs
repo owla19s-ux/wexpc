@@ -46,7 +46,7 @@ impl TaskGate {
         Ok(TaskLease { gate: self.clone(), task_id: task_id.to_owned(), generation })
     }
 
-    pub fn is_running(&self, task_id: &str) -> Result<bool, TaskError> {
+    /// Execute a synchronous operation while holding its path reservation.\n    /// The caller remains responsible for authorization, path resolution and persistence.\n    pub fn execute<T, E>(&self, task_id: &str, paths: &[String], action: impl FnOnce() -> Result<T, E>) -> Result<Result<T, E>, TaskError> {\n        let lease = self.start(task_id, paths)?;\n        let result = action();\n        let phase = if result.is_ok() { TaskPhase::Completed } else { TaskPhase::Failed };\n        lease.finish(phase)?;\n        Ok(result)\n    }\n\n    pub fn is_running(&self, task_id: &str) -> Result<bool, TaskError> {
         Ok(self.state.lock().map_err(|_| TaskError::Unavailable)?.running.contains_key(task_id))
     }
 
