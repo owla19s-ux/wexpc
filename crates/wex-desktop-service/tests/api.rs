@@ -357,3 +357,14 @@ fn non_streaming_accepts_explicit_stop_finish_reason() {
     assert_eq!(execute_chat(&request(url), "secret-key").unwrap(), "complete");
     handle.join().unwrap();
 }
+
+#[test]
+fn legacy_function_call_cannot_be_committed_as_plain_text() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"message":{"content":"looks complete","function_call":{"name":"write_file","arguments":"{}"}}}]}"#,
+    );
+    let error = execute_chat(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "TOOLS_NOT_CONNECTED");
+}
