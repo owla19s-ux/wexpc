@@ -102,6 +102,18 @@ impl TaskBoard {
         Ok(())
     }
 
+    /// Record trusted operation evidence without asserting task completion.
+    pub fn record_evidence(&mut self, id: &str, reference: String) -> Result<(), TaskError> {
+        if !valid_id(&reference) {
+            return Err(TaskError::InvalidInput);
+        }
+        let task = self.tasks.get_mut(id).ok_or(TaskError::NotFound)?;
+        if !task.evidence_refs.contains(&reference) {
+            task.evidence_refs.push(reference);
+        }
+        Ok(())
+    }
+
     pub fn transition(
         &mut self,
         id: &str,
