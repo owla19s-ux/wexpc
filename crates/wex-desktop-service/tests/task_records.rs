@@ -691,3 +691,33 @@ fn agent_report_survives_restart_without_becoming_a_receipt() {
     assert_eq!(snapshot.tasks[0].status, TaskStatus::Draft);
     assert_eq!(app.member_brief(&agent.id).unwrap().agent_work_reports.len(), 1);
 }
+
+#[test]
+fn member_brief_does_not_expose_unrelated_execution_receipts() {
+    let mut app = DesktopService::memory().unwrap();
+    let a = task(&mut app, "Visible");
+    let b = task(&mut app, "Hidden");
+    let c = app.add_connection(NewConnection {
+        name: "API".into(),
+        base_url: "https://api.deepseek.com".into(),
+        models: vec!["deepseek-chat".into()],
+    }, "vault".into()).unwrap();
+    let agent = app.add_agent(NewAgent {
+        project_id: a.project_id.clone(),
+        name: "Worker".into(),
+        role: AgentRole::Worker,
+        connection_id: c.id,
+        model_id: "deepseek-chat".into(),
+    }).unwrap();
+    let rev = app.snapshot().unwrap().revision;
+    app.update_task(rev, &a.id, NewTask {
+        project_id: a.project_id.clone(),
+        title: a.title.clone(),
+        goal: a.goal.clone(),
+        scope: a.scope.clone(),
+        acceptance: a.acceptance.clone(),
+        agent_ids: vec![agent.id.clone()],
+    }).unwrap();
+    assert!(app.member_brief(&agent.id).unwrap().execution_receipts.is_empty());
+    assert!(app.member_brief(&agent.id).unwrap().tasks.iter().all(|t| t.id != b.id));
+}
