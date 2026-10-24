@@ -2,6 +2,20 @@ use super::{id, invalid, organization::check_revision, text};
 use crate::*;
 
 impl DesktopService {
+    /// Store a manual review comment without implying that any verification ran.
+    pub fn append_review_note(
+        &mut self,
+        revision: u64,
+        input: NewReviewNote,
+    ) -> Result<TaskRecord> {
+        self.append_task_record(revision, NewTaskRecord {
+            task_id: input.task_id,
+            kind: TaskRecordKind::Handoff,
+            body: input.body,
+            references: input.references,
+        })
+    }
+
     pub fn append_task_record(
         &mut self,
         revision: u64,
