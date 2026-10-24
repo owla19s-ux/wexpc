@@ -352,6 +352,28 @@ mod tests {
     }
 
     #[test]
+    fn trusted_task_changes_preserve_other_running_tasks() {
+        let mut board = TaskBoard::default();
+        board.insert(task(TaskStatus::Running)).unwrap();
+        apply_task_change(&mut board, TaskChange::RecordEvidence {
+            task_id: "task_a".into(), evidence_ref: "build_2".into(),
+        }).unwrap();
+        assert_eq!(board.get("task_a").unwrap().status, TaskStatus::Running);
+        assert_eq!(board.get("task_a").unwrap().evidence_refs, vec!["log_a", "build_2"]);
+    }
+
+    #[test]
+    fn invalid_task_change_does_not_mutate_board() {
+        let mut board = TaskBoard::default();
+        board.insert(task(TaskStatus::Running)).unwrap();
+        let before = board.snapshot();
+        assert_eq!(apply_task_change(&mut board, TaskChange::Assign {
+            task_id: "task_a".into(), agent_id: "agent_b".into(),
+        }), Err(TaskError::InvalidTransition));
+        assert_eq!(board.snapshot(), before);
+    }
+
+    #[test]
     fn snapshot_wire_roundtrip_preserves_status_and_fields() {
         let task = task(TaskStatus::Failed);
         let encoded = serde_json::to_vec(&TaskWire::from(task.clone())).unwrap();
