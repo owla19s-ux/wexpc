@@ -113,11 +113,9 @@ impl TaskOperationIndex {
                         .map_err(LinkError::Task)?;
                 }
             }
-            OperationState::OutcomeUnknown { .. } => {
-                if status == TaskStatus::Running {
-                    tasks.transition(&link.task_id, TaskStatus::Blocked, None)
-                        .map_err(LinkError::Task)?;
-                }
+            OperationState::OutcomeUnknown { .. } if status == TaskStatus::Running => {
+                tasks.transition(&link.task_id, TaskStatus::Blocked, None)
+                    .map_err(LinkError::Task)?;
             }
             _ => {}
         }
