@@ -48,3 +48,32 @@ impl DesktopService {
         })
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_unassigned_executor_outcome_without_writing_receipt() {
+        let mut app = DesktopService::memory().unwrap();
+        let project = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+        let task = app.create_task(NewTask {
+            project_id: project.id,
+            title: "Test".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![],
+        }).unwrap();
+        let error = app.record_executor_outcome(ExecutorOutcome {
+            task_id: task.id,
+            agent_id: "not_assigned".into(),
+            tool_name: "test".into(),
+            invocation_id: "invocation-1".into(),
+            succeeded: true,
+            summary: "untrusted fixture".into(),
+        }).unwrap_err();
+        assert_eq!(error.code, "INVALID_BINDING");
+        assert!(app.snapshot().unwrap().execution_receipts.is_empty());
+    }
+}
