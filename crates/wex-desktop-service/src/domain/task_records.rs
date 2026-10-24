@@ -48,3 +48,24 @@ pub struct NewReviewNote {
     pub body: String,
     pub references: Vec<String>,
 }
+
+/// Self-reported Agent progress is distinct from user notes and trusted tool receipts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWorkReport {
+    pub id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub body: String,
+    pub references: Vec<String>,
+    pub task_snapshot: Task,
+    pub recorded_revision: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewAgentWorkReport {
+    pub task_id: String,
+    pub agent_id: String,
+    pub body: String,
+    pub references: Vec<String>,
+}
