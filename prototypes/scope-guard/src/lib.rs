@@ -42,6 +42,15 @@ impl ScopePath {
         for seg in path[3..].split('\\') {
             if seg.is_empty() { continue; }
             if seg == "." || seg == ".." { return Err(ScopeError::Traversal); }
+            // Windows device names and non-ASCII case folding require native path resolution.
+            if !seg.is_ascii() { return Err(ScopeError::Unsupported); }
+            let stem = seg.split('.').next().unwrap_or("");
+            let device = stem.to_ascii_uppercase();
+            if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" |
+                "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" |
+                "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9") {
+                return Err(ScopeError::Unsupported);
+            }
             if seg.ends_with('.') || seg.ends_with(' ') || seg.chars().any(|c| c.is_control() || "<>:\"|?*".contains(c)) {
                 return Err(ScopeError::Unsupported);
             }
