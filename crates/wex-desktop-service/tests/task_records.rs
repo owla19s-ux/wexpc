@@ -519,3 +519,24 @@ fn review_status_rejects_task_edits_without_changing_revision() {
     assert_eq!(error.code, "TASK_CLOSED");
     assert_eq!(app.snapshot().unwrap().revision, revision);
 }
+
+#[test]
+fn review_acceptance_and_rework_are_explicit_actions() {
+    let mut app = DesktopService::memory().unwrap();
+    let t = task(&mut app, "Review decision");
+    let initial = app.snapshot().unwrap().revision;
+    assert_eq!(app.accept_task_review(initial, &t.id).unwrap_err().code,
+        "INVALID_TASK_TRANSITION");
+    for status in [TaskStatus::Ready, TaskStatus::InProgress, TaskStatus::InReview] {
+        let revision = app.snapshot().unwrap().revision;
+        app.transition_task(revision, &t.id, status).unwrap();
+    }
+    let revision = app.snapshot().unwrap().revision;
+    app.request_task_rework(revision, &t.id).unwrap();
+    assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::InProgress);
+    let revision = app.snapshot().unwrap().revision;
+    app.transition_task(revision, &t.id, TaskStatus::InReview).unwrap();
+    let revision = app.snapshot().unwrap().revision;
+    app.accept_task_review(revision, &t.id).unwrap();
+    assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Completed);
+}
