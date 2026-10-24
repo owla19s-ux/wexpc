@@ -48,9 +48,7 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         // Reject unsupported or malformed proposals before dispatching any
         // member of the batch. Validation does not itself authorize execution.
         for call in calls {
-            if !tools_available_for_proposal(call, crate::github_config::status(app)?.enabled) {
-                return Err(ServiceError::new("TOOL_UNSUPPORTED", "工具批次包含不可用的调用，未执行此批次"));
-            }
+            preflight_proposal(call, crate::github_config::status(app)?.enabled)?;
         }
         calls.iter().map(|call| {
             if matches!(call.name.as_str(), "git_status" | "cargo_test" | "cargo_fmt_check") {
@@ -80,12 +78,26 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
     })
 }
 
-fn tools_available_for_proposal(call: &ToolProposal, github_enabled: bool) -> bool {
-    match call.name.as_str() {
-        "read_file" | "git_status" | "cargo_test" | "cargo_fmt_check" => true,
-        "github_read_file" | "github_write_file" => github_enabled,
-        _ => false,
+fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
+    let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数不是有效 JSON"))?;
+    let obj = args.as_object()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "工具参数必须是对象"))?;
+    let fields: &[&str] = match call.name.as_str() {
+        "read_file" => &["file_name"],
+        "git_status" | "cargo_test" | "cargo_fmt_check" => &[],
+        "github_read_file" if github_enabled => &["owner", "repo", "path"],
+        "github_write_file" if github_enabled => &["owner", "repo", "path", "sha", "content"],
+        _ => return Err(ServiceError::new("TOOL_UNSUPPORTED", "工具当前不可用")),
+    };
+    if obj.len() != fields.len()
+        || fields.iter().any(|field| {
+            !obj.get(*field).is_some_and(|value| value.as_str().is_some())
+        })
+    {
+        return Err(ServiceError::new("INVALID_INPUT", "工具参数字段与声明不一致"));
     }
+    Ok(())
 }
 
 fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<(String, String)> {
