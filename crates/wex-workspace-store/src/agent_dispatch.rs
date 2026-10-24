@@ -3,7 +3,7 @@
 //! Ordinary conversation operations remain supported by OperationStore directly.
 use crate::operations::{CommittedDispatch, OperationStore, OperationStoreError};
 use crate::tasks::{TaskStore, TaskStoreError, TaskStoreView};
-use wex_core::operation::{ExecutionChecks, OperationLedger, OperationState};
+use wex_core::operation::{ExecutionChecks, OperationLedger, OperationState, Outcome};
 use wex_core::task::TaskStatus;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -101,6 +101,52 @@ pub fn begin_linked_operation(
             .begin(expected_operation_revision, operation_id, attempt_id, checks)
             .map_err(Into::into)
     })
+}
+
+/// Persist a trusted receipt first, then reconcile its linked task.
+/// If the task write fails, the operation receipt remains durable and the Host
+/// must retry reconciliation only (never repeat the external side effect).
+/// This is a sequential two-store protocol, not an atomic transaction.
+pub fn finish_linked_operation(
+    tasks: &TaskStore,
+    operations: &OperationStore,
+    expected_operation_revision: u64,
+    operation_id: &str,
+    attempt_id: &str,
+    outcome: Outcome,
+) -> Result<TaskStoreView, AgentDispatchError> {
+    let operation_view = operations.apply(
+        expected_operation_revision,
+        crate::operations::OperationChange::Finish {
+            id: operation_id.to_owned(),
+            attempt_id: attempt_id.to_owned(),
+            outcome,
+        },
+    )?;
+    let ledger = OperationLedger::from_trusted_view(operation_view.ledger)
+        .map_err(|_| AgentDispatchError::InvalidLedger)?;
+    // A concurrent task edit may cause a revision conflict. That must not
+    // roll back or erase the operation receipt.
+    let task_view = tasks.load()?;
+    tasks
+        .reconcile_operation(task_view.revision, operation_id, &ledger)
+        .map_err(Into::into)
+}
+
+/// Repair a task projection from an already persisted operation receipt.
+/// This path does not issue another Connector call or mutate the ledger.
+pub fn reconcile_linked_receipt(
+    tasks: &TaskStore,
+    operations: &OperationStore,
+    operation_id: &str,
+) -> Result<TaskStoreView, AgentDispatchError> {
+    let operation_view = operations.load()?;
+    let ledger = OperationLedger::from_trusted_view(operation_view.ledger)
+        .map_err(|_| AgentDispatchError::InvalidLedger)?;
+    let task_view = tasks.load()?;
+    tasks
+        .reconcile_operation(task_view.revision, operation_id, &ledger)
+        .map_err(Into::into)
 }
 
 #[cfg(test)]
