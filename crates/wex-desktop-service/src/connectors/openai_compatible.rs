@@ -56,20 +56,23 @@ fn protocol_messages(request: &PreparedChat) -> Result<Vec<wex_api::Message>> {
     Ok(messages)
 }
 
-fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
-    use wex_api::{ApiRequest, EncodeOptions};
-    let messages = protocol_messages(request)?;
-    let api_request = ApiRequest {
+fn protocol_request(request: &PreparedChat) -> Result<wex_api::ApiRequest> {
+    Ok(wex_api::ApiRequest {
         request_id: request.turn_id.clone(),
         connection_id: request.connection_id.clone(),
         conversation_id: request.conversation_id.clone(),
         model: request.model_id.clone(),
         endpoint: chat_endpoint(&request.base_url)?,
-        messages,
+        messages: protocol_messages(request)?,
         tools: Vec::new(),
         parameters_json: "{}".into(),
         continuation: None,
-    };
+    })
+}
+
+fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
+    use wex_api::EncodeOptions;
+    let api_request = protocol_request(request)?;
     let mut body = wex_api::encode_request(
         &api_request,
         EncodeOptions {
@@ -103,7 +106,7 @@ pub fn execute_chat_stream_with_progress(
     key: &str,
     mut on_delta: impl FnMut(&str),
 ) -> Result<String> {
-    use wex_api::{ApiRequest, Decoder, EncodeOptions, Event, RequestOptions};
+    use wex_api::{Decoder, EncodeOptions, Event, RequestOptions};
     if key.is_empty() {
         return Err(ServiceError::new(
             "CREDENTIAL_UNAVAILABLE",
@@ -111,18 +114,7 @@ pub fn execute_chat_stream_with_progress(
         ));
     }
     let endpoint = chat_endpoint(&request.base_url)?;
-    let messages = protocol_messages(request)?;
-    let api_request = ApiRequest {
-        request_id: request.turn_id.clone(),
-        connection_id: request.connection_id.clone(),
-        conversation_id: request.conversation_id.clone(),
-        model: request.model_id.clone(),
-        endpoint: endpoint.clone(),
-        messages,
-        tools: Vec::new(),
-        parameters_json: "{}".into(),
-        continuation: None,
-    };
+    let api_request = protocol_request(request)?;
     let body =
         wex_api::encode_request(&api_request, EncodeOptions::default()).map_err(protocol_error)?;
     let options = RequestOptions::default();
