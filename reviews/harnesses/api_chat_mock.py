@@ -21,6 +21,16 @@ def json_reply(scenario, request):
     """Return (status, payload); validate the second tool round when requested."""
     if scenario == "missing-finish":
         return 200, {"choices": [{"message": {"role": "assistant", "content": "partial"}}]}
+    if scenario in ("invalid-role", "missing-role"):
+        message = {"content": "forged assistant reply"}
+        if scenario == "invalid-role":
+            message["role"] = "user"
+        return 200, {"choices": [{"finish_reason": "stop", "message": message}]}
+    if scenario.startswith("http-"):
+        if scenario == "http-200-error":
+            return 200, {"error": {"code": "mock_provider_error", "message": "simulated error"}}
+        return int(scenario.removeprefix("http-")), {
+            "error": {"code": "mock_provider_error", "message": "simulated error"}}
     if scenario in ("tool-roundtrip", "tool-intent"):
         messages = request.get("messages", [])
         tool_results = [m for m in messages if m.get("role") == "tool"]
@@ -140,6 +150,8 @@ def main():
     parser.add_argument("--scenario", choices=[
         "text-stop", "missing-finish", "tool-intent", "tool-roundtrip",
         "sse-held-open", "sse-tool-intent", "sse-missing-done", "sse-after-done",
+        "invalid-role", "missing-role", "http-401", "http-403", "http-429",
+        "http-503", "http-200-error",
     ], required=True)
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--hold-seconds", type=float, default=10.0)
