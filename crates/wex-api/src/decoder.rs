@@ -193,6 +193,7 @@ impl Decoder {
             .get("choices")
             .and_then(|value| value.as_array())
             .ok_or_else(|| ApiError::new(ErrorKind::Protocol, "frame without choices"))?;
+        let mut primary_choice_seen = false;
         for choice in choices {
             let object = choice
                 .as_object()
@@ -204,6 +205,13 @@ impl Decoder {
             if index != 0 {
                 continue;
             }
+            if primary_choice_seen {
+                return Err(ApiError::new(
+                    ErrorKind::Protocol,
+                    "duplicate primary choice in one frame",
+                ));
+            }
+            primary_choice_seen = true;
             let delta = object.get("delta").filter(|delta| {
                 delta
                     .as_object()
@@ -215,7 +223,18 @@ impl Decoder {
                 .filter(|value| !value.is_null())
                 .and_then(|value| value.as_str());
             if self.terminal {
-                if delta.is_some() || finish.is_some() {
+                if let Some(reason) = finish {
+                    let parsed = parse_finish_reason(reason)?;
+                    return Err(ApiError::new(
+                        ErrorKind::Protocol,
+                        if Some(parsed) == self.finish {
+                            "duplicate terminal frame"
+                        } else {
+                            "conflicting terminal frame"
+                        },
+                    ));
+                }
+                if delta.is_some() {
                     return Err(ApiError::new(
                         ErrorKind::Protocol,
                         "frame after terminal event",
@@ -338,29 +357,7 @@ impl Decoder {
     }
 
     fn apply_finish(&mut self, reason: &str) -> Result<(), ApiError> {
-        let parsed = match reason {
-            "stop" => FinishReason::Stop,
-            "tool_calls" => FinishReason::ToolCalls,
-            "length" | "content_filter" => {
-                return Err(ApiError::new(
-                    ErrorKind::Protocol,
-                    "truncated stream is not success",
-                ));
-            }
-            _ => return Err(ApiError::new(ErrorKind::Protocol, "unknown finish reason")),
-        };
-        if let Some(existing) = self.finish {
-            if existing != parsed {
-                return Err(ApiError::new(
-                    ErrorKind::Protocol,
-                    "conflicting terminal frames",
-                ));
-            }
-            return Err(ApiError::new(
-                ErrorKind::Protocol,
-                "duplicate terminal frame",
-            ));
-        }
+        let parsed = parse_finish_reason(reason)?;
         self.finish = Some(parsed);
         self.terminal = true;
         let completion = self.build_completion(parsed)?;
@@ -382,10 +379,14 @@ impl Decoder {
                 "tool_calls without calls",
             ));
         }
+        let mut seen_ids = std::collections::HashSet::new();
         for index in &self.order {
             let partial = self.tools.get(index).expect("indexed");
             if partial.id.trim().is_empty() || partial.name.trim().is_empty() {
                 return Err(ApiError::new(ErrorKind::Protocol, "incomplete tool call"));
+            }
+            if !seen_ids.insert(partial.id.as_str()) {
+                return Err(ApiError::new(ErrorKind::Protocol, "duplicate tool call id"));
             }
             if !crate::is_json_object(&partial.arguments) {
                 return Err(ApiError::new(
@@ -417,6 +418,18 @@ impl Decoder {
             usage: self.usage.clone(),
             continuation,
         })
+    }
+}
+
+fn parse_finish_reason(reason: &str) -> Result<FinishReason, ApiError> {
+    match reason {
+        "stop" => Ok(FinishReason::Stop),
+        "tool_calls" => Ok(FinishReason::ToolCalls),
+        "length" | "content_filter" => Err(ApiError::new(
+            ErrorKind::Protocol,
+            "truncated stream is not success",
+        )),
+        _ => Err(ApiError::new(ErrorKind::Protocol, "unknown finish reason")),
     }
 }
 

@@ -414,3 +414,80 @@ fn split_invariance_one_byte_at_a_time() {
     assert_eq!(events, baseline_events);
     assert_eq!(completion, baseline_completion);
 }
+#[test]
+fn conflicting_terminal_frame_is_rejected() {
+    let mut decoder = Decoder::new(options());
+    collect(
+        &mut decoder,
+        &frame(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#),
+    );
+    let error = decoder
+        .push(
+            frame(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#)
+                .as_bytes(),
+        )
+        .expect_err("conflicting terminal");
+    assert_eq!(error.kind, ErrorKind::Protocol);
+    assert_eq!(error.detail, "conflicting terminal frame");
+}
+
+#[test]
+fn duplicate_primary_choice_in_one_frame_is_rejected() {
+    let mut decoder = Decoder::new(options());
+    let body = frame(
+        r#"{"choices":[{"index":0,"delta":{"content":"a"}},{"index":0,"delta":{"content":"b"}}]}"#,
+    );
+    let error = decoder.push(body.as_bytes()).expect_err("duplicate choice");
+    assert_eq!(error.kind, ErrorKind::Protocol);
+}
+
+#[test]
+fn duplicate_tool_call_ids_are_rejected() {
+    let mut decoder = Decoder::new(options());
+    collect(
+        &mut decoder,
+        &frame(
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"f","arguments":"{}"}}]}}]}"#,
+        ),
+    );
+    collect(
+        &mut decoder,
+        &frame(
+            r#"{"choices":[{"index":0,"delta":{"tool_calls":[{"index":1,"id":"c1","function":{"name":"g","arguments":"{}"}}]}}]}"#,
+        ),
+    );
+    let error = decoder
+        .push(
+            frame(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"tool_calls"}]}"#)
+                .as_bytes(),
+        )
+        .expect_err("duplicate ids");
+    assert_eq!(error.kind, ErrorKind::Protocol);
+    assert_eq!(error.detail, "duplicate tool call id");
+}
+
+#[test]
+fn unexpected_delta_role_is_rejected() {
+    let mut decoder = Decoder::new(options());
+    let body = frame(r#"{"choices":[{"index":0,"delta":{"role":"tool","content":"x"}}]}"#);
+    let error = decoder.push(body.as_bytes()).expect_err("bad role");
+    assert_eq!(error.kind, ErrorKind::Protocol);
+}
+
+#[test]
+fn continuation_exactly_at_limit_is_allowed() {
+    let mut opts = options();
+    opts.max_continuation_bytes = 16;
+    let mut decoder = Decoder::new(opts).with_continuation_scope(scope());
+    collect(
+        &mut decoder,
+        &frame(r#"{"choices":[{"index":0,"delta":{"reasoning_content":"0123456789abcdef"}}]}"#),
+    );
+    collect(
+        &mut decoder,
+        &frame(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#),
+    );
+    let completion = decoder.finish().expect("exact limit allowed");
+    let continuation = completion.continuation.expect("payload");
+    assert_eq!(continuation.payload().len(), 16);
+}
