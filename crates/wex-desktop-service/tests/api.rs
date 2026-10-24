@@ -170,3 +170,21 @@ fn streaming_adapter_does_not_execute_provider_tool_calls() {
     handle.join().unwrap();
     assert_eq!(error.code, "TOOLS_NOT_CONNECTED");
 }
+
+#[test]
+fn streaming_adapter_rejects_json_success_body() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"message":{"content":"not an SSE stream"}}]}"#,
+    );
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "API_RESPONSE_ERROR");
+}
+
+#[test]
+fn streaming_adapter_rejects_missing_credential_before_network() {
+    let error = execute_chat_stream(&request("https://api.deepseek.com".into()), "")
+        .unwrap_err();
+    assert_eq!(error.code, "CREDENTIAL_UNAVAILABLE");
+}
