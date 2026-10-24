@@ -1,0 +1,61 @@
+//! Canonical, length-delimited SHA-256 binding for reviewed tool arguments.
+/// This does not grant authority. Core's consumed Dispatch and trusted approval
+/// are additionally required, with InFlight durably stored before side effects.
+use crate::{Result, ServiceError};
+use ring::digest::{digest, SHA256};
+use wex_core::operation::Dispatch;
+
+/// Callers must include *all* effectful arguments, excluding credentials.
+/// The capability and resource ID are always part of the digest.
+pub fn digest_arguments(capability: &str, resource_id: &str, args: &[&[u8]]) -> String {
+    let mut bytes = b"WEXPC_TOOL_INTENT_V1\0".to_vec();
+    for part in std::iter::once(capability.as_bytes())
+        .chain(std::iter::once(resource_id.as_bytes()))
+        .chain(args.iter().copied())
+    {
+        bytes.extend_from_slice(&(part.len() as u64).to_be_bytes());
+        bytes.extend_from_slice(part);
+    }
+    let digest = digest(&SHA256, &bytes);
+    let mut encoded = String::with_capacity(64);
+    for byte in digest.as_ref() {
+        use std::fmt::Write;
+        write!(&mut encoded, "{byte:02x}").expect("write to String");
+    }
+    encoded
+}
+
+pub fn verify_arguments(dispatch: &Dispatch, args: &[&[u8]]) -> Result<()> {
+    let expected = digest_arguments(
+        &dispatch.intent.capability_id, &dispatch.intent.resource_id, args,
+    );
+    if expected != dispatch.intent.intent_digest {
+        return Err(ServiceError::new(
+            "INTENT_MISMATCH", "操作参数与批准时的摘要不一致",
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn length_prefix_prevents_ambiguous_tuple_collision() {
+        assert_ne!(
+            digest_arguments("write", "repo", &[b"ab", b"c"]),
+            digest_arguments("write", "repo", &[b"a", b"bc"]),
+        );
+    }
+    #[test]
+    fn capability_and_resource_identity_are_bound() {
+        assert_ne!(
+            digest_arguments("read", "repo_A", &[b"file"]),
+            digest_arguments("read", "repo_B", &[b"file"]),
+        );
+        assert_ne!(
+            digest_arguments("read", "repo_A", &[b"file"]),
+            digest_arguments("write", "repo_A", &[b"file"]),
+        );
+    }
+}
