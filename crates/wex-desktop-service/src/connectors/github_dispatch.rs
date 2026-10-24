@@ -109,6 +109,9 @@ pub fn update_approved_github_file(
         .header("Accept", "application/vnd.github+json")
         .bearer_auth(token).json(&body).send()
         .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 更新结果不确定，不得自动重试"))?;
+    if response.status().is_server_error() {
+        return Err(ServiceError::new("OUTCOME_UNKNOWN", "GitHub 服务端错误，写入结果未确认"));
+    }
     if !response.status().is_success() {
         return Err(ServiceError::new("GITHUB_WRITE_REJECTED", "GitHub 未确认更新成功"));
     }
