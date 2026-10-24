@@ -416,6 +416,25 @@ mod proposal_preflight_tests {
     }
 
     #[test]
+    fn github_write_preflight_preserves_multiline_text_and_checks_sha() {
+        let body = serde_json::json!({
+            "owner":"owner", "repo":"repo", "path":"src/main.rs",
+            "sha":"a".repeat(40), "content":"first\\nsecond"
+        });
+        let proposed = call("github_write_file", &body.to_string());
+        assert!(preflight_proposal(&proposed, true).is_ok());
+        let bad = serde_json::json!({
+            "owner":"owner", "repo":"repo", "path":"file",
+            "sha":"invalid", "content":"text"
+        });
+        assert_eq!(
+            preflight_proposal(&call("github_write_file", &bad.to_string()), true)
+                .unwrap_err().code,
+            "INVALID_INPUT"
+        );
+    }
+
+    #[test]
     fn github_calls_require_enabled_connection_and_exact_schema() {
         let read = call("github_read_file", r#"{"owner":"a","repo":"b","path":"README.md"}"#);
         assert_eq!(preflight_proposal(&read, false).unwrap_err().code, "TOOL_UNSUPPORTED");
