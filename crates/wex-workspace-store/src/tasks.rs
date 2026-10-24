@@ -386,6 +386,59 @@ impl TaskStore {
         Ok(view)
     }
 
+    /// Project a trusted operation receipt into its linked task without cold
+    /// recovery. The operation receipt must already be durably committed.
+    /// A successful tool operation adds evidence, never completes a task.
+    /// Repeated reconciliation is idempotent.
+    pub fn reconcile_operation(
+        &self,
+        expected_revision: u64,
+        operation_id: &str,
+        ledger: &OperationLedger,
+    ) -> Result<TaskStoreView, TaskStoreError> {
+        let mut lock = self.io.lock()?;
+        let current = self.read_locked()?;
+        if current.revision != expected_revision {
+            return Err(OrganizationError::Conflict.into());
+        }
+        let mut board = TaskBoard::default();
+        for task in &current.tasks {
+            board.insert(task.clone()).map_err(TaskStoreError::Domain)?;
+        }
+        let index = TaskOperationIndex::restore(current.links.clone(), &board, ledger)
+            .map_err(TaskStoreError::Link)?;
+        index
+            .reconcile(operation_id, &mut board, ledger)
+            .map_err(TaskStoreError::Link)?;
+        let tasks = board.snapshot();
+        if tasks == current.tasks {
+            return Ok(current);
+        }
+        let revision = expected_revision
+            .checked_add(1)
+            .ok_or(OrganizationError::RevisionExhausted)?;
+        let view = TaskStoreView {
+            revision,
+            tasks,
+            links: current.links,
+        };
+        let bytes = serde_json::to_vec(&Snapshot {
+            schema_version: 1,
+            revision,
+            tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
+            links: view.links.clone().into_iter().map(Into::into).collect(),
+        })
+        .map_err(|_| OrganizationError::Unavailable)?;
+        if bytes.len() as u64 > SNAPSHOT_LIMIT {
+            return Err(OrganizationError::LimitExceeded.into());
+        }
+        if let Err(error) = self.io.save_bytes_locked(&bytes) {
+            lock.release = false;
+            return Err(error.into());
+        }
+        Ok(view)
+    }
+
     /// Compare-and-swap a complete task+link snapshot. This is atomic only
     /// within the task store, NOT with the separate operation store.
     pub fn replace(
