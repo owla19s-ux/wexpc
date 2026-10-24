@@ -276,6 +276,9 @@ impl DesktopService {
                 .iter()
                 .find(|t| t.id == task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if input.agent_ids.iter().collect::<std::collections::HashSet<_>>().len() != input.agent_ids.len() {
+                return Err(ServiceError::new("INVALID_BINDING", "任务成员不可重复分配"));
+            }
             if task.project_id != input.project_id
                 || input.agent_ids.iter().any(|id| {
                     !s.agents
