@@ -780,3 +780,34 @@ fn legacy_snapshot_defaults_new_agent_and_receipt_collections() {
     assert!(snapshot.agent_work_reports.is_empty());
     assert!(snapshot.execution_receipts.is_empty());
 }
+
+#[test]
+fn receipt_data_survives_restart_without_promoting_agent_report() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("receipt-storage.sqlite");
+    let mut app = DesktopService::open(&path).unwrap();
+    let t = task(&mut app, "Receipt");
+    drop(app);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let body: String = db.query_row("SELECT body FROM desktop_state WHERE id=1", [], |r| r.get(0)).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let receipt = serde_json::json!({
+        "id": "receipt_from_executor_fixture",
+        "task_id": t.id,
+        "agent_id": "agent_fixture",
+        "tool_name": "fixture_tool",
+        "invocation_id": "fixture_invocation",
+        "succeeded": false,
+        "summary": "fixture only; no tool was executed",
+        "task_snapshot": t,
+        "recorded_revision": 2
+    });
+    json["execution_receipts"] = serde_json::json!([receipt]);
+    db.execute("UPDATE desktop_state SET body=?1", [json.to_string()]).unwrap();
+    drop(db);
+    let app = DesktopService::open(&path).unwrap();
+    let snapshot = app.snapshot().unwrap();
+    assert_eq!(snapshot.execution_receipts.len(), 1);
+    assert!(!snapshot.execution_receipts[0].succeeded);
+    assert!(snapshot.agent_work_reports.is_empty());
+}
