@@ -35,7 +35,7 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
     if crate::github_config::status(app)?.enabled {
         tools.push(ToolDefinition {
             name: "github_read_file".into(),
-            description: "Read a GitHub file only after explicit user confirmation.".into(),
+            description: "Read an existing GitHub UTF-8 file and its current blob SHA after explicit user confirmation; use that SHA for a separately approved update.".into(),
             parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"}},"required":["owner","repo","path"],"additionalProperties":false}"#.into(),
         });
         tools.push(ToolDefinition {
