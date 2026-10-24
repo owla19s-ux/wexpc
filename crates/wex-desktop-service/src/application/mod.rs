@@ -292,6 +292,15 @@ impl DesktopService {
             Ok(())
         })
     }
+    /// Explicit human review decision; manual task notes are not verification.
+    pub fn accept_task_review(&mut self, revision: u64, task_id: &str) -> Result<()> {
+        self.transition_task(revision, task_id, TaskStatus::Completed)
+    }
+
+    /// Return an in-review task to execution without treating it as accepted.
+    pub fn request_task_rework(&mut self, revision: u64, task_id: &str) -> Result<()> {
+        self.transition_task(revision, task_id, TaskStatus::InProgress)
+    }
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
         let name = title(&input.title)?;
         text(&input.goal)?;
