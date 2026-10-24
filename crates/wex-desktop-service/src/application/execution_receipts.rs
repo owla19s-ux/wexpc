@@ -92,4 +92,48 @@ mod tests {
         assert_eq!(error.code, "INVALID_INPUT");
         assert_eq!(app.snapshot().unwrap().revision, before);
     }
+    #[test]
+    fn assigned_outcome_persists_and_duplicate_invocation_is_rejected() {
+        let mut app = DesktopService::memory().unwrap();
+        let project = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+        let connection = app.add_connection(NewConnection {
+            name: "API".into(),
+            base_url: "https://api.deepseek.com".into(),
+            models: vec!["deepseek-chat".into()],
+        }, "vault".into()).unwrap();
+        let agent = app.add_agent(NewAgent {
+            project_id: project.id.clone(),
+            name: "Worker".into(),
+            role: AgentRole::Worker,
+            connection_id: connection.id,
+            model_id: "deepseek-chat".into(),
+        }).unwrap();
+        let task = app.create_task(NewTask {
+            project_id: project.id,
+            title: "Execute".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![agent.id.clone()],
+        }).unwrap();
+        let make_outcome = || ExecutorOutcome {
+            task_id: task.id.clone(),
+            agent_id: agent.id.clone(),
+            tool_name: "fixture".into(),
+            invocation_id: "same-call".into(),
+            succeeded: false,
+            summary: "simulated result; no tool was invoked".into(),
+        };
+        let before = app.snapshot().unwrap().revision;
+        let receipt = app.record_executor_outcome(make_outcome()).unwrap();
+        assert_eq!(receipt.recorded_revision, before + 1);
+        assert!(!receipt.succeeded);
+        assert_eq!(app.member_brief(&agent.id).unwrap().execution_receipts.len(), 1);
+        let after = app.snapshot().unwrap().revision;
+        assert_eq!(app.record_executor_outcome(make_outcome()).unwrap_err().code, "DUPLICATE_INVOCATION");
+        assert_eq!(app.snapshot().unwrap().revision, after);
+        assert_eq!(app.snapshot().unwrap().execution_receipts.len(), 1);
+        assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Draft);
+    }
+
 }
