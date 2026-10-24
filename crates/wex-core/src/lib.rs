@@ -3,6 +3,7 @@ pub mod access;
 pub mod connection_session;
 pub mod operation;
 pub mod task;
+pub mod task_operation;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Request {
