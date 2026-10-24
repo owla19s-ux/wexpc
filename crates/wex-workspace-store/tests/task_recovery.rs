@@ -222,3 +222,53 @@ fn cross_store_failure_keeps_operation_receipt_recoverable_without_false_complet
         recovered.tasks
     );
 }
+
+#[test]
+fn reassigned_task_reopens_with_historical_link_without_old_receipt_projection() {
+    let root = Root::new();
+    let store = TaskStore::open(&root.0).unwrap();
+    let ledger = persisted_ledger(&root);
+    let linked = store
+        .replace(
+            0,
+            vec![task()],
+            vec![TaskOperationLink {
+                task_id: "task_1".into(),
+                operation_id: "op_1".into(),
+                agent_id: "agent_1".into(),
+            }],
+            &ledger,
+        )
+        .unwrap();
+    let blocked = store
+        .apply(
+            linked.revision,
+            TaskChange::Transition {
+                task_id: "task_1".into(),
+                status: TaskStatus::Blocked,
+                evidence: None,
+            },
+            &ledger,
+        )
+        .unwrap();
+    let reassigned = store
+        .apply(
+            blocked.revision,
+            TaskChange::Assign {
+                task_id: "task_1".into(),
+                agent_id: "agent_2".into(),
+            },
+            &ledger,
+        )
+        .unwrap();
+    let reopened = TaskStore::open(&root.0).unwrap();
+    let recovered = reopened
+        .recover_and_commit(reassigned.revision, &ledger)
+        .unwrap();
+    assert_eq!(recovered.revision, reassigned.revision);
+    assert_eq!(recovered.tasks[0].assigned_agent.as_deref(), Some("agent_2"));
+    assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
+    assert!(recovered.tasks[0].evidence_refs.is_empty());
+    assert_eq!(recovered.links, reassigned.links);
+    assert_eq!(reopened.load().unwrap(), recovered);
+}
