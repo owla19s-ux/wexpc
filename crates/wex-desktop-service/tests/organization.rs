@@ -198,3 +198,49 @@ fn editing_context_preserves_links_and_rejects_stale_writes() {
         Some(c.id.as_str())
     );
 }
+
+#[test]
+fn checked_context_move_rejects_stale_revision_without_mutating_placement() {
+    let mut app = DesktopService::memory().unwrap();
+    let a = app.create_space("A".into()).unwrap();
+    let b = app.create_space("B".into()).unwrap();
+    let context = app.create_context("资料".into(), "".into(), vec![], &a.id, None).unwrap();
+    let stale = app.snapshot().unwrap().revision;
+    let group = app.create_group(&b.id, "新组".into()).unwrap();
+    assert_eq!(
+        app.move_context_checked(stale, &context.id, &b.id, Some(group.id.clone())).unwrap_err().code,
+        "REVISION_CONFLICT"
+    );
+    let current = app.snapshot().unwrap();
+    assert_eq!(current.placements[0].space_id, a.id);
+    assert!(current.placements[0].group_id.is_none());
+    app.move_context_checked(current.revision, &context.id, &b.id, Some(group.id.clone())).unwrap();
+    let after = app.snapshot().unwrap();
+    assert_eq!(after.placements[0].space_id, b.id);
+    assert_eq!(after.placements[0].group_id.as_deref(), Some(group.id.as_str()));
+}
+
+#[test]
+fn checked_context_binding_rejects_stale_project_and_conversation_updates() {
+    let mut app = DesktopService::memory().unwrap();
+    let space = app.create_space("资料".into()).unwrap();
+    let context = app.create_context("上下文".into(), "".into(), vec![], &space.id, None).unwrap();
+    let project = app.create_project("项目".into(), "".into(), vec![]).unwrap();
+    let api = app.add_connection(NewConnection {
+        name: "API".into(),
+        base_url: "https://api.deepseek.com".into(),
+        models: vec!["deepseek-chat".into()],
+    }, "vault".into()).unwrap();
+    let conv = app.create_conversation(None, "讨论".into(), api.id, "deepseek-chat".into()).unwrap();
+    let stale = app.snapshot().unwrap().revision;
+    app.bind_project_context_checked(stale, &project.id, Some(context.id.clone())).unwrap();
+    assert_eq!(
+        app.bind_conversation_context_checked(stale, &conv.id, Some(context.id.clone())).unwrap_err().code,
+        "REVISION_CONFLICT"
+    );
+    let now = app.snapshot().unwrap();
+    assert!(now.conversations[0].context_id.is_none());
+    assert_eq!(now.projects[0].context_id.as_deref(), Some(context.id.as_str()));
+    app.bind_conversation_context_checked(now.revision, &conv.id, Some(context.id.clone())).unwrap();
+    assert_eq!(app.snapshot().unwrap().conversations[0].context_id.as_deref(), Some(context.id.as_str()));
+}
