@@ -1,4 +1,6 @@
 use serde::{Deserialize, Serialize};
+mod organization;
+pub use organization::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceError {
@@ -48,6 +50,8 @@ pub struct Project {
     pub goal: String,
     /// References only; this association does not grant any tool permission.
     pub resources: Vec<String>,
+    #[serde(default)]
+    pub context_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -142,6 +146,14 @@ pub struct ChatTurn {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DesktopSnapshot {
     pub revision: u64,
+    #[serde(default)]
+    pub spaces: Vec<Space>,
+    #[serde(default)]
+    pub groups: Vec<Group>,
+    #[serde(default)]
+    pub contexts: Vec<Context>,
+    #[serde(default)]
+    pub placements: Vec<ContextPlacement>,
     pub connections: Vec<AiConnection>,
     pub projects: Vec<Project>,
     pub agents: Vec<Agent>,

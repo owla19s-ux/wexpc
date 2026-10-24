@@ -1,9 +1,10 @@
 //! Authoritative desktop data and basic conversation service. No file/command
 //! tools are exposed until their permission and execution adapters are wired.
-mod api;
-mod model;
-mod service;
+mod application;
+mod connectors;
+mod domain;
+mod infrastructure;
 
-pub use api::{chat_endpoint, execute_chat};
-pub use model::*;
-pub use service::DesktopService;
+pub use application::DesktopService;
+pub use connectors::openai_compatible::{chat_endpoint, execute_chat};
+pub use domain::*;

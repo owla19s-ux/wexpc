@@ -5,8 +5,9 @@ import { type Agent, type AgentRole, type Conversation, type Project, type Snaps
 import { ConnectionForm, Selection } from './Connections';
 import { ProjectDetail } from './Projects';
 import { Chat } from './Chat';
+import { Organization } from './Organization';
 
-type Page = 'projects'|'new'|'connections'|'conversation';
+type Page = 'projects'|'new'|'connections'|'conversation'|'organization';
 export function App() {
   const [data,setData]=useState<Snapshot|null>(null);
   const [error,setError]=useState('');
@@ -49,6 +50,7 @@ export function App() {
   return <div className="app">
     <header><strong>WEXPC</strong><span>0.1.1 · 开发中</span></header>
     <div className="shell"><nav aria-label="主导航">
+      <button onClick={()=>setPage('organization')}>Space 与上下文</button>
       <button onClick={()=>{setProjectId('');setPage('projects');}}>项目</button>
       <button onClick={()=>setPage('new')}>＋ 新建项目</button>
       <button onClick={()=>{setConversationId('');setPage('conversation');}}>普通对话</button>
@@ -61,6 +63,7 @@ export function App() {
       {!desktopAvailable&&<p className="notice">浏览器预览未连接桌面服务。请运行桌面程序后管理项目和调用 API。</p>}
       {error&&<p className="error" role="alert">{error}<button onClick={()=>setError('')} aria-label="关闭错误提示">×</button></p>}
       {desktopAvailable&&!data&&!error&&<p>正在加载本地项目…</p>}
+      {page==='organization'&&data&&<Organization data={data} run={run}/>}
       {page==='new'&&<section><h1>新建项目</h1><p>记录目标，关联已有代码与资料，再配置参与工作的 AI。</p><form onSubmit={e=>{e.preventDefault();void run(()=>createProject(e.currentTarget));}}>
         <label>项目名称<input name="name" maxLength={128} required /></label>
         <label>目标与约束<textarea name="goal" rows={4} /></label>

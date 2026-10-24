@@ -28,6 +28,43 @@ fn create_project(
 }
 
 #[tauri::command]
+fn create_space(state: State<'_, Shared>, name: String) -> Result<Space> {
+    locked(&state)?.create_space(name)
+}
+#[tauri::command]
+fn create_group(state: State<'_, Shared>, space_id: String, name: String) -> Result<Group> {
+    locked(&state)?.create_group(&space_id, name)
+}
+#[tauri::command]
+fn create_context(
+    state: State<'_, Shared>,
+    name: String,
+    goal: String,
+    resources: Vec<String>,
+    space_id: String,
+    group_id: Option<String>,
+) -> Result<Context> {
+    locked(&state)?.create_context(name, goal, resources, &space_id, group_id)
+}
+#[tauri::command]
+fn move_context(
+    state: State<'_, Shared>,
+    context_id: String,
+    space_id: String,
+    group_id: Option<String>,
+) -> Result<()> {
+    locked(&state)?.move_context(&context_id, &space_id, group_id)
+}
+#[tauri::command]
+fn bind_project_context(
+    state: State<'_, Shared>,
+    project_id: String,
+    context_id: Option<String>,
+) -> Result<()> {
+    locked(&state)?.bind_project_context(&project_id, context_id)
+}
+
+#[tauri::command]
 fn add_connection(
     state: State<'_, Shared>,
     input: NewConnection,
@@ -134,7 +171,12 @@ fn main() {
             create_task,
             create_conversation,
             send_message,
-            retry_chat_result
+            retry_chat_result,
+            create_space,
+            create_group,
+            create_context,
+            move_context,
+            bind_project_context
         ])
         .run(tauri::generate_context!())
         .expect("WEXPC desktop startup failed");

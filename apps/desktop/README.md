@@ -1,5 +1,11 @@
 # WEXPC 桌面首批
 
+## 组织基础批
+
+正式服务已按 `domain` / `application` / `infrastructure` / `connectors` 分责，保持 React → Tauri → Rust 的同一调用路径。Space 与上下文入口支持创建空间、可选分组、通用 Context 及移动位置；项目详情可显式关联/解除 Context。位置独立保存，移动不改变 Context ID/资料、不移动外部文件、不添加工具授权。
+
+SQLite schema 从 1 升级到 2，保留原 payload，旧项目无 `context_id` 时保持未关联，不猜测类别；版本门槛防止旧二进制打开新数据后把组织字段丢掉。基础 UI 未冻结；组织删除/共享/权限继承、Context 自身对话绑定和完整对象图仍未实现。
+
 正式路径：React → Tauri command → `wex-desktop-service` → SQLite / reqwest。普通 API 对话不调用 Flutter FFI。界面为基础功能入口，视觉与后续交互未冻结。
 
 ## Windows 启动
