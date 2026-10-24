@@ -136,4 +136,47 @@ mod tests {
         assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Draft);
     }
 
+    #[test]
+    fn receipt_is_not_available_to_other_project_members() {
+        let mut app = DesktopService::memory().unwrap();
+        let project = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+        let connection = app.add_connection(NewConnection {
+            name: "API".into(),
+            base_url: "https://api.deepseek.com".into(),
+            models: vec!["deepseek-chat".into()],
+        }, "vault".into()).unwrap();
+        let first = app.add_agent(NewAgent {
+            project_id: project.id.clone(),
+            name: "First".into(),
+            role: AgentRole::Worker,
+            connection_id: connection.id.clone(),
+            model_id: "deepseek-chat".into(),
+        }).unwrap();
+        let second = app.add_agent(NewAgent {
+            project_id: project.id.clone(),
+            name: "Second".into(),
+            role: AgentRole::Worker,
+            connection_id: connection.id,
+            model_id: "deepseek-chat".into(),
+        }).unwrap();
+        let task = app.create_task(NewTask {
+            project_id: project.id,
+            title: "Assigned".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![first.id.clone(), second.id.clone()],
+        }).unwrap();
+        app.record_executor_outcome(ExecutorOutcome {
+            task_id: task.id,
+            agent_id: first.id.clone(),
+            tool_name: "fixture".into(),
+            invocation_id: "first-call".into(),
+            succeeded: true,
+            summary: "fixture; not a real execution".into(),
+        }).unwrap();
+        assert_eq!(app.member_brief(&first.id).unwrap().execution_receipts.len(), 1);
+        assert!(app.member_brief(&second.id).unwrap().execution_receipts.is_empty());
+    }
+
 }
