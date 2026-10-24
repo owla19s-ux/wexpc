@@ -27,7 +27,8 @@
 | `reference/flutter-android` | 从 WEX 迁入的 Flutter/Dart UI、连接器与测试快照 | 历史参考，不是 PC 桌面应用或最终 UI；CI 的 Flutter job 只验证此参考资产 |
 | `.github/workflows/rust.yml` | Rust 与参考 Flutter 检查 | Windows job 只验证现有后端；没有桌面安装包/实机验收 |
 | `docs/PC-PRODUCT-AND-TECH-BASELINE.md` | 当前产品与技术主基线 | 0.1.1 首版结果与建议施工批次、未验证选型分开记录 |
-| `docs/DEVELOPMENT-WORKFLOW.md`、`AGENTS.md` | 当前开发和 GitHub 操作 | 属工程 D 域，不定义产品内任务/施工卡机制 |
+| `docs/DEVELOPMENT-WORKFLOW.md`、`AGENTS.md` | 当前开发、双环境分工、共同日志与交接/裁决规则 | 属工程D域；PR #4讨论区只追加实际记录，不等同产品内施工卡/范围锁 |
+| `docs/INTERFACE-CONTRACTS.md` | 可编码契约正文、版本/采用与替代关系 | 当前API-PC-01为DRAFT-0范围登记，未形成实现接口；不把文档当模块完成 |
 
 `apps/desktop` 已建立 Tauri/React 源码与 Rust 服务接线，覆盖项目保存、AI 成员绑定、任务草案和普通 API 对话。Windows CI 已通过 Host 编译检查、服务测试和前端构建；这不证明桌面窗口、凭证库或真实服务已经实机运行。实际入口、对应提交证据和剩余要求见 [桌面说明](../apps/desktop/README.md)。
 
