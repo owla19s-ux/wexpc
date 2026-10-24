@@ -1242,6 +1242,13 @@ name = "wex-core"
 version = "0.1.0"
 
 [[package]]
+name = "wex-api"
+version = "0.1.1"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "wex-desktop-service"
 version = "0.1.1"
 dependencies = [
@@ -1252,6 +1259,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "uuid",
+ "wex-api",
  "wex-core",
 ]
 

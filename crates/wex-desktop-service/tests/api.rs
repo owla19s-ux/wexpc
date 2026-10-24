@@ -3,7 +3,9 @@ use std::{
     net::TcpListener,
     thread,
 };
-use wex_desktop_service::{chat_endpoint, execute_chat, ApiMessage, PreparedChat};
+use wex_desktop_service::{
+    chat_endpoint, execute_chat, execute_chat_stream, ApiMessage, PreparedChat,
+};
 
 #[test]
 fn endpoint_preserves_proxy_prefix_and_explicit_version() {
@@ -89,6 +91,8 @@ fn compatible_http_request_and_response_are_real_and_provider_errors_are_sanitiz
     let body: serde_json::Value =
         serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body["model"], "deepseek-chat");
+    assert_eq!(body["stream"], false);
+    assert!(body.get("stream_options").is_none());
     assert_eq!(body["messages"][0]["content"], "你好");
     assert!(body.get("tools").is_none());
     let (url, handle) = server(
@@ -101,4 +105,124 @@ fn compatible_http_request_and_response_are_real_and_provider_errors_are_sanitiz
     assert!(!serde_json::to_string(&error)
         .unwrap()
         .contains("secret-key"));
+}
+
+fn sse_server(frames: Vec<String>) -> (String, thread::JoinHandle<String>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = thread::spawn(move || {
+        let (mut socket, _) = listener.accept().unwrap();
+        socket
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut request_bytes = Vec::new();
+        let mut chunk = [0u8; 4096];
+        loop {
+            let n = socket.read(&mut chunk).unwrap();
+            if n == 0 {
+                break;
+            }
+            request_bytes.extend_from_slice(&chunk[..n]);
+            if let Some(pos) = request_bytes.windows(4).position(|w| w == b"\r\n\r\n") {
+                let headers = String::from_utf8_lossy(&request_bytes[..pos]).to_lowercase();
+                let length: usize = headers
+                    .lines()
+                    .find_map(|line| line.strip_prefix("content-length: "))
+                    .unwrap()
+                    .parse()
+                    .unwrap();
+                if request_bytes.len() >= pos + 4 + length {
+                    break;
+                }
+            }
+        }
+        let length: usize = frames.iter().map(String::len).sum();
+        let headers = format!("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {length}\r\nConnection: close\r\n\r\n");
+        socket.write_all(headers.as_bytes()).unwrap();
+        for frame in frames {
+            socket.write_all(frame.as_bytes()).unwrap();
+        }
+        String::from_utf8(request_bytes).unwrap()
+    });
+    (format!("http://{addr}/v1"), handle)
+}
+
+#[test]
+fn streaming_adapter_decodes_fragmented_sse_and_sends_stream_request() {
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"你好\"}}]}\n\n".into(),
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"，WEX\"},\"finish_reason\":\"stop\"}]}\n\n".into(),
+        "data: [DONE]\n\n".into(),
+    ]);
+    let result = execute_chat_stream(&request(url), "secret-key").unwrap();
+    assert_eq!(result, "你好，WEX");
+    let sent = handle.join().unwrap();
+    let body: serde_json::Value =
+        serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(body["stream"], true);
+    assert_eq!(body["stream_options"]["include_usage"], true);
+    assert_eq!(body["model"], "deepseek-chat");
+}
+
+#[test]
+fn streaming_adapter_rejects_missing_terminal_frame() {
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"partial\"}}]}\n\n".into(),
+    ]);
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "PROTOCOL");
+}
+
+#[test]
+fn streaming_adapter_does_not_execute_provider_tool_calls() {
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{}\"}}]}}]}\n\n".into(),
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n".into(),
+        "data: [DONE]\n\n".into(),
+    ]);
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "TOOLS_NOT_CONNECTED");
+}
+
+#[test]
+fn streaming_adapter_rejects_json_success_body() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"message":{"content":"not an SSE stream"}}]}"#,
+    );
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "API_RESPONSE_ERROR");
+}
+
+#[test]
+fn streaming_adapter_rejects_missing_credential_before_network() {
+    let error = execute_chat_stream(&request("https://api.deepseek.com".into()), "").unwrap_err();
+    assert_eq!(error.code, "CREDENTIAL_UNAVAILABLE");
+}
+
+#[test]
+fn streaming_adapter_redacts_provider_http_errors() {
+    let (url, handle) = server(
+        "429 Too Many Requests",
+        r#"{"error":{"message":"secret-key provider echo"}}"#,
+    );
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "RATE_LIMITED");
+    assert!(!error.message.contains("secret-key"));
+}
+
+#[test]
+fn streaming_adapter_rejects_incomplete_tool_calls() {
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_1\",\"function\":{\"name\":\"write_file\",\"arguments\":\"{\"}}]}}]}\n\n".into(),
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n".into(),
+        "data: [DONE]\n\n".into(),
+    ]);
+    let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "PROTOCOL");
 }
