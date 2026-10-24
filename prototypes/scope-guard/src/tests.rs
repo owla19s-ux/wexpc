@@ -51,3 +51,34 @@ fn reserved_device_names_and_unicode_are_rejected() {
     }
     assert!(ScopePath::parse("C:/repo/normal.txt").is_ok());
 }
+
+#[test]
+fn reservations_block_overlap_and_release_on_drop() {
+    let registry = super::ScopeRegistry::default();
+    let first = registry.reserve(&["C:/project/src".into()]).unwrap();
+    assert_eq!(registry.active_count(), Ok(1));
+    assert!(matches!(registry.reserve(&["c:/project/src/main.rs".into()]), Err(super::ReservationError::Conflict)));
+    let sibling = registry.reserve(&["C:/project/tests".into()]).unwrap();
+    assert_eq!(registry.active_count(), Ok(2));
+    drop(first);
+    let _next = registry.reserve(&["C:/project/src/main.rs".into()]).unwrap();
+    drop(sibling);
+}
+
+#[test]
+fn reservations_reject_invalid_scope_without_partial_acquisition() {
+    let registry = super::ScopeRegistry::default();
+    assert!(matches!(registry.reserve(&["C:/project".into(), "../relative".into()]), Err(super::ReservationError::Invalid(_))));
+    assert_eq!(registry.active_count(), Ok(0));
+    assert_eq!(registry.reserve(&[]).err(), Some(super::ReservationError::Empty));
+}
+
+#[test]
+fn registry_clones_share_active_reservations() {
+    let registry = super::ScopeRegistry::default();
+    let second = registry.clone();
+    let held = registry.reserve(&["C:/repo".into()]).unwrap();
+    assert!(matches!(second.reserve(&["C:/repo/sub".into()]), Err(super::ReservationError::Conflict)));
+    drop(held);
+    assert!(second.reserve(&["C:/repo/sub".into()]).is_ok());
+}
