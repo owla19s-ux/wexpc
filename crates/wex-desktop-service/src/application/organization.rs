@@ -18,6 +18,27 @@ fn validate_placement(s: &DesktopSnapshot, space_id: &str, group_id: Option<&str
 }
 
 impl DesktopService {
+    pub fn bind_conversation_context(
+        &mut self,
+        conversation_id: &str,
+        context_id: Option<String>,
+    ) -> Result<()> {
+        self.mutate(|s| {
+            if context_id
+                .as_ref()
+                .is_some_and(|id| !s.contexts.iter().any(|c| &c.id == id))
+            {
+                return Err(invalid("上下文不存在"));
+            }
+            s.conversations
+                .iter_mut()
+                .find(|c| c.id == conversation_id)
+                .ok_or_else(|| invalid("对话不存在"))?
+                .context_id = context_id;
+            Ok(())
+        })
+    }
+
     pub fn create_space(&mut self, name: String) -> Result<Space> {
         let name = title(&name)?;
         self.mutate(|s| {

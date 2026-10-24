@@ -202,6 +202,7 @@ impl DesktopService {
             project_exists(s, &input.project_id)?;
             selection(s, &input.connection_id, &input.model_id)?;
             let conversation = Conversation {
+                context_id: None,
                 id: id("conv"),
                 project_id: Some(input.project_id.clone()),
                 title: name.clone(),
@@ -270,6 +271,7 @@ impl DesktopService {
             }
             selection(s, &connection_id, &model_id)?;
             let c = Conversation {
+                context_id: None,
                 id: id("conv"),
                 project_id,
                 title: name,
@@ -292,6 +294,9 @@ impl DesktopService {
             if s.turns.iter().any(|t|t.conversation_id==conversation_id&&t.status==TurnStatus::Running) {return Err(ServiceError::new("CONVERSATION_BUSY", "当前对话正在回复，请等待完成"));}
             let c=s.connections.iter().find(|c|c.id==selected.connection_id).ok_or_else(||invalid("连接不存在"))?;
             let mut messages=vec![];
+            if let Some(context)=s.conversations.iter().find(|c|c.id==conversation_id).and_then(|c|c.context_id.as_ref()).and_then(|id|s.contexts.iter().find(|c|&c.id==id)) {
+                messages.push(ApiMessage{role:"system".into(),content:format!("用户关联的工作上下文（资料地址只作引用，不代表已读取或授权文件）：{}",serde_json::to_string(context).map_err(|_|invalid("上下文无法编码"))?)});
+            }
             if let Some(agent)=s.agents.iter().find(|a|a.conversation_id==conversation_id) {
                 let project=s.projects.iter().find(|p|p.id==agent.project_id).ok_or_else(||invalid("成员项目不存在"))?;
                 let tasks:Vec<_>=s.tasks.iter().filter(|t|t.project_id==agent.project_id&&t.agent_ids.contains(&agent.id)).collect();

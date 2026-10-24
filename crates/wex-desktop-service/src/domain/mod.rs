@@ -117,6 +117,8 @@ pub struct Task {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Conversation {
+    #[serde(default)]
+    pub context_id: Option<String>,
     pub id: String,
     pub project_id: Option<String>,
     pub title: String,

@@ -98,7 +98,44 @@ fn pre_organization_snapshot_is_upgraded_without_inventing_containers_or_links()
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(
-        version, 2,
+        version, 3,
         "previous binaries must refuse organization snapshots"
     );
+}
+
+#[test]
+fn independent_conversation_can_bind_context_without_a_project() {
+    let mut app = DesktopService::memory().unwrap();
+    let s = app.create_space("资料".into()).unwrap();
+    let c = app
+        .create_context("研究".into(), "背景".into(), vec![], &s.id, None)
+        .unwrap();
+    let api = app
+        .add_connection(
+            NewConnection {
+                name: "API".into(),
+                base_url: "https://api.deepseek.com".into(),
+                models: vec!["deepseek-chat".into()],
+            },
+            "vault".into(),
+        )
+        .unwrap();
+    let conv = app
+        .create_conversation(None, "讨论".into(), api.id, "deepseek-chat".into())
+        .unwrap();
+    assert!(app
+        .bind_conversation_context(&conv.id, Some("missing".into()))
+        .is_err());
+    app.bind_conversation_context(&conv.id, Some(c.id.clone()))
+        .unwrap();
+    let state = app.snapshot().unwrap();
+    assert_eq!(
+        state.conversations[0].context_id.as_deref(),
+        Some(c.id.as_str())
+    );
+    assert!(state.conversations[0].project_id.is_none());
+    app.bind_conversation_context(&conv.id, None).unwrap();
+    assert!(app.snapshot().unwrap().conversations[0]
+        .context_id
+        .is_none());
 }

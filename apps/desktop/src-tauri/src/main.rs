@@ -13,6 +13,15 @@ fn locked(shared: &Shared) -> Result<std::sync::MutexGuard<'_, DesktopService>> 
 }
 
 #[tauri::command]
+fn bind_conversation_context(
+    state: State<'_, Shared>,
+    conversation_id: String,
+    context_id: Option<String>,
+) -> Result<()> {
+    locked(&state)?.bind_conversation_context(&conversation_id, context_id)
+}
+
+#[tauri::command]
 fn snapshot(state: State<'_, Shared>) -> Result<DesktopSnapshot> {
     locked(&state)?.snapshot()
 }
@@ -163,6 +172,7 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            bind_conversation_context,
             snapshot,
             create_project,
             add_connection,
