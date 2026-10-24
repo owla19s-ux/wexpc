@@ -212,16 +212,12 @@ fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
     let message = choice["message"].as_object().ok_or_else(|| {
         ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少消息对象")
     })?;
-    if let Some(calls) = message.get("tool_calls").filter(|v| !v.is_null()) {
-        let calls = calls.as_array().ok_or_else(|| {
-            ServiceError::new("API_RESPONSE_ERROR", "服务商工具调用格式无效")
-        })?;
-        if !calls.is_empty() {
-            return Err(ServiceError::new(
-                "TOOLS_NOT_CONNECTED",
-                "工具执行尚未接通；没有执行服务商提出的工具调用",
-            ));
-        }
+    let calls = super::tool_proposals::parse_tool_proposals(&value["choices"][0]["message"])?;
+    if !calls.is_empty() {
+        return Err(ServiceError::new(
+            "TOOLS_NOT_CONNECTED",
+            "工具调用已解析，但执行审批与派发尚未连接",
+        ));
     }
     // Older OpenAI-compatible providers may send a legacy function_call
     // without the modern tool_calls array. Never persist it as plain text.
