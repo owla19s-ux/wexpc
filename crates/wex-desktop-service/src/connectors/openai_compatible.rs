@@ -157,14 +157,19 @@ pub fn execute_chat_stream_with_progress(
             "流式请求未返回 SSE 内容类型",
         ));
     }
-    let mut decoder = Decoder::new(options);
+    let mut decoder = Decoder::new(options.clone());
     let mut chunk = [0u8; 8192];
+    let mut received = 0usize;
     loop {
         let size = response
             .read(&mut chunk)
             .map_err(|_| ServiceError::new("API_RESPONSE_ERROR", "流式响应读取失败；未自动重试"))?;
         if size == 0 {
             break;
+        }
+        received = received.saturating_add(size);
+        if received > options.max_response_bytes {
+            return Err(ServiceError::new("API_RESPONSE_ERROR", "流式回复超过当前接收上限"));
         }
         for event in decoder.push(&chunk[..size]).map_err(protocol_error)? {
             if let Event::TextDelta(delta) = event {
