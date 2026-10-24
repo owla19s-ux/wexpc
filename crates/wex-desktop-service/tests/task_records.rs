@@ -648,3 +648,46 @@ fn agent_report_requires_assignment_and_preserves_task_state() {
     assert_eq!(snapshot.tasks[0].status, TaskStatus::Draft);
     assert_eq!(app.member_brief(&agent.id).unwrap().agent_work_reports.len(), 1);
 }
+
+#[test]
+fn agent_report_survives_restart_without_becoming_a_receipt() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("agent-report.sqlite");
+    let mut app = DesktopService::open(&path).unwrap();
+    let t = task(&mut app, "Persist");
+    let c = app.add_connection(NewConnection {
+        name: "API".into(),
+        base_url: "https://api.deepseek.com".into(),
+        models: vec!["deepseek-chat".into()],
+    }, "vault".into()).unwrap();
+    let agent = app.add_agent(NewAgent {
+        project_id: t.project_id.clone(),
+        name: "Worker".into(),
+        role: AgentRole::Worker,
+        connection_id: c.id,
+        model_id: "deepseek-chat".into(),
+    }).unwrap();
+    let rev = app.snapshot().unwrap().revision;
+    app.update_task(rev, &t.id, NewTask {
+        project_id: t.project_id.clone(),
+        title: t.title.clone(),
+        goal: t.goal.clone(),
+        scope: t.scope.clone(),
+        acceptance: t.acceptance.clone(),
+        agent_ids: vec![agent.id.clone()],
+    }).unwrap();
+    let rev = app.snapshot().unwrap().revision;
+    let report = app.append_agent_work_report(rev, NewAgentWorkReport {
+        task_id: t.id.clone(),
+        agent_id: agent.id.clone(),
+        body: "self reported".into(),
+        references: vec![],
+    }).unwrap();
+    drop(app);
+    let app = DesktopService::open(&path).unwrap();
+    let snapshot = app.snapshot().unwrap();
+    assert_eq!(snapshot.agent_work_reports[0].id, report.id);
+    assert_eq!(snapshot.agent_work_reports[0].task_snapshot.title, "Persist");
+    assert_eq!(snapshot.tasks[0].status, TaskStatus::Draft);
+    assert_eq!(app.member_brief(&agent.id).unwrap().agent_work_reports.len(), 1);
+}
