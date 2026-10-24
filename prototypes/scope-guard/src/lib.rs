@@ -135,3 +135,5 @@ pub mod task_gate;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod task_gate_tests;
