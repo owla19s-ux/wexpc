@@ -264,3 +264,13 @@ fn non_streaming_valid_tool_intent_is_not_executed_or_committed_as_text() {
     handle.join().unwrap();
     assert_eq!(error.code, "TOOLS_NOT_CONNECTED");
 }
+
+#[test]
+fn both_transports_reject_unsupported_transcript_roles_before_network() {
+    let mut invalid = request("https://api.deepseek.com".into());
+    invalid.messages[0].role = "tool".into();
+    let non_stream = execute_chat(&invalid, "secret-key").unwrap_err();
+    let stream = execute_chat_stream(&invalid, "secret-key").unwrap_err();
+    assert_eq!(non_stream.code, "INVALID_INPUT");
+    assert_eq!(stream.code, "INVALID_INPUT");
+}
