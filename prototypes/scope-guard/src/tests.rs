@@ -40,3 +40,14 @@ fn alternate_data_stream_suffix_is_rejected() {
     assert!(ScopePath::parse("C:/repo/file.txt:stream").is_err());
     assert!(ScopePath::parse("C:/repo/file.txt").is_ok());
 }
+
+#[test]
+fn reserved_device_names_and_unicode_are_rejected() {
+    for path in [
+        "C:/repo/CON", "C:/repo/con.txt", "C:/repo/NUL",
+        "C:/repo/COM1.log", "C:/repo/LPT9", "C:/repo/文件",
+    ] {
+        assert!(ScopePath::parse(path).is_err(), "accepted {path}");
+    }
+    assert!(ScopePath::parse("C:/repo/normal.txt").is_ok());
+}
