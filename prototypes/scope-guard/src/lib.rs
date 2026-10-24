@@ -49,7 +49,7 @@ impl ScopePath {
             if !seg.is_ascii() { return Err(ScopeError::Unsupported); }
             let stem = seg.split('.').next().unwrap_or("");
             let device = stem.to_ascii_uppercase();
-            if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" |
+            if matches!(device.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$" |
                 "COM1" | "COM2" | "COM3" | "COM4" | "COM5" | "COM6" | "COM7" | "COM8" | "COM9" |
                 "LPT1" | "LPT2" | "LPT3" | "LPT4" | "LPT5" | "LPT6" | "LPT7" | "LPT8" | "LPT9") {
                 return Err(ScopeError::Unsupported);
