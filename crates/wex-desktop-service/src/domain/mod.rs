@@ -174,6 +174,8 @@ pub struct DesktopSnapshot {
     pub task_records: Vec<TaskRecord>,
     #[serde(default)]
     pub agent_work_reports: Vec<AgentWorkReport>,
+    #[serde(default)]
+    pub execution_receipts: Vec<ExecutionReceipt>,
     pub conversations: Vec<Conversation>,
     pub turns: Vec<ChatTurn>,
     /// Runtime-only pending settlements, populated in the returned projection.
