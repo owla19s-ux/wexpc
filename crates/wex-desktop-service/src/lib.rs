@@ -12,3 +12,7 @@ pub use connectors::openai_compatible::{
 pub use domain::*;
 pub use connectors::tool_proposals::ToolProposal;
 pub use connectors::tool_round::{committed_tool_messages, drive_tool_rounds, execute_model_step, ModelStep};
+pub use connectors::local_dispatch::read_approved_file;
+pub use connectors::github_dispatch::{read_approved_github_file, update_approved_github_file};
+pub use connectors::git_dispatch::approved_git_status;
+pub use connectors::intent_binding::digest_arguments;
