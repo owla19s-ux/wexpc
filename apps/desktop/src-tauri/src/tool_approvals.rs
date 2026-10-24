@@ -45,6 +45,13 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         });
     }
     drive_tool_rounds(chat, key, tools, |calls| {
+        // Reject unsupported or malformed proposals before dispatching any
+        // member of the batch. Validation does not itself authorize execution.
+        for call in calls {
+            if !tools_available_for_proposal(call, crate::github_config::status(app)?.enabled) {
+                return Err(ServiceError::new("TOOL_UNSUPPORTED", "工具批次包含不可用的调用，未执行此批次"));
+            }
+        }
         calls.iter().map(|call| {
             if matches!(call.name.as_str(), "git_status" | "cargo_test" | "cargo_fmt_check") {
                 return Ok((call.id.clone(), review_local_command(app, chat, call)?));
@@ -71,6 +78,14 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             Ok((call.id.clone(), result.to_string()))
         }).collect::<Result<Vec<_>>>()
     })
+}
+
+fn tools_available_for_proposal(call: &ToolProposal, github_enabled: bool) -> bool {
+    match call.name.as_str() {
+        "read_file" | "git_status" | "cargo_test" | "cargo_fmt_check" => true,
+        "github_read_file" | "github_write_file" => github_enabled,
+        _ => false,
+    }
 }
 
 fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<(String, String)> {
