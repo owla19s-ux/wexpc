@@ -242,3 +242,25 @@ fn streaming_adapter_rejects_incomplete_tool_calls() {
     handle.join().unwrap();
     assert_eq!(error.code, "PROTOCOL");
 }
+
+#[test]
+fn non_streaming_malformed_tool_calls_never_become_text_success() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"message":{"content":"looks successful","tool_calls":{"unexpected":"object"}}}]}"#,
+    );
+    let error = execute_chat(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "API_RESPONSE_ERROR");
+}
+
+#[test]
+fn non_streaming_valid_tool_intent_is_not_executed_or_committed_as_text() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"message":{"content":"looks successful","tool_calls":[{"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{}"}}]}}]}"#,
+    );
+    let error = execute_chat(&request(url), "secret-key").unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(error.code, "TOOLS_NOT_CONNECTED");
+}
