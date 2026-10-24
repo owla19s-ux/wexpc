@@ -179,6 +179,29 @@ impl TaskStore {
         Ok(view)
     }
 
+    /// Reconcile trusted operation receipts after cold recovery. A completed
+    /// operation only adds evidence; it never completes the enclosing task.
+    /// The Host must persist the returned projection before exposing it.
+    pub fn recover_with_ledger(
+        view: TaskStoreView,
+        ledger: &OperationLedger,
+    ) -> Result<TaskStoreView, TaskStoreError> {
+        let recovered = Self::recover(view)?;
+        let mut board = TaskBoard::restore(recovered.tasks)
+            .map_err(TaskStoreError::Domain)?;
+        let index = TaskOperationIndex::restore(recovered.links.clone(), &board, ledger)
+            .map_err(TaskStoreError::Link)?;
+        for link in index.snapshot() {
+            index.reconcile(&link.operation_id, &mut board, ledger)
+                .map_err(TaskStoreError::Link)?;
+        }
+        Ok(TaskStoreView {
+            revision: recovered.revision,
+            tasks: board.snapshot(),
+            links: recovered.links,
+        })
+    }
+
     /// Cold recovery must not silently resume a previously running task.
     pub fn recover(view: TaskStoreView) -> Result<TaskStoreView, TaskStoreError> {
         let board = TaskBoard::restore(view.tasks).map_err(TaskStoreError::Domain)?;
@@ -215,6 +238,16 @@ mod tests {
             revision: 4, tasks: vec![task(TaskStatus::Completed)], links: vec![],
         };
         assert_eq!(TaskStore::recover(view).unwrap().tasks[0].status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn cold_recovery_with_empty_ledger_preserves_unlinked_tasks() {
+        let view = TaskStoreView {
+            revision: 7, tasks: vec![task(TaskStatus::Running)], links: vec![],
+        };
+        let result = TaskStore::recover_with_ledger(view, &OperationLedger::default()).unwrap();
+        assert_eq!(result.tasks[0].status, TaskStatus::Blocked);
+        assert_eq!(result.revision, 7);
     }
 
     #[test]
