@@ -99,9 +99,6 @@ impl Decoder {
                     "event batch limit exceeded",
                 ));
             }
-            if self.done_seen {
-                break;
-            }
         }
         Ok(events)
     }
@@ -291,15 +288,15 @@ impl Decoder {
             .ok_or_else(|| ApiError::new(ErrorKind::Protocol, "tool call without index"))?;
         let index = usize::try_from(index)
             .map_err(|_| ApiError::new(ErrorKind::Protocol, "tool index out of range"))?;
-        if self.order.len() > 64 {
-            return Err(ApiError::new(
-                ErrorKind::LimitExceeded,
-                "tool call count limit exceeded",
-            ));
-        }
         if !self.tools.contains_key(&index) {
             if index != self.order.len() {
                 return Err(ApiError::new(ErrorKind::Protocol, "tool call index gap"));
+            }
+            if self.order.len() >= 64 {
+                return Err(ApiError::new(
+                    ErrorKind::LimitExceeded,
+                    "tool call count limit exceeded",
+                ));
             }
             self.order.push(index);
             self.tools.insert(index, PartialTool::default());

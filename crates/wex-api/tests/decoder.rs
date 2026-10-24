@@ -211,6 +211,23 @@ fn unterminated_frame_limit_is_enforced() {
 }
 
 #[test]
+fn frames_after_done_fail_immediately() {
+    let mut decoder = Decoder::new(options());
+    collect(
+        &mut decoder,
+        &frame(r#"{"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}"#),
+    );
+    let input = concat!(
+        "data: [DONE]\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"late\"}}]}\n\n",
+    );
+    let error = decoder
+        .push(input.as_bytes())
+        .expect_err("frame after DONE");
+    assert_eq!(error.kind, ErrorKind::Protocol);
+}
+
+#[test]
 fn cancellation_is_observed() {
     let cancellation = Cancellation::default();
     cancellation.cancel();

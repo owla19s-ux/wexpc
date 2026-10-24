@@ -17,7 +17,7 @@ rustfmt 1.10.0 / clippy 0.1.99 / clang 21.1.8 / Node v24.18.0
 
 ```sh
 cargo test -p wex-api
-# test result: ok. 22 passed; 0 failed
+# test result: ok. 23 passed; 0 failed
 
 rustfmt --edition 2021 --check crates/wex-api/src/*.rs crates/wex-api/tests/*.rs
 # exit 0
@@ -38,6 +38,8 @@ cargo test --workspace --no-fail-fast
 ```
 
 ## 设计要点（相对 a600f2cd 类型提案的补强）
+
+0. 自审（智谱 glm-4.7）后修正：`[DONE]` 之后继续消费缓冲，后续 data 帧立即判协议错误；工具调用数量上限收紧为 64，去掉 off-by-one。
 
 1. `Decoder` 状态机：SSE 分片、UTF-8 边界、多行 data、注释、`[DONE]`、index 聚合、终态、上限。
 2. `ApiRequest::validate()`：必填字段、消息角色/工具字段一致性、工具参数必须是 JSON 对象。
