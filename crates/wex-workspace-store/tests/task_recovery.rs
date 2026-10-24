@@ -40,6 +40,7 @@ fn task() -> Task {
         project_id: "project_1".into(),
         objective: "Build".into(),
         assigned_agent: Some("agent_1".into()),
+        assignment_epoch: 0,
         status: TaskStatus::Running,
         evidence_refs: vec![],
     }
@@ -201,6 +202,7 @@ fn cross_store_failure_keeps_operation_receipt_recoverable_without_false_complet
                 task_id: "task_1".into(),
                 operation_id: "op_1".into(),
                 agent_id: "agent_1".into(),
+                assignment_epoch: Some(0),
             }],
             &completed_operation,
         )
@@ -236,6 +238,7 @@ fn reassigned_task_reopens_with_historical_link_without_old_receipt_projection()
                 task_id: "task_1".into(),
                 operation_id: "op_1".into(),
                 agent_id: "agent_1".into(),
+                assignment_epoch: Some(0),
             }],
             &ledger,
         )
@@ -261,17 +264,65 @@ fn reassigned_task_reopens_with_historical_link_without_old_receipt_projection()
             &ledger,
         )
         .unwrap();
+    let returned = store
+        .apply(
+            reassigned.revision,
+            TaskChange::Assign {
+                task_id: "task_1".into(),
+                agent_id: "agent_1".into(),
+            },
+            &ledger,
+        )
+        .unwrap();
     let reopened = TaskStore::open(&root.0).unwrap();
     let recovered = reopened
-        .recover_and_commit(reassigned.revision, &ledger)
+        .recover_and_commit(returned.revision, &ledger)
         .unwrap();
-    assert_eq!(recovered.revision, reassigned.revision);
+    assert_eq!(recovered.revision, returned.revision);
     assert_eq!(
         recovered.tasks[0].assigned_agent.as_deref(),
-        Some("agent_2")
+        Some("agent_1")
     );
+    assert_eq!(recovered.tasks[0].assignment_epoch, 2);
     assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
     assert!(recovered.tasks[0].evidence_refs.is_empty());
-    assert_eq!(recovered.links, reassigned.links);
+    assert_eq!(recovered.links, returned.links);
+    assert_eq!(reopened.load().unwrap(), recovered);
+}
+
+#[test]
+fn legacy_link_without_epoch_is_retained_but_never_replayed() {
+    let root = Root::new();
+    let store = TaskStore::open(&root.0).unwrap();
+    let ledger = persisted_ledger(&root);
+    store
+        .replace(
+            0,
+            vec![task()],
+            vec![TaskOperationLink {
+                task_id: "task_1".into(),
+                operation_id: "op_1".into(),
+                agent_id: "agent_1".into(),
+                assignment_epoch: Some(0),
+            }],
+            &ledger,
+        )
+        .unwrap();
+    let mut legacy: serde_json::Value = serde_json::from_slice(&root.bytes()).unwrap();
+    legacy["tasks"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("assignment_epoch");
+    legacy["links"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("assignment_epoch");
+    root.write(&serde_json::to_vec(&legacy).unwrap());
+
+    let reopened = TaskStore::open(&root.0).unwrap();
+    let recovered = reopened.recover_and_commit(1, &ledger).unwrap();
+    assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
+    assert!(recovered.tasks[0].evidence_refs.is_empty());
+    assert_eq!(recovered.links[0].assignment_epoch, None);
     assert_eq!(reopened.load().unwrap(), recovered);
 }
