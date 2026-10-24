@@ -357,3 +357,60 @@ fn continuation_size_is_bounded() {
     let error = Continuation::new(scope(), payload).expect_err("too large");
     assert_eq!(error.kind, ErrorKind::LimitExceeded);
 }
+fn canonical_stream() -> String {
+    concat!(
+        ": keep-alive\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"你\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"好\"}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\",\"function\":{\"name\":\"f\",\"arguments\":\"{\\\"a\\\":\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"1}\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"tool_calls\"}]}\n\n",
+        "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":9}}\n\n",
+        "data: [DONE]\n\n",
+    )
+    .to_string()
+}
+
+fn run_chunked(chunks: &[&[u8]]) -> (Vec<Event>, Completion) {
+    let mut decoder = Decoder::new(options());
+    let mut events = Vec::new();
+    for chunk in chunks {
+        events.extend(decoder.push(chunk).expect("push ok"));
+    }
+    let completion = decoder.finish().expect("complete");
+    (events, completion)
+}
+
+#[test]
+fn split_invariance_at_every_byte_boundary() {
+    let body = canonical_stream();
+    let bytes = body.as_bytes();
+    let (baseline_events, baseline_completion) = run_chunked(&[bytes]);
+    assert_eq!(baseline_completion.text, "你好");
+    assert_eq!(baseline_completion.tool_calls.len(), 1);
+    assert_eq!(
+        baseline_completion.tool_calls[0].arguments_json,
+        "{\"a\":1}"
+    );
+
+    for split in 0..=bytes.len() {
+        let (events, completion) = run_chunked(&[&bytes[..split], &bytes[split..]]);
+        assert_eq!(events, baseline_events, "events differ at split {split}");
+        assert_eq!(
+            completion, baseline_completion,
+            "completion differs at split {split}"
+        );
+    }
+}
+
+#[test]
+fn split_invariance_one_byte_at_a_time() {
+    let body = canonical_stream();
+    let bytes = body.as_bytes();
+    let (baseline_events, baseline_completion) = run_chunked(&[bytes]);
+
+    let chunks: Vec<&[u8]> = bytes.chunks(1).collect();
+    let (events, completion) = run_chunked(&chunks);
+    assert_eq!(events, baseline_events);
+    assert_eq!(completion, baseline_completion);
+}
