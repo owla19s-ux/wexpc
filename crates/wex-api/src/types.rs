@@ -313,11 +313,12 @@ pub struct ApiRequest {
     pub continuation: Option<Continuation>,
 }
 
-pub const RESERVED_PARAMETER_KEYS: [&str; 7] = [
+pub const RESERVED_PARAMETER_KEYS: [&str; 8] = [
     "model",
     "messages",
     "tools",
     "stream",
+    "stream_options",
     "authorization",
     "api_key",
     "key",
