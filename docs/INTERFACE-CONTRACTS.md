@@ -100,3 +100,12 @@ reasoning隔离职责明确：API不拥有全局/跨会话缓存，只解析并�
 
 
 可运行类型提案见[contracts/README.md](../contracts/README.md)。库本地编译及4项测试通过；尚无正式Executor签名和HTTP实现，不代表已采用或可正式交接。取消标记不等于网络取消已接线，JSON字符串不等于已校验，续传比较不等于应用层隔离已集成。
+
+
+## 对手机核对意见的处理（REC-6387016118）
+
+Work接受纯协议解码器与I/O传输分层；协议核只依赖确定性数据处理所需组件，不能把reqwest运行方式绑入Decoder。候选入口为push(bytes)产出增量、finish()验证唯一终态并返回Completion，最终签名/重复完成与EOF行为须在主workspace起点明确。传输适配由Work负责接线及I/O取消/超时/背压验证；并非本批承诺同时维护blocking和async两种实现。
+
+D-002已收到鱼对主workspace方案的接受，Work确认该方向；依赖版本及锁文件仍由Work准备。D-003补充采纳max_continuation_bytes独立字节上限，拒绝超限、不得截断续传，Continuation/ApiRequest不派生Serialize。手机a600f2cd类型测试4项通过不替代尚缺的请求/参数/消息/代理校验、默认值、Retry-After及Decoder测试；这些缺口均接受核对意见，后续实现和证据分别登记。
+
+手机ENV实证见REC-6387015668：全workspace Windows目标check因ring构建缺assert.h失败，不能继续沿用此前“全目标已通过”的概括；纯Rust子集检查与Android原生测试分别记录。双方按现有评论达成分层方向，不代签尚未实现模块或最终传输契约已采用。
