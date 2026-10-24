@@ -22,6 +22,16 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         parameters_json: r#"{"type":"object","properties":{"file_name":{"type":"string"}},"required":["file_name"],"additionalProperties":false}"#.into(),
     };
     let mut tools = vec![tool];
+    for (name, description) in [
+        ("git_status", "Read Git status of a repository selected by the user."),
+        ("cargo_test", "Run cargo test --workspace --locked only after explicit per-run approval."),
+        ("cargo_fmt_check", "Run cargo fmt --all -- --check after explicit per-run approval."),
+    ] {
+        tools.push(ToolDefinition {
+            name: name.into(), description: description.into(),
+            parameters_json: r#"{"type":"object","properties":{},"additionalProperties":false}"#.into(),
+        });
+    }
     if crate::github_config::status(app)?.enabled {
         tools.push(ToolDefinition {
             name: "github_read_file".into(),
@@ -36,6 +46,9 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
     }
     drive_tool_rounds(chat, key, tools, |calls| {
         calls.iter().map(|call| {
+            if matches!(call.name.as_str(), "git_status" | "cargo_test" | "cargo_fmt_check") {
+                return Ok((call.id.clone(), review_local_command(app, chat, call)?));
+            }
             if call.name == "github_read_file" || call.name == "github_write_file" {
                 return Ok((call.id.clone(), review_github(app, chat, call)?));
             }
