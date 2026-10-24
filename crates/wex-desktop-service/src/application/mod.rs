@@ -257,6 +257,45 @@ impl DesktopService {
             Ok(task)
         })
     }
+    pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
+        let name = title(&input.title)?;
+        text(&input.goal)?;
+        text(&input.acceptance)?;
+        for scope in &input.scope {
+            text(scope)?;
+        }
+        self.mutate(|s| {
+            organization::check_revision(s, revision)?;
+            let task = s
+                .tasks
+                .iter()
+                .find(|t| t.id == task_id)
+                .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if task.project_id != input.project_id
+                || input.agent_ids.iter().any(|id| {
+                    !s.agents
+                        .iter()
+                        .any(|a| &a.id == id && a.project_id == task.project_id)
+                })
+            {
+                return Err(ServiceError::new(
+                    "INVALID_BINDING",
+                    "任务项目不可通过编辑变更，成员必须属于该项目",
+                ));
+            }
+            let task = s
+                .tasks
+                .iter_mut()
+                .find(|t| t.id == task_id)
+                .expect("task checked above");
+            task.title = name;
+            task.goal = input.goal;
+            task.scope = input.scope;
+            task.acceptance = input.acceptance;
+            task.agent_ids = input.agent_ids;
+            Ok(())
+        })
+    }
     pub fn create_conversation(
         &mut self,
         project_id: Option<String>,

@@ -156,6 +156,16 @@ fn create_task(state: State<'_, Shared>, input: NewTask) -> Result<Task> {
 }
 
 #[tauri::command]
+fn update_task(
+    state: State<'_, Shared>,
+    revision: u64,
+    task_id: String,
+    input: NewTask,
+) -> Result<()> {
+    locked(&state)?.update_task(revision, &task_id, input)
+}
+
+#[tauri::command]
 fn retry_chat_result(state: State<'_, Shared>, turn_id: String) -> Result<()> {
     locked(&state)?.retry_chat_result(&turn_id)
 }
@@ -224,6 +234,7 @@ fn main() {
             set_connection_enabled,
             add_agent,
             create_task,
+            update_task,
             create_conversation,
             send_message,
             retry_chat_result,

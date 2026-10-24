@@ -212,7 +212,7 @@ impl DesktopService {
     }
 }
 
-fn check_revision(s: &DesktopSnapshot, revision: u64) -> Result<()> {
+pub(super) fn check_revision(s: &DesktopSnapshot, revision: u64) -> Result<()> {
     if s.revision != revision {
         return Err(ServiceError::new(
             "REVISION_CONFLICT",

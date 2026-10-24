@@ -265,3 +265,122 @@ fn completed_response_can_retry_persistence_without_repeating_the_api_request() 
     assert!(s.unsaved_turn_ids.is_empty());
     assert!(app.prepare_chat(&conv.id, "next".into()).is_ok());
 }
+
+#[test]
+fn task_draft_can_be_reassigned_and_edited_without_changing_identity_after_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("tasks.sqlite");
+    let mut app = DesktopService::open(&path).unwrap();
+    let c = app.add_connection(api(), "vault".into()).unwrap();
+    let p = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+    let t = app
+        .create_task(NewTask {
+            project_id: p.id.clone(),
+            title: "初稿".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![],
+        })
+        .unwrap();
+    let a = app
+        .add_agent(NewAgent {
+            project_id: p.id.clone(),
+            name: "审查".into(),
+            role: AgentRole::Reviewer,
+            connection_id: c.id,
+            model_id: "deepseek-chat".into(),
+        })
+        .unwrap();
+    let revision = app.snapshot().unwrap().revision;
+    app.update_task(
+        revision,
+        &t.id,
+        NewTask {
+            project_id: p.id.clone(),
+            title: "正式目标".into(),
+            goal: "保留状态".into(),
+            scope: vec!["src/".into(), "tests/".into()],
+            acceptance: "重启可恢复".into(),
+            agent_ids: vec![a.id.clone()],
+        },
+    )
+    .unwrap();
+    drop(app);
+    let app = DesktopService::open(&path).unwrap();
+    let s = app.snapshot().unwrap();
+    let saved = &s.tasks[0];
+    assert_eq!(s.revision, revision + 1);
+    assert_eq!(saved.id, t.id);
+    assert_eq!(saved.project_id, p.id);
+    assert_eq!(saved.title, "正式目标");
+    assert_eq!(saved.goal, "保留状态");
+    assert_eq!(saved.scope, vec!["src/", "tests/"]);
+    assert_eq!(saved.acceptance, "重启可恢复");
+    assert_eq!(saved.agent_ids, vec![a.id]);
+    assert_eq!(saved.status, TaskStatus::Draft);
+    assert!(s.turns.is_empty(), "editing does not dispatch work");
+}
+
+#[test]
+fn task_edit_rejects_stale_revision_project_change_and_foreign_member_atomically() {
+    let mut app = DesktopService::memory().unwrap();
+    let c = app.add_connection(api(), "vault".into()).unwrap();
+    let p = app.create_project("A".into(), "".into(), vec![]).unwrap();
+    let other = app.create_project("B".into(), "".into(), vec![]).unwrap();
+    let a = app
+        .add_agent(NewAgent {
+            project_id: other.id.clone(),
+            name: "B".into(),
+            role: AgentRole::Worker,
+            connection_id: c.id,
+            model_id: "deepseek-chat".into(),
+        })
+        .unwrap();
+    let t = app
+        .create_task(NewTask {
+            project_id: p.id.clone(),
+            title: "原任务".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![],
+        })
+        .unwrap();
+    let revision = app.snapshot().unwrap().revision;
+    let input = |project_id: String, agent_ids: Vec<String>| NewTask {
+        project_id,
+        title: "覆盖".into(),
+        goal: "".into(),
+        scope: vec![],
+        acceptance: "".into(),
+        agent_ids,
+    };
+    for (rev, id, body, code) in [
+        (
+            revision - 1,
+            t.id.as_str(),
+            input(p.id.clone(), vec![]),
+            "REVISION_CONFLICT",
+        ),
+        (
+            revision,
+            t.id.as_str(),
+            input(other.id, vec![]),
+            "INVALID_BINDING",
+        ),
+        (
+            revision,
+            t.id.as_str(),
+            input(p.id.clone(), vec![a.id]),
+            "INVALID_BINDING",
+        ),
+        (revision, "missing", input(p.id, vec![]), "TASK_NOT_FOUND"),
+    ] {
+        assert_eq!(app.update_task(rev, id, body).unwrap_err().code, code);
+        let s = app.snapshot().unwrap();
+        assert_eq!(s.revision, revision);
+        assert_eq!(s.tasks[0].title, "原任务");
+        assert!(s.tasks[0].agent_ids.is_empty());
+    }
+}
