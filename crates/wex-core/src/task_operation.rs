@@ -1,0 +1,385 @@
+//! Trusted, read-only projection from operation ledger receipts into task progress.
+//! This does not approve, dispatch, verify or persist operations. The host must
+//! persist operation and task changes transactionally before exposing them.
+use crate::operation::{OperationLedger, OperationState};
+use crate::task::{TaskBoard, TaskError, TaskStatus};
+use std::collections::BTreeMap;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskOperationLink {
+    pub task_id: String,
+    pub operation_id: String,
+    pub agent_id: String,
+    /// None means an older snapshot lacks assignment provenance.
+    pub assignment_epoch: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkError {
+    InvalidLink,
+    DuplicateOperation,
+    MissingTask,
+    MissingOperation,
+    AgentMismatch,
+    Task(TaskError),
+}
+
+#[derive(Debug, Default)]
+pub struct TaskOperationIndex {
+    links: BTreeMap<String, TaskOperationLink>,
+}
+
+fn valid_link_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
+
+impl TaskOperationIndex {
+    /// Restore only after the host validates the saved snapshot's provenance.
+    pub fn restore(
+        links: Vec<TaskOperationLink>,
+        tasks: &TaskBoard,
+        ledger: &OperationLedger,
+    ) -> Result<Self, LinkError> {
+        let mut index = Self::default();
+        for link in links {
+            index.attach_checked(link, tasks, ledger, false)?;
+        }
+        Ok(index)
+    }
+
+    pub fn snapshot(&self) -> Vec<TaskOperationLink> {
+        self.links.values().cloned().collect()
+    }
+
+    /// A link never grants authority to execute an operation.
+    pub fn attach(
+        &mut self,
+        link: TaskOperationLink,
+        tasks: &TaskBoard,
+        ledger: &OperationLedger,
+    ) -> Result<(), LinkError> {
+        self.attach_checked(link, tasks, ledger, true)
+    }
+
+    fn attach_checked(
+        &mut self,
+        link: TaskOperationLink,
+        tasks: &TaskBoard,
+        ledger: &OperationLedger,
+        require_current_assignment: bool,
+    ) -> Result<(), LinkError> {
+        if !valid_link_id(&link.task_id)
+            || !valid_link_id(&link.operation_id)
+            || !valid_link_id(&link.agent_id)
+        {
+            return Err(LinkError::InvalidLink);
+        }
+        if self.links.contains_key(&link.operation_id) {
+            return Err(LinkError::DuplicateOperation);
+        }
+        let task = tasks.get(&link.task_id).ok_or(LinkError::MissingTask)?;
+        if require_current_assignment
+            && (task.assigned_agent.as_deref() != Some(&link.agent_id)
+                || link.assignment_epoch != Some(task.assignment_epoch))
+        {
+            return Err(LinkError::AgentMismatch);
+        }
+        if link
+            .assignment_epoch
+            .is_some_and(|epoch| epoch > task.assignment_epoch)
+        {
+            return Err(LinkError::InvalidLink);
+        }
+        let record = ledger
+            .view()
+            .records
+            .into_iter()
+            .find(|record| record.intent.id == link.operation_id)
+            .ok_or(LinkError::MissingOperation)?;
+        if record.intent.actor_id != link.agent_id {
+            return Err(LinkError::AgentMismatch);
+        }
+        self.links.insert(link.operation_id.clone(), link);
+        Ok(())
+    }
+
+    /// A successful platform receipt is evidence of an operation, not proof of
+    /// review, test acceptance or overall task completion.
+    pub fn reconcile(
+        &self,
+        operation_id: &str,
+        tasks: &mut TaskBoard,
+        ledger: &OperationLedger,
+    ) -> Result<(), LinkError> {
+        let link = self
+            .links
+            .get(operation_id)
+            .ok_or(LinkError::MissingOperation)?;
+        let record = ledger
+            .view()
+            .records
+            .into_iter()
+            .find(|record| record.intent.id == operation_id)
+            .ok_or(LinkError::MissingOperation)?;
+        if record.intent.actor_id != link.agent_id {
+            return Err(LinkError::AgentMismatch);
+        }
+        let task = tasks.get(&link.task_id).ok_or(LinkError::MissingTask)?;
+        // A historical receipt remains visible after reassignment, but cannot
+        // change the newly assigned agent's task progress.
+        if task.assigned_agent.as_deref() != Some(&link.agent_id)
+            || link.assignment_epoch != Some(task.assignment_epoch)
+        {
+            return Ok(());
+        }
+        let status = task.status.clone();
+        match record.state {
+            OperationState::Succeeded { evidence_ref, .. } => {
+                tasks
+                    .record_evidence(&link.task_id, evidence_ref)
+                    .map_err(LinkError::Task)?;
+            }
+            OperationState::Failed { evidence_ref, .. } => {
+                if status != TaskStatus::Completed {
+                    tasks
+                        .record_evidence(&link.task_id, evidence_ref)
+                        .map_err(LinkError::Task)?;
+                }
+                if status == TaskStatus::Running {
+                    tasks
+                        .transition(&link.task_id, TaskStatus::Failed, None)
+                        .map_err(LinkError::Task)?;
+                }
+            }
+            OperationState::OutcomeUnknown { .. } if status == TaskStatus::Running => {
+                tasks
+                    .transition(&link.task_id, TaskStatus::Blocked, None)
+                    .map_err(LinkError::Task)?;
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operation::{Action, ExecutionChecks, OperationIntent, Outcome};
+    use crate::task::Task;
+
+    fn setup() -> (TaskBoard, OperationLedger) {
+        let mut tasks = TaskBoard::default();
+        tasks
+            .insert(Task {
+                id: "task_1".into(),
+                project_id: "pc".into(),
+                objective: "Build project".into(),
+                assigned_agent: Some("agent_a".into()),
+                assignment_epoch: 0,
+                status: TaskStatus::Running,
+                evidence_refs: vec![],
+            })
+            .unwrap();
+        let mut ledger = OperationLedger::default();
+        let intent = OperationIntent {
+            id: "op_1".into(),
+            actor_id: "agent_a".into(),
+            conversation_id: "chat_1".into(),
+            context_id: None,
+            connection_id: "local".into(),
+            capability_id: "build".into(),
+            resource_id: "project".into(),
+            action: Action::Write,
+            expected_version: None,
+            intent_digest: "a".repeat(64),
+        };
+        ledger.propose(intent.clone()).unwrap();
+        ledger.approve("op_1", &intent, 1).unwrap();
+        ledger
+            .begin(
+                "op_1",
+                "attempt_1",
+                ExecutionChecks {
+                    authority_revision: 1,
+                    connection_enabled: true,
+                    authenticated: true,
+                    platform_available: true,
+                    resource_allowed: true,
+                },
+            )
+            .unwrap();
+        (tasks, ledger)
+    }
+
+    fn link() -> TaskOperationLink {
+        TaskOperationLink {
+            task_id: "task_1".into(),
+            operation_id: "op_1".into(),
+            agent_id: "agent_a".into(),
+            assignment_epoch: Some(0),
+        }
+    }
+
+    #[test]
+    fn success_records_evidence_without_completing_task() {
+        let (mut tasks, mut ledger) = setup();
+        let mut index = TaskOperationIndex::default();
+        index.attach(link(), &tasks, &ledger).unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Succeeded {
+                    evidence_ref: "build_log_1".into(),
+                },
+            )
+            .unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        let task = tasks.get("task_1").unwrap();
+        assert_eq!(task.status, TaskStatus::Running);
+        assert_eq!(task.evidence_refs, vec!["build_log_1"]);
+    }
+
+    #[test]
+    fn unknown_outcome_blocks_task_without_false_success() {
+        let (mut tasks, mut ledger) = setup();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        ledger
+            .finish("op_1", "attempt_1", Outcome::Unknown)
+            .unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Blocked);
+        assert!(tasks.get("task_1").unwrap().evidence_refs.is_empty());
+    }
+
+    #[test]
+    fn failed_receipt_is_recorded_once_and_marks_running_task_failed() {
+        let (mut tasks, mut ledger) = setup();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Failed {
+                    evidence_ref: "error_log_1".into(),
+                },
+            )
+            .unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Failed);
+        assert_eq!(
+            tasks.get("task_1").unwrap().evidence_refs,
+            vec!["error_log_1"]
+        );
+    }
+
+    #[test]
+    fn restored_completed_task_retains_historical_operation_link() {
+        let (mut tasks, ledger) = setup();
+        tasks
+            .transition("task_1", TaskStatus::Completed, Some("review_a".into()))
+            .unwrap();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        assert_eq!(index.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn reassignment_preserves_historical_link_without_replaying_old_receipt() {
+        let (mut tasks, mut ledger) = setup();
+        let original = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Blocked, None)
+            .unwrap();
+        tasks.assign("task_1", "agent_b".into()).unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Failed {
+                    evidence_ref: "old_failure".into(),
+                },
+            )
+            .unwrap();
+
+        let restored = TaskOperationIndex::restore(original.snapshot(), &tasks, &ledger).unwrap();
+        restored.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        let task = tasks.get("task_1").unwrap();
+        assert_eq!(task.assigned_agent.as_deref(), Some("agent_b"));
+        assert_eq!(task.status, TaskStatus::Blocked);
+        assert!(task.evidence_refs.is_empty());
+        assert_eq!(restored.snapshot(), vec![link()]);
+    }
+
+    #[test]
+    fn restore_rejects_historical_link_with_wrong_operation_actor() {
+        let (mut tasks, ledger) = setup();
+        tasks
+            .transition("task_1", TaskStatus::Blocked, None)
+            .unwrap();
+        tasks.assign("task_1", "agent_b".into()).unwrap();
+        let mut forged = link();
+        forged.agent_id = "agent_c".into();
+        assert!(matches!(
+            TaskOperationIndex::restore(vec![forged], &tasks, &ledger),
+            Err(LinkError::AgentMismatch)
+        ));
+    }
+
+    #[test]
+    fn old_receipt_cannot_affect_new_assignment_to_same_agent() {
+        let (mut tasks, mut ledger) = setup();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Blocked, None)
+            .unwrap();
+        tasks.assign("task_1", "agent_b".into()).unwrap();
+        tasks.assign("task_1", "agent_a".into()).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Running, None)
+            .unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Failed {
+                    evidence_ref: "old_failure".into(),
+                },
+            )
+            .unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        let current = tasks.get("task_1").unwrap();
+        assert_eq!(current.assignment_epoch, 2);
+        assert_eq!(current.status, TaskStatus::Running);
+        assert!(current.evidence_refs.is_empty());
+        assert_eq!(
+            TaskOperationIndex::restore(index.snapshot(), &tasks, &ledger)
+                .unwrap()
+                .snapshot(),
+            vec![link()]
+        );
+    }
+
+    #[test]
+    fn reject_agent_mismatch_and_duplicate_operation_link() {
+        let (tasks, ledger) = setup();
+        let mut index = TaskOperationIndex::default();
+        let mut wrong = link();
+        wrong.agent_id = "agent_b".into();
+        assert_eq!(
+            index.attach(wrong, &tasks, &ledger),
+            Err(LinkError::AgentMismatch)
+        );
+        index.attach(link(), &tasks, &ledger).unwrap();
+        assert_eq!(
+            index.attach(link(), &tasks, &ledger),
+            Err(LinkError::DuplicateOperation)
+        );
+    }
+}
