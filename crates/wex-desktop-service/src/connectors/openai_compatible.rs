@@ -33,9 +33,8 @@ pub fn chat_endpoint(base: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
-/// Encode the text-only desktop transcript without implying tool authority.
-fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
-    use wex_api::{ApiRequest, EncodeOptions, Message, Role};
+fn protocol_messages(request: &PreparedChat) -> Result<Vec<wex_api::Message>> {
+    use wex_api::{Message, Role};
     let messages = request
         .messages
         .iter()
@@ -54,6 +53,12 @@ fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
+    Ok(messages)
+}
+
+fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
+    use wex_api::{ApiRequest, EncodeOptions};
+    let messages = protocol_messages(request)?;
     let api_request = ApiRequest {
         request_id: request.turn_id.clone(),
         connection_id: request.connection_id.clone(),
@@ -98,7 +103,7 @@ pub fn execute_chat_stream_with_progress(
     key: &str,
     mut on_delta: impl FnMut(&str),
 ) -> Result<String> {
-    use wex_api::{ApiRequest, Decoder, EncodeOptions, Event, Message, RequestOptions, Role};
+    use wex_api::{ApiRequest, Decoder, EncodeOptions, Event, RequestOptions};
     if key.is_empty() {
         return Err(ServiceError::new(
             "CREDENTIAL_UNAVAILABLE",
@@ -106,24 +111,7 @@ pub fn execute_chat_stream_with_progress(
         ));
     }
     let endpoint = chat_endpoint(&request.base_url)?;
-    let messages = request
-        .messages
-        .iter()
-        .map(|message| {
-            let role = match message.role.as_str() {
-                "system" => Role::System,
-                "user" => Role::User,
-                "assistant" => Role::Assistant,
-                _ => return Err(ServiceError::new("INVALID_INPUT", "不支持的消息角色")),
-            };
-            Ok(Message {
-                role,
-                content: Some(message.content.clone()),
-                tool_calls: Vec::new(),
-                tool_call_id: None,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let messages = protocol_messages(request)?;
     let api_request = ApiRequest {
         request_id: request.turn_id.clone(),
         connection_id: request.connection_id.clone(),
