@@ -76,4 +76,20 @@ mod tests {
         assert_eq!(error.code, "INVALID_BINDING");
         assert!(app.snapshot().unwrap().execution_receipts.is_empty());
     }
+
+    #[test]
+    fn rejects_blank_invocation_before_any_storage_change() {
+        let mut app = DesktopService::memory().unwrap();
+        let before = app.snapshot().unwrap().revision;
+        let error = app.record_executor_outcome(ExecutorOutcome {
+            task_id: "missing".into(),
+            agent_id: "missing".into(),
+            tool_name: "tool".into(),
+            invocation_id: " ".into(),
+            succeeded: false,
+            summary: "".into(),
+        }).unwrap_err();
+        assert_eq!(error.code, "INVALID_INPUT");
+        assert_eq!(app.snapshot().unwrap().revision, before);
+    }
 }
