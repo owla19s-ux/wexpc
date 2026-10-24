@@ -264,15 +264,18 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效 JSON"))?;
     let message = &value["choices"][0]["message"];
-    if message
-        .get("tool_calls")
-        .and_then(|v| v.as_array())
-        .is_some_and(|v| !v.is_empty())
-    {
-        return Err(ServiceError::new(
-            "TOOLS_NOT_CONNECTED",
-            "本批尚未接入工具执行，未执行服务商提出的工具调用",
-        ));
+    // Never interpret malformed tool-call payloads as a plain-text success.
+    // The dispatcher is not connected, so even a valid tool intent must fail closed.
+    if let Some(calls) = message.get("tool_calls").filter(|v| !v.is_null()) {
+        let calls = calls.as_array().ok_or_else(|| {
+            ServiceError::new("API_RESPONSE_ERROR", "服务商工具调用格式无效")
+        })?;
+        if !calls.is_empty() {
+            return Err(ServiceError::new(
+                "TOOLS_NOT_CONNECTED",
+                "本批尚未接入工具执行，未执行服务商提出的工具调用",
+            ));
+        }
     }
     message["content"]
         .as_str()
