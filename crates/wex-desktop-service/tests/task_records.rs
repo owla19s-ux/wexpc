@@ -759,3 +759,24 @@ fn schema_five_rejects_future_versions_without_mutation() {
     let body: String = db.query_row("SELECT body FROM desktop_state WHERE id=1", [], |r| r.get(0)).unwrap();
     assert!(body.contains(&t.id));
 }
+
+#[test]
+fn legacy_snapshot_defaults_new_agent_and_receipt_collections() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("legacy-collections.sqlite");
+    let app = DesktopService::open(&path).unwrap();
+    drop(app);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let body: String = db.query_row("SELECT body FROM desktop_state WHERE id=1", [], |r| r.get(0)).unwrap();
+    let mut json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    let obj = json.as_object_mut().unwrap();
+    obj.remove("agent_work_reports");
+    obj.remove("execution_receipts");
+    db.execute("UPDATE desktop_state SET body=?1", [json.to_string()]).unwrap();
+    db.pragma_update(None, "user_version", 4).unwrap();
+    drop(db);
+    let app = DesktopService::open(&path).unwrap();
+    let snapshot = app.snapshot().unwrap();
+    assert!(snapshot.agent_work_reports.is_empty());
+    assert!(snapshot.execution_receipts.is_empty());
+}
