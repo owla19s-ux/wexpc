@@ -29,7 +29,7 @@ pub fn read_approved_github_file(
     {
         return Err(ServiceError::new("INVALID_INPUT", "仓库或文件路径无效"));
     }
-    let mut url = Url::parse("https://api.github.com/repos/")
+    let mut url = Url::parse("https://api.github.com/")
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "GitHub API 地址错误"))?;
     url.path_segments_mut().map_err(|_| ServiceError::new("INVALID_INPUT", "路径无效"))?
         .extend(["repos", owner, repo, "contents"].into_iter().chain(path.split('/')));
