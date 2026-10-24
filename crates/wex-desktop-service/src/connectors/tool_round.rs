@@ -95,7 +95,7 @@ pub fn committed_tool_messages(
         tool_call_id: None,
     }];
     for (call, (id, body)) in calls.iter().zip(results) {
-        if &call.id != id || body.len() > 64 * 1024 {
+        if &call.id != id || body.len() > 512 * 1024 {
             return Err(ServiceError::new("INVALID_INPUT", "工具回执 ID 或大小无效"));
         }
         messages.push(Message { role: Role::Tool, content: Some(body.clone()),
@@ -118,6 +118,10 @@ pub fn drive_tool_rounds(
         match execute_model_step(prepared, key, transcript.clone(), tools.clone())? {
             ModelStep::Text(text) => return Ok(text),
             ModelStep::Proposal { assistant_text, calls } => {
+                // Cap the batch BEFORE any potentially irreversible dispatch.
+                if calls.len() > 4 {
+                    return Err(ServiceError::new("TOOL_BATCH_LIMIT", "一次工具回合最多执行四项操作"));
+                }
                 // The Host callback is the *only* path to execution.
                 // Rejection or interrupted approval ends the turn here.
                 let results = settle_approved(&calls)?;
