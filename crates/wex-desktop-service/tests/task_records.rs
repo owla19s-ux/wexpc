@@ -741,3 +741,21 @@ fn schema_four_upgrades_to_five_without_losing_existing_records() {
     let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
     assert_eq!(version, 5);
 }
+
+#[test]
+fn schema_five_rejects_future_versions_without_mutation() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("future.sqlite");
+    let mut app = DesktopService::open(&path).unwrap();
+    let t = task(&mut app, "Future");
+    drop(app);
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.pragma_update(None, "user_version", 6).unwrap();
+    drop(db);
+    assert_eq!(DesktopService::open(&path).err().unwrap().code, "UNSUPPORTED_VERSION");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let version: u32 = db.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    assert_eq!(version, 6);
+    let body: String = db.query_row("SELECT body FROM desktop_state WHERE id=1", [], |r| r.get(0)).unwrap();
+    assert!(body.contains(&t.id));
+}
