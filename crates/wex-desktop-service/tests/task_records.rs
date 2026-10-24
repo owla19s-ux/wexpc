@@ -600,3 +600,51 @@ fn active_and_reviewing_tasks_can_be_cancelled() {
         assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Cancelled);
     }
 }
+
+#[test]
+fn agent_report_requires_assignment_and_preserves_task_state() {
+    let mut app = DesktopService::memory().unwrap();
+    let t = task(&mut app, "Agent report");
+    let c = app.add_connection(NewConnection {
+        name: "API".into(),
+        base_url: "https://api.deepseek.com".into(),
+        models: vec!["deepseek-chat".into()],
+    }, "vault".into()).unwrap();
+    let agent = app.add_agent(NewAgent {
+        project_id: t.project_id.clone(),
+        name: "Worker".into(),
+        role: AgentRole::Worker,
+        connection_id: c.id,
+        model_id: "deepseek-chat".into(),
+    }).unwrap();
+    let rev = app.snapshot().unwrap().revision;
+    let input = NewAgentWorkReport {
+        task_id: t.id.clone(),
+        agent_id: agent.id.clone(),
+        body: "unverified progress".into(),
+        references: vec![],
+    };
+    assert_eq!(app.append_agent_work_report(rev, input).unwrap_err().code,
+        "INVALID_BINDING");
+    assert_eq!(app.snapshot().unwrap().revision, rev);
+    app.update_task(rev, &t.id, NewTask {
+        project_id: t.project_id.clone(),
+        title: t.title.clone(),
+        goal: t.goal.clone(),
+        scope: t.scope.clone(),
+        acceptance: t.acceptance.clone(),
+        agent_ids: vec![agent.id.clone()],
+    }).unwrap();
+    let rev = app.snapshot().unwrap().revision;
+    let report = app.append_agent_work_report(rev, NewAgentWorkReport {
+        task_id: t.id.clone(),
+        agent_id: agent.id.clone(),
+        body: "unverified progress".into(),
+        references: vec!["commit:unverified".into()],
+    }).unwrap();
+    assert_eq!(report.recorded_revision, rev + 1);
+    let snapshot = app.snapshot().unwrap();
+    assert_eq!(snapshot.agent_work_reports.len(), 1);
+    assert_eq!(snapshot.tasks[0].status, TaskStatus::Draft);
+    assert_eq!(app.member_brief(&agent.id).unwrap().agent_work_reports.len(), 1);
+}
