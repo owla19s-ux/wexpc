@@ -35,7 +35,7 @@ pub fn validate_linked_dispatch(
     ledger: &OperationLedger,
     operation_id: &str,
 ) -> Result<(), AgentDispatchError> {
-    TaskStore::validate_links(&task_view, &ledger)?;
+    TaskStore::validate_links(task_view, ledger)?;
     let link = task_view
         .links
         .iter()
@@ -46,7 +46,9 @@ pub fn validate_linked_dispatch(
         .iter()
         .find(|task| task.id == link.task_id)
         .ok_or(AgentDispatchError::MissingLink)?;
-    if task.status != TaskStatus::Running || task.assigned_agent.as_deref() != Some(link.agent_id.as_str()) {
+    if task.status != TaskStatus::Running
+        || task.assigned_agent.as_deref() != Some(link.agent_id.as_str())
+    {
         return Err(AgentDispatchError::TaskNotRunning);
     }
     let operation = ledger
@@ -165,6 +167,40 @@ mod tests {
         assert_eq!(
             validate_linked_dispatch(&view, &ledger, "op_1"),
             Err(AgentDispatchError::TaskNotRunning)
+        );
+    }
+
+    #[test]
+    fn wrong_agent_cannot_use_another_agents_link() {
+        let (mut view, mut ledger, intent) = fixture(TaskStatus::Running);
+        ledger.approve("op_1", &intent, 1).unwrap();
+        view.links[0].agent_id = "agent_2".into();
+        assert!(matches!(
+            validate_linked_dispatch(&view, &ledger, "op_1"),
+            Err(AgentDispatchError::Task(TaskStoreError::Link(_)))
+        ));
+    }
+
+    #[test]
+    fn already_dispatched_operation_cannot_be_dispatched_again() {
+        let (view, mut ledger, intent) = fixture(TaskStatus::Running);
+        ledger.approve("op_1", &intent, 1).unwrap();
+        ledger
+            .begin(
+                "op_1",
+                "attempt_1",
+                ExecutionChecks {
+                    authority_revision: 1,
+                    connection_enabled: true,
+                    authenticated: true,
+                    platform_available: true,
+                    resource_allowed: true,
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            validate_linked_dispatch(&view, &ledger, "op_1"),
+            Err(AgentDispatchError::OperationNotApproved)
         );
     }
 
