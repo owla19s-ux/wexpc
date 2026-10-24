@@ -63,3 +63,6 @@ pub fn may_overlap(left: &[String], right: &[String]) -> Result<bool, ScopeError
     let right: Vec<_> = right.iter().map(|s| ScopePath::parse(s)).collect::<Result<_, _>>()?;
     Ok(left.iter().any(|a| right.iter().any(|b| a.overlaps(b))))
 }
+
+#[cfg(test)]
+mod tests;
