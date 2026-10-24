@@ -6,6 +6,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use wex_core::operation::{Action, ExecutionChecks, OperationIntent, OperationLedger, Outcome};
 use wex_core::task::{Task, TaskStatus};
 use wex_core::task_operation::TaskOperationLink;
+use wex_workspace_store::operations::{OperationChange, OperationStore};
 use wex_workspace_store::tasks::{TaskChange, TaskStore, TaskStoreError};
 use wex_workspace_store::OrganizationError;
 
@@ -43,8 +44,8 @@ fn task() -> Task {
         evidence_refs: vec![],
     }
 }
-fn ledger() -> OperationLedger {
-    let mut ledger = OperationLedger::default();
+fn persisted_ledger(root: &Root) -> OperationLedger {
+    let store = OperationStore::open(&root.0).unwrap();
     let intent = OperationIntent {
         id: "op_1".into(),
         actor_id: "agent_1".into(),
@@ -57,10 +58,22 @@ fn ledger() -> OperationLedger {
         expected_version: None,
         intent_digest: "a".repeat(64),
     };
-    ledger.propose(intent.clone()).unwrap();
-    ledger.approve("op_1", &intent, 1).unwrap();
-    ledger
+    store
+        .apply(1, OperationChange::Propose(intent.clone()))
+        .unwrap();
+    store
+        .apply(
+            2,
+            OperationChange::Approve {
+                id: "op_1".into(),
+                exact_intent: intent,
+                authority_revision: 1,
+            },
+        )
+        .unwrap();
+    store
         .begin(
+            3,
             "op_1",
             "attempt_1",
             ExecutionChecks {
@@ -72,16 +85,26 @@ fn ledger() -> OperationLedger {
             },
         )
         .unwrap();
-    ledger
-        .finish(
-            "op_1",
-            "attempt_1",
-            Outcome::Succeeded {
-                evidence_ref: "receipt_1".into(),
+    store
+        .apply(
+            4,
+            OperationChange::Finish {
+                id: "op_1".into(),
+                attempt_id: "attempt_1".into(),
+                outcome: Outcome::Succeeded {
+                    evidence_ref: "receipt_1".into(),
+                },
             },
         )
         .unwrap();
-    ledger
+    OperationLedger::from_view(
+        OperationStore::open(&root.0)
+            .unwrap()
+            .load()
+            .unwrap()
+            .ledger,
+    )
+    .unwrap()
 }
 
 #[test]
@@ -169,7 +192,7 @@ fn malformed_or_future_snapshot_fails_closed_without_reset() {
 fn cross_store_failure_keeps_operation_receipt_recoverable_without_false_completion() {
     let root = Root::new();
     let store = TaskStore::open(&root.0).unwrap();
-    let completed_operation = ledger();
+    let completed_operation = persisted_ledger(&root);
     store
         .replace(
             0,
