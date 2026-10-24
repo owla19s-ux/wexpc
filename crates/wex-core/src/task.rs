@@ -54,6 +54,9 @@ impl TaskBoard {
     pub fn restore(tasks: Vec<Task>) -> Result<Self, TaskError> {
         let mut board = Self::default();
         for mut task in tasks {
+            if !valid(&task) {
+                return Err(TaskError::InvalidInput);
+            }
             // An interrupted execution is not proof of success or failure.
             if matches!(task.status, TaskStatus::Running) {
                 task.status = TaskStatus::Blocked;
@@ -206,6 +209,13 @@ mod tests {
         assert_eq!(restored.get("a").unwrap().evidence_refs, vec!["commit_a"]);
         assert_eq!(restored.get("b").unwrap().status, TaskStatus::Blocked);
     }
+    #[test]
+    fn restore_rejects_unassigned_running_task_before_recovery() {
+        let mut t = task("a");
+        t.status = TaskStatus::Running;
+        assert!(matches!(TaskBoard::restore(vec![t]), Err(TaskError::InvalidInput)));
+    }
+
     #[test]
     fn duplicate_evidence_does_not_accumulate() {
         let mut board = TaskBoard::default();
