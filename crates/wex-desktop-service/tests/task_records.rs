@@ -171,10 +171,10 @@ fn schema_three_upgrade_preserves_exact_payload_and_future_version_is_refused() 
         .unwrap();
     assert_eq!(stored, raw);
     assert_eq!(
-        version, 4,
+        version, 5,
         "older binaries must refuse and cannot erase task records"
     );
-    db.pragma_update(None, "user_version", 5).unwrap();
+    db.pragma_update(None, "user_version", 6).unwrap();
     drop(db);
     assert_eq!(
         DesktopService::open(&path).err().unwrap().code,
