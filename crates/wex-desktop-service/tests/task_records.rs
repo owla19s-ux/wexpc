@@ -434,3 +434,42 @@ fn duplicate_agents_cannot_be_assigned_to_one_task() {
     assert_eq!(snapshot.revision, revision);
     assert_eq!(snapshot.tasks[0].title, "任务");
 }
+
+#[test]
+fn task_lifecycle_enforces_order_and_revisions() {
+    let mut app = DesktopService::memory().unwrap();
+    let task = task(&mut app, "Lifecycle");
+    let start = app.snapshot().unwrap().revision;
+    assert_eq!(app.transition_task(start, &task.id, TaskStatus::Completed).unwrap_err().code,
+        "INVALID_TASK_TRANSITION");
+    assert_eq!(app.snapshot().unwrap().revision, start);
+    app.transition_task(start, &task.id, TaskStatus::Ready).unwrap();
+    assert_eq!(app.transition_task(start, &task.id, TaskStatus::InProgress).unwrap_err().code,
+        "REVISION_CONFLICT");
+    let advance = |app: &mut DesktopService, next| {
+        let revision = app.snapshot().unwrap().revision;
+        app.transition_task(revision, &task.id, next).unwrap();
+    };
+    advance(&mut app, TaskStatus::InProgress);
+    advance(&mut app, TaskStatus::Blocked);
+    advance(&mut app, TaskStatus::InProgress);
+    advance(&mut app, TaskStatus::InReview);
+    advance(&mut app, TaskStatus::Completed);
+    let done = app.snapshot().unwrap();
+    assert_eq!(done.tasks[0].status, TaskStatus::Completed);
+    assert_eq!(app.transition_task(done.revision, &task.id, TaskStatus::InProgress)
+        .unwrap_err().code, "INVALID_TASK_TRANSITION");
+    assert_eq!(app.snapshot().unwrap().revision, done.revision);
+}
+
+#[test]
+fn cancelled_task_cannot_be_restarted_implicitly() {
+    let mut app = DesktopService::memory().unwrap();
+    let task = task(&mut app, "Cancelled");
+    let revision = app.snapshot().unwrap().revision;
+    app.transition_task(revision, &task.id, TaskStatus::Cancelled).unwrap();
+    let current = app.snapshot().unwrap().revision;
+    assert_eq!(app.transition_task(current, &task.id, TaskStatus::Ready).unwrap_err().code,
+        "INVALID_TASK_TRANSITION");
+    assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Cancelled);
+}
