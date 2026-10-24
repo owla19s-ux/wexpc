@@ -20,6 +20,9 @@ impl DesktopService {
         text(&outcome.tool_name)?;
         text(&outcome.invocation_id)?;
         text(&outcome.summary)?;
+        if outcome.summary.trim().is_empty() {
+            return Err(invalid("执行结果摘要不能为空"));
+        }
         self.mutate(|snapshot| {
             let task = snapshot.tasks.iter().find(|t| t.id == outcome.task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
