@@ -69,20 +69,113 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     }
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效 JSON"))?;
-    let message = &value["choices"][0]["message"];
-    if message
-        .get("tool_calls")
-        .and_then(|v| v.as_array())
-        .is_some_and(|v| !v.is_empty())
-    {
-        return Err(ServiceError::new(
-            "TOOLS_NOT_CONNECTED",
-            "本批尚未接入工具执行，未执行服务商提出的工具调用",
-        ));
+    parse_chat_response(&value)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposedToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatResponse {
+    Text(String),
+    ToolCalls(Vec<ProposedToolCall>),
+}
+
+pub fn decode_chat_response(value: &serde_json::Value) -> Result<ChatResponse> {
+    let choice = value.get("choices").and_then(|v| v.as_array()).and_then(|v| v.first())
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "缺少回复候选"))?;
+    let message = choice.get("message")
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "缺少回复消息"))?;
+    if let Some(calls) = message.get("tool_calls") {
+        let calls = calls.as_array().filter(|v| !v.is_empty())
+            .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "工具调用结构无效"))?;
+        let mut result = Vec::with_capacity(calls.len());
+        for call in calls {
+            let id = call.get("id").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty());
+            let kind = call.get("type").and_then(|v| v.as_str());
+            let function = call.get("function");
+            let name = function.and_then(|f| f.get("name")).and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty());
+            let args = function.and_then(|f| f.get("arguments")).and_then(|v| v.as_str());
+            if kind != Some("function") || id.is_none() || name.is_none() || args.is_none() {
+                return Err(ServiceError::new("API_RESPONSE_ERROR", "工具调用字段无效"));
+            }
+            result.push(ProposedToolCall {
+                id: id.unwrap().into(),
+                name: name.unwrap().into(),
+                arguments_json: args.unwrap().into(),
+            });
+        }
+        return Ok(ChatResponse::ToolCalls(result));
     }
-    message["content"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))
+    let content = message.get("content").and_then(|v| v.as_str()).filter(|v| !v.is_empty())
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))?;
+    Ok(ChatResponse::Text(content.into()))
+}
+
+pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
+    match decode_chat_response(value)? {
+        ChatResponse::Text(content) => Ok(content),
+        ChatResponse::ToolCalls(_) => Err(ServiceError::new(
+            "TOOLS_NOT_CONNECTED",
+            "工具调用已解析，但执行器尚未连接；没有执行任何工具",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    #[test]
+    fn parses_ordinary_compatible_chat_reply() {
+        let value = serde_json::json!({"choices":[{"message":{"role":"assistant","content":"hello"}}]});
+        assert_eq!(parse_chat_response(&value).unwrap(), "hello");
+    }
+
+    #[test]
+    fn tool_calls_are_not_misrepresented_as_text() {
+        let value = serde_json::json!({"choices":[{"message":{
+            "role":"assistant",
+            "content":"I will run the tool",
+            "tool_calls":[{"id":"call_1","type":"function","function":{"name":"example","arguments":"{}"}}]
+        }}]});
+        assert_eq!(parse_chat_response(&value).unwrap_err().code, "TOOLS_NOT_CONNECTED");
+    }
+
+    #[test]
+    fn structured_tool_call_preserves_provider_arguments() {
+        let value = serde_json::json!({"choices":[{"message":{
+            "tool_calls":[{"id":"call_1","type":"function",
+                "function":{"name":"github_read","arguments":"{\\"path\\":\\"README.md\\"}"}}]
+        }}]});
+        assert_eq!(decode_chat_response(&value).unwrap(),
+            ChatResponse::ToolCalls(vec![ProposedToolCall {
+                id: "call_1".into(),
+                name: "github_read".into(),
+                arguments_json: r#"{"path":"README.md"}"#.into(),
+            }]));
+    }
+
+    #[test]
+    fn malformed_tool_calls_are_rejected_before_dispatch() {
+        for value in [
+            serde_json::json!({"choices":[{"message":{"tool_calls":[]}}]}),
+            serde_json::json!({"choices":[{"message":{"tool_calls":[{"id":"a","type":"function","function":{"name":"read"}}]}}]}),
+            serde_json::json!({"choices":[{"message":{"tool_calls":[{"id":"","type":"function","function":{"name":"read","arguments":"{}"}}]}}]})
+        ] {
+            assert_eq!(decode_chat_response(&value).unwrap_err().code, "API_RESPONSE_ERROR");
+        }
+    }
+
+    #[test]
+    fn malformed_reply_does_not_succeed() {
+        for value in [serde_json::json!({}), serde_json::json!({"choices":[]}),
+            serde_json::json!({"choices":[{"message":{"content":null}}]})] {
+            assert_eq!(parse_chat_response(&value).unwrap_err().code, "API_RESPONSE_ERROR");
+        }
+    }
 }

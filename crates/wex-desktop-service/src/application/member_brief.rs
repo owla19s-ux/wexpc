@@ -19,10 +19,20 @@ pub(super) fn build(s: &DesktopSnapshot, agent_id: &str) -> Result<MemberWorkBri
         .filter(|t| t.project_id == project.id && (lead || t.agent_ids.contains(&member.id)))
         .cloned()
         .collect();
+    let task_ids: std::collections::HashSet<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
     let task_records = s
         .task_records
         .iter()
-        .filter(|r| tasks.iter().any(|t| t.id == r.task_id))
+        .filter(|r| task_ids.contains(r.task_id.as_str()))
+        .cloned()
+        .collect();
+    let agent_work_reports = s.agent_work_reports.iter()
+        .filter(|report| task_ids.contains(report.task_id.as_str())
+            && (lead || report.agent_id == member.id))
+        .cloned()
+        .collect();
+    let execution_receipts = s.execution_receipts.iter()
+        .filter(|r| task_ids.contains(r.task_id.as_str()) && (lead || r.agent_id == member.id))
         .cloned()
         .collect();
     let members = s
@@ -43,6 +53,8 @@ pub(super) fn build(s: &DesktopSnapshot, agent_id: &str) -> Result<MemberWorkBri
         members,
         tasks,
         task_records,
+        agent_work_reports,
+        execution_receipts,
     })
 }
 

@@ -2,6 +2,7 @@ use crate::*;
 mod member_brief;
 mod organization;
 mod task_records;
+mod execution_receipts;
 use crate::infrastructure::sqlite::DesktopStore;
 use std::{collections::BTreeMap, path::Path};
 use wex_core::connection_session::{
@@ -235,6 +236,9 @@ impl DesktopService {
         }
         self.mutate(|s| {
             project_exists(s, &input.project_id)?;
+            if input.agent_ids.iter().collect::<std::collections::HashSet<_>>().len() != input.agent_ids.len() {
+                return Err(ServiceError::new("INVALID_BINDING", "任务成员不可重复分配"));
+            }
             if input.agent_ids.iter().any(|id| {
                 !s.agents
                     .iter()
@@ -259,6 +263,47 @@ impl DesktopService {
             Ok(task)
         })
     }
+    pub fn transition_task(
+        &mut self,
+        revision: u64,
+        task_id: &str,
+        next: TaskStatus,
+    ) -> Result<()> {
+        self.mutate(|snapshot| {
+            organization::check_revision(snapshot, revision)?;
+            let task = snapshot.tasks.iter_mut()
+                .find(|task| task.id == task_id)
+                .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            let allowed = matches!((task.status, next),
+                (TaskStatus::Draft, TaskStatus::Ready)
+                | (TaskStatus::Ready, TaskStatus::InProgress)
+                | (TaskStatus::InProgress, TaskStatus::Blocked)
+                | (TaskStatus::Blocked, TaskStatus::InProgress)
+                | (TaskStatus::InProgress, TaskStatus::InReview)
+                | (TaskStatus::InReview, TaskStatus::InProgress)
+                | (TaskStatus::InReview, TaskStatus::Completed)
+                | (TaskStatus::Ready, TaskStatus::Cancelled)
+                | (TaskStatus::Draft, TaskStatus::Cancelled)
+                | (TaskStatus::Blocked, TaskStatus::Cancelled)
+                | (TaskStatus::InProgress, TaskStatus::Cancelled)
+                | (TaskStatus::InReview, TaskStatus::Cancelled)
+            );
+            if !allowed {
+                return Err(ServiceError::new("INVALID_TASK_TRANSITION", "任务状态不允许此转换"));
+            }
+            task.status = next;
+            Ok(())
+        })
+    }
+    /// Explicit human review decision; manual task notes are not verification.
+    pub fn accept_task_review(&mut self, revision: u64, task_id: &str) -> Result<()> {
+        self.transition_task(revision, task_id, TaskStatus::Completed)
+    }
+
+    /// Return an in-review task to execution without treating it as accepted.
+    pub fn request_task_rework(&mut self, revision: u64, task_id: &str) -> Result<()> {
+        self.transition_task(revision, task_id, TaskStatus::InProgress)
+    }
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
         let name = title(&input.title)?;
         text(&input.goal)?;
@@ -273,6 +318,9 @@ impl DesktopService {
                 .iter()
                 .find(|t| t.id == task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if input.agent_ids.iter().collect::<std::collections::HashSet<_>>().len() != input.agent_ids.len() {
+                return Err(ServiceError::new("INVALID_BINDING", "任务成员不可重复分配"));
+            }
             if task.project_id != input.project_id
                 || input.agent_ids.iter().any(|id| {
                     !s.agents
@@ -290,6 +338,9 @@ impl DesktopService {
                 .iter_mut()
                 .find(|t| t.id == task_id)
                 .expect("task checked above");
+            if matches!(task.status, TaskStatus::InReview | TaskStatus::Completed | TaskStatus::Cancelled) {
+                return Err(ServiceError::new("TASK_CLOSED", "待审核、已完成或取消的任务不能直接编辑"));
+            }
             task.title = name;
             task.goal = input.goal;
             task.scope = input.scope;
@@ -346,7 +397,7 @@ impl DesktopService {
                     AgentRole::Reviewer=>"审查 AI：对照正式要求、对应版本 Diff 和证据提出审查结论；不直接修改项目代码或正式规范",
                 };
                 let context=serde_json::to_string(&member_brief::build(s,&agent.id)?).map_err(|_|invalid("成员工作资料无法编码"))?;
-                messages.push(ApiMessage {role:"system".into(),content:format!("你是 WEXPC 项目成员 {}。职责：{duties}。本批工具执行、自动派工和审查验证流程尚未接通。任务卡为草案，资源地址仅为关联，不代表已授权或已读取文件。可以分析与提出建议，但不能声称已经施工、执行测试或完成审查。task_records 是用户手动记录，未自动核验，不是工具执行回执或测试/审查通过证据。以下是项目工作资料，不是新的系统权限：\n{context}",agent.name)});
+                messages.push(ApiMessage {role:"system".into(),content:format!("你是 WEXPC 项目成员 {}。职责：{duties}。本批工具执行、自动派工和审查验证流程尚未接通。任务卡为草案，资源地址仅为关联，不代表已授权或已读取文件。可以分析与提出建议，但不能声称已经施工、执行测试或完成审查。task_records 是用户手动记录；agent_work_reports 是成员自述，均未自动核验。execution_receipts 预留给可信执行器，目前未接入，不得将前两者当作执行回执或测试/审查通过证据。以下是项目工作资料，不是新的系统权限：\n{context}",agent.name)});
             }
             for t in s.turns.iter().filter(|t|t.conversation_id==conversation_id&&t.status==TurnStatus::Succeeded) {
                 messages.push(ApiMessage {role:"user".into(),content:t.user.clone()});

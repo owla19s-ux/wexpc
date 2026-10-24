@@ -39,3 +39,48 @@ pub struct TaskRecord {
     /// Durable append order, assigned inside the same store transaction.
     pub recorded_revision: u64,
 }
+
+/// A manually supplied review note. It is not a trusted tool receipt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewReviewNote {
+    pub task_id: String,
+    pub body: String,
+    pub references: Vec<String>,
+}
+
+/// Self-reported Agent progress is distinct from user notes and trusted tool receipts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentWorkReport {
+    pub id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub body: String,
+    pub references: Vec<String>,
+    pub task_snapshot: Task,
+    pub recorded_revision: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewAgentWorkReport {
+    pub task_id: String,
+    pub agent_id: String,
+    pub body: String,
+    pub references: Vec<String>,
+}
+
+/// Receipt issued by a trusted internal executor after a tool invocation.
+/// No public NewExecutionReceipt input is exposed to model/user content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReceipt {
+    pub id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub tool_name: String,
+    pub invocation_id: String,
+    pub succeeded: bool,
+    pub summary: String,
+    pub task_snapshot: Task,
+    pub recorded_revision: u64,
+}
