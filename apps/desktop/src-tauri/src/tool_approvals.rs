@@ -227,16 +227,16 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
 fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> Result<String> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "GitHub 工具参数无效"))?;
-    let field = |name: &str| -> Result<&str> {
-        args.get(name).and_then(|v| v.as_str())
+    fn field<'a>(value: &'a serde_json::Value, name: &str) -> Result<&'a str> {
+        value.get(name).and_then(|v| v.as_str())
             .ok_or_else(|| ServiceError::new("INVALID_INPUT", "GitHub 缺少必要参数"))
-    };
-    let owner = field("owner")?;
-    let repo = field("repo")?;
-    let path = field("path")?;
+    }
+    let owner = field(&args, "owner")?;
+    let repo = field(&args, "repo")?;
+    let path = field(&args, "path")?;
     let write = call.name == "github_write_file";
-    let sha = if write { field("sha")? } else { "" };
-    let content = if write { field("content")? } else { "" };
+    let sha = if write { field(&args, "sha")? } else { "" };
+    let content = if write { field(&args, "content")? } else { "" };
     if owner.is_empty() || repo.is_empty() || path.is_empty()
         || owner.len() > 255 || repo.len() > 255 || path.len() > 4096
         || owner.chars().any(char::is_control)
