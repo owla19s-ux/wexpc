@@ -133,6 +133,95 @@ fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<S
 }
 
 
+/// The user chooses the target repository each time. No AI-supplied cwd,
+/// shell expression or arbitrary argument enters the subprocess.
+fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> Result<String> {
+    let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "命令参数无效"))?;
+    if !args.as_object().is_some_and(|o| o.is_empty()) {
+        return Err(ServiceError::new("INVALID_INPUT", "当前命令不接受模型提供的参数"));
+    }
+    let (capability, action, command) = match call.name.as_str() {
+        "git_status" => ("git_status", Action::Read, "git --no-optional-locks status --porcelain=v1 -uno"),
+        "cargo_test" => ("terminal_cargo_test", Action::Write, "cargo test --workspace --locked"),
+        "cargo_fmt_check" => ("terminal_cargo_fmt_check", Action::Write, "cargo fmt --all -- --check"),
+        _ => return Err(ServiceError::new("TOOL_UNSUPPORTED", "不支持的命令")),
+    };
+    let selected = app.dialog().file()
+        .set_title(format!("WEXPC 请求执行 {command}：请选择仓库目录"))
+        .blocking_pick_folder()
+        .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "未选择授权仓库目录"))?;
+    let root = selected.into_path()
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "仓库位置不可用"))?;
+    let root = fs::canonicalize(root)
+        .map_err(|_| ServiceError::new("RESOURCE_UNAVAILABLE", "无法验证仓库目录"))?;
+    let internal = app.path().app_data_dir()
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "应用数据目录不可用"))?;
+    if root.starts_with(&internal) {
+        return Err(ServiceError::new("PERMISSION_DENIED", "禁止执行于 WEXPC 内部数据目录"));
+    }
+    let cwd = root.to_str().ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码不支持"))?;
+    let extra = if action == Action::Write {
+        "注意：Cargo 构建可能执行仓库自身的构建脚本，仅在信任此代码时批准。"
+    } else {
+        "仅查询 Git 状态，不执行提交或推送。"
+    };
+    let approved = app.dialog()
+        .message(format!("请求执行：{command}\n工作目录：{cwd}\n{extra}"))
+        .title("WEXPC 终端操作逐次审批")
+        .buttons(MessageDialogButtons::OkCancel)
+        .blocking_show();
+    if !approved {
+        return Err(ServiceError::new("PERMISSION_DENIED", "用户未批准命令"));
+    }
+    let resource_id = digest_arguments("local_repo", "selected", &[cwd.as_bytes()]);
+    let operation_id = format!("op_{}", uuid::Uuid::new_v4().simple());
+    let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
+    let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
+    let intent = OperationIntent {
+        id: operation_id.clone(), actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(), context_id: None,
+        connection_id: "terminal".into(), capability_id: capability.into(),
+        resource_id: resource_id.clone(), action, expected_version: None,
+        intent_digest: digest_arguments(capability, &resource_id, &[cwd.as_bytes()]),
+    };
+    let mut ledger = OperationLedger::default();
+    ledger.propose(intent.clone()).map_err(|_| core_failure())?;
+    ledger.approve(&operation_id, &intent, 1).map_err(|_| core_failure())?;
+    let dispatch = ledger.begin(&operation_id, &attempt_id, ExecutionChecks {
+        authority_revision: 1, connection_enabled: true, authenticated: true,
+        platform_available: true, resource_allowed: true,
+    }).map_err(|_| core_failure())?;
+    journal(app, &attempt_id, &operation_id, "in_flight", Some(&intent.intent_digest))?;
+    let outcome = if call.name == "git_status" {
+        wex_desktop_service::approved_git_status(&dispatch, &resource_id, &root)
+    } else {
+        let task = if call.name == "cargo_test" {
+            wex_desktop_service::TerminalTask::CargoTest
+        } else {
+            wex_desktop_service::TerminalTask::CargoFmtCheck
+        };
+        wex_desktop_service::execute_approved_terminal(&dispatch, &resource_id, &root, task)
+    };
+    let status = match &outcome {
+        Ok(_) => "succeeded",
+        Err(e) if e.code == "OUTCOME_UNKNOWN" || e.code == "TOOL_TIMEOUT" => "unknown",
+        Err(_) => "failed",
+    };
+    let evidence_hash = outcome.as_ref().ok().map(|value|
+        digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()])
+    );
+    journal(app, &attempt_id, &operation_id, status, evidence_hash.as_deref())?;
+    let core_outcome = match status {
+        "succeeded" => Outcome::Succeeded { evidence_ref: evidence_id.clone() },
+        "unknown" => Outcome::Unknown,
+        _ => Outcome::Failed { evidence_ref: evidence_id.clone() },
+    };
+    ledger.finish(&operation_id, &attempt_id, core_outcome).map_err(|_| core_failure())?;
+    let result = outcome?;
+    Ok(serde_json::json!({"evidence_ref":evidence_id,"output":result}).to_string())
+}
+
 /// Approval always displays the exact repo/path and, for writes, every byte
 /// of the bounded text update. The model never sees the GitHub PAT.
 fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> Result<String> {
