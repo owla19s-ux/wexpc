@@ -45,6 +45,8 @@ struct TaskWire {
     project_id: String,
     objective: String,
     assigned_agent: Option<String>,
+    #[serde(default)]
+    assignment_epoch: u64,
     status: Status,
     evidence_refs: Vec<String>,
 }
@@ -55,6 +57,7 @@ impl From<Task> for TaskWire {
             project_id: t.project_id,
             objective: t.objective,
             assigned_agent: t.assigned_agent,
+            assignment_epoch: t.assignment_epoch,
             status: match t.status {
                 TaskStatus::Queued => Status::Queued,
                 TaskStatus::Running => Status::Running,
@@ -73,6 +76,7 @@ impl From<TaskWire> for Task {
             project_id: t.project_id,
             objective: t.objective,
             assigned_agent: t.assigned_agent,
+            assignment_epoch: t.assignment_epoch,
             status: match t.status {
                 Status::Queued => TaskStatus::Queued,
                 Status::Running => TaskStatus::Running,
@@ -90,6 +94,8 @@ struct LinkWire {
     task_id: String,
     operation_id: String,
     agent_id: String,
+    #[serde(default)]
+    assignment_epoch: Option<u64>,
 }
 impl From<TaskOperationLink> for LinkWire {
     fn from(l: TaskOperationLink) -> Self {
@@ -97,6 +103,7 @@ impl From<TaskOperationLink> for LinkWire {
             task_id: l.task_id,
             operation_id: l.operation_id,
             agent_id: l.agent_id,
+            assignment_epoch: l.assignment_epoch,
         }
     }
 }
@@ -106,6 +113,7 @@ impl From<LinkWire> for TaskOperationLink {
             task_id: l.task_id,
             operation_id: l.operation_id,
             agent_id: l.agent_id,
+            assignment_epoch: l.assignment_epoch,
         }
     }
 }
@@ -528,6 +536,7 @@ mod tests {
             project_id: "project_a".into(),
             objective: "Build and test".into(),
             assigned_agent: Some("agent_a".into()),
+            assignment_epoch: 0,
             status,
             evidence_refs: vec!["log_a".into()],
         }
