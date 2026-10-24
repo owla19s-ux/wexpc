@@ -85,6 +85,37 @@ pub enum ChatResponse {
     ToolCalls(Vec<ProposedToolCall>),
 }
 
+pub fn decode_chat_response(value: &serde_json::Value) -> Result<ChatResponse> {
+    let choice = value.get("choices").and_then(|v| v.as_array()).and_then(|v| v.first())
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "缺少回复候选"))?;
+    let message = choice.get("message")
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "缺少回复消息"))?;
+    if let Some(calls) = message.get("tool_calls") {
+        let calls = calls.as_array().filter(|v| !v.is_empty())
+            .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "工具调用结构无效"))?;
+        let mut result = Vec::with_capacity(calls.len());
+        for call in calls {
+            let id = call.get("id").and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty());
+            let kind = call.get("type").and_then(|v| v.as_str());
+            let function = call.get("function");
+            let name = function.and_then(|f| f.get("name")).and_then(|v| v.as_str()).filter(|v| !v.trim().is_empty());
+            let args = function.and_then(|f| f.get("arguments")).and_then(|v| v.as_str());
+            if kind != Some("function") || id.is_none() || name.is_none() || args.is_none() {
+                return Err(ServiceError::new("API_RESPONSE_ERROR", "工具调用字段无效"));
+            }
+            result.push(ProposedToolCall {
+                id: id.unwrap().into(),
+                name: name.unwrap().into(),
+                arguments_json: args.unwrap().into(),
+            });
+        }
+        return Ok(ChatResponse::ToolCalls(result));
+    }
+    let content = message.get("content").and_then(|v| v.as_str()).filter(|v| !v.is_empty())
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))?;
+    Ok(ChatResponse::Text(content.into()))
+}
+
 pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
     let choice = value.get("choices").and_then(|v| v.as_array()).and_then(|v| v.first())
         .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效候选回复"))?;
