@@ -115,3 +115,16 @@ fn redundant_separators_fail_closed_but_drive_root_is_valid() {
     assert!(ScopePath::parse("C:/repo//src").is_err());
     assert!(ScopePath::parse("C:/repo/").is_err());
 }
+
+#[test]
+fn reservation_release_is_scoped_to_the_correct_handle() {
+    let registry = super::ScopeRegistry::default();
+    let first = registry.reserve(&["C:/repo/src".into()]).unwrap();
+    let second = registry.reserve(&["C:/repo/tests".into()]).unwrap();
+    drop(first);
+    assert_eq!(registry.active_count(), Ok(1));
+    assert!(matches!(registry.reserve(&["C:/repo/tests/a.rs".into()]), Err(super::ReservationError::Conflict)));
+    let _third = registry.reserve(&["C:/repo/src/a.rs".into()]).unwrap();
+    drop(second);
+    assert_eq!(registry.active_count(), Ok(1));
+}
