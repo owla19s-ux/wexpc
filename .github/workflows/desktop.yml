@@ -1,11 +1,13 @@
+# Temporary pause: no automatic Actions through 2026-10-31 (Asia/Shanghai).
+# Do not dispatch manually before 2026-11-01. Restore triggers only after review.
 name: desktop (Windows check)
 
 on:
-  pull_request:
-    paths:
-      - 'apps/desktop/**'
-      - 'crates/wex-desktop-service/**'
-      - '.github/workflows/desktop.yml'
+#   pull_request:
+#     paths:
+#       - 'apps/desktop/**'
+#       - 'crates/wex-desktop-service/**'
+#       - '.github/workflows/desktop.yml'
   workflow_dispatch:
 
 permissions:

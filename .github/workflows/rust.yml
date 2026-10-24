@@ -1,15 +1,17 @@
+# Temporary pause: no automatic Actions through 2026-10-31 (Asia/Shanghai).
+# Do not dispatch manually before 2026-11-01. Restore triggers only after review.
 name: rust
 
 on:
-  pull_request:
-    paths:
-      - 'crates/**'
-      - 'bridge/**'
-      - 'apps/desktop/**'
-      - 'tests/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/workflows/rust.yml'
+#   pull_request:
+#     paths:
+#       - 'crates/**'
+#       - 'bridge/**'
+#       - 'apps/desktop/**'
+#       - 'tests/**'
+#       - 'Cargo.toml'
+#       - 'Cargo.lock'
+#       - '.github/workflows/rust.yml'
   workflow_dispatch:
 
 permissions:

@@ -1,5 +1,7 @@
 # WEXPC 桌面首批
 
+临时验证安排：2026-10-24至2026-10-31（北京时间）暂停Actions，提交带 `[skip ci]`。本地能测即测，手机验证由大肥鱼报告实际结果；本地不能测的按源码提交标为NOT_RUN，11月1日以后集中评估云端验证。此前Windows通过记录只适用于各自源码，不替代暂停期间的新改动。详见[工程规则](../../docs/DEVELOPMENT-WORKFLOW.md)。
+
 ## 组织基础批
 
 正式服务已按 `domain` / `application` / `infrastructure` / `connectors` 分责，保持 React → Tauri → Rust 的同一调用路径。Space 与上下文入口支持创建空间、可选分组、通用 Context 及移动位置；项目详情可显式关联/解除 Context。位置独立保存，移动不改变 Context ID/资料、不移动外部文件、不添加工具授权。
