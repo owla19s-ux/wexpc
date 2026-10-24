@@ -5,6 +5,7 @@
 //! Only a trusted Host supplies the private storage root.
 pub mod catalog;
 pub mod operations;
+pub mod tasks;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
