@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { command, desktopAvailable, errorMessage } from './client';
 import { type Agent, type AgentRole, type Conversation, type Project, type Snapshot } from './types';
 import { ConnectionForm, Selection } from './Connections';
@@ -8,6 +9,7 @@ import { Chat } from './Chat';
 import { Organization } from './Organization';
 
 type Page = 'projects'|'new'|'connections'|'conversation'|'organization';
+type ChatDelta = {turnId:string;conversationId:string;delta:string};
 export function App() {
   const [data,setData]=useState<Snapshot|null>(null);
   const [error,setError]=useState('');
@@ -16,11 +18,35 @@ export function App() {
   const [conversationId,setConversationId]=useState('');
   const [pending,setPending]=useState<Set<string>>(new Set());
   const [drafts,setDrafts]=useState<Record<string,string>>({});
+  const [previews,setPreviews]=useState<Record<string,string>>({});
+  useEffect(()=>{
+    if(!desktopAvailable)return;
+    let active=true;
+    let unlisten:UnlistenFn|undefined;
+    void listen<ChatDelta>('chat-delta',event=>{
+      if(!active)return;
+      const {turnId,delta}=event.payload;
+      if(!turnId||!delta)return;
+      setPreviews(current=>({...current,[turnId]:(current[turnId]||'')+delta}));
+    }).then(stop=>{if(active)unlisten=stop;else stop();}).catch(e=>setError(errorMessage(e)));
+    return ()=>{active=false;unlisten?.();};
+  },[]);
   const refresh=useCallback(async()=>{
     const incoming=await command<Snapshot>('snapshot');
     setData(current=>current&&current.revision>incoming.revision?current:incoming);
     return incoming;
   },[]);
+  useEffect(()=>{
+    if(!data)return;
+    const completed=new Set(data.turns.filter(t=>t.assistant!==null||t.status==='succeeded').map(t=>t.id));
+    if(!completed.size)return;
+    setPreviews(current=>{
+      const next={...current};
+      let changed=false;
+      for(const id of completed){if(id in next){delete next[id];changed=true;}}
+      return changed?next:current;
+    });
+  },[data]);
   useEffect(()=>{if(desktopAvailable) void refresh().catch(e=>setError(errorMessage(e)));},[refresh]);
   async function run(action:()=>Promise<void>) {setError('');try {await action();await refresh();}catch(e){setError(errorMessage(e));}}
   const project=data?.projects.find(p=>p.id===projectId);
@@ -31,7 +57,7 @@ export function App() {
     const p=await command<Project>('create_project',{name:fields.get('name'),goal:fields.get('goal'),resources:String(fields.get('resources')||'').split('\n').map(s=>s.trim()).filter(Boolean)});
     setProjectId(p.id);setPage('projects');
   }
-  async function send(prompt:string) {
+  async function send(prompt:string,stream:boolean) {
     if(!conversation) return;
     const id=conversation.id;setError('');setPending(prev=>new Set(prev).add(id));
     // Refresh after request admission; do not await the network before the
@@ -43,7 +69,7 @@ export function App() {
       }
     };
     const timer=window.setTimeout(()=>void refresh().then(admitted).catch(()=>{}),200);
-    try {await command('send_message',{conversationId:id,prompt});}
+    try {await command('send_message',{conversationId:id,prompt,stream});}
     catch(e){setError(errorMessage(e));}
     finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});await refresh().then(admitted).catch(e=>setError(errorMessage(e)));}
   }
@@ -76,7 +102,7 @@ export function App() {
       {page==='connections'&&<section><h1>连接与服务</h1><h2>AI API</h2>{data?.connections.map(c=><div className="item" key={c.id}><strong>{c.name}</strong><span>{c.base_url}</span><span>{c.models.join(' · ')}</span><button onClick={()=>void run(async()=>{await command('set_connection_enabled',{connectionId:c.id,enabled:!c.enabled});})}>{c.enabled?'停用':'启用'}</button></div>)}<ConnectionForm run={run}/><hr/><h2>后续接入项</h2><p>GitHub、本地文件工具、终端环境、Android 模拟器：尚未接到本批桌面运行路径。</p></section>}
       {page==='conversation'&&!conversation&&data&&<section><h1>新建普通对话</h1><form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void run(async()=>{const c=await command<Conversation>('create_conversation',{projectId:null,title:fields.get('title'),connectionId:fields.get('connection'),modelId:fields.get('model')});showConversation(c);});}}><label>对话名称<input name="title" required maxLength={128} defaultValue="普通对话"/></label><Selection connections={data.connections}/><button className="primary" disabled={!data.connections.some(c=>c.enabled)}>创建对话</button></form></section>}
       {page==='conversation'&&conversation&&data&&<label>关联上下文<select value={conversation.context_id||''} onChange={e=>{const contextId=e.target.value||null;void run(async()=>{await command('bind_conversation_context',{conversationId:conversation.id,contextId});});}}><option value="">独立对话，不关联上下文</option>{data.contexts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
-      {page==='conversation'&&conversation&&data&&<Chat conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
+      {page==='conversation'&&conversation&&data&&<Chat conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
     </main></div><footer>{pending.size?`${pending.size} 个对话正在请求 API`:'本地项目数据由桌面服务保存'} · 本批任务为草案，工具施工流程尚未接通</footer>
   </div>;
 }

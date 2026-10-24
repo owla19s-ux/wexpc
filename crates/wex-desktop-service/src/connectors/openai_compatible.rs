@@ -87,7 +87,17 @@ fn protocol_error(error: wex_api::ApiError) -> ServiceError {
 /// Streaming transport using the same credential and endpoint safeguards as
 /// non-streaming chat. Tool calls are rejected until dispatch is connected.
 pub fn execute_chat_stream(request: &PreparedChat, key: &str) -> Result<String> {
-    use wex_api::{ApiRequest, Decoder, EncodeOptions, Message, RequestOptions, Role};
+    execute_chat_stream_with_progress(request, key, |_| {})
+}
+
+/// Reports provisional text as it arrives. Only the returned complete reply
+/// may be committed to conversation history after the terminal SSE frame.
+pub fn execute_chat_stream_with_progress(
+    request: &PreparedChat,
+    key: &str,
+    mut on_delta: impl FnMut(&str),
+) -> Result<String> {
+    use wex_api::{ApiRequest, Decoder, EncodeOptions, Event, Message, RequestOptions, Role};
     if key.is_empty() {
         return Err(ServiceError::new(
             "CREDENTIAL_UNAVAILABLE",
@@ -175,7 +185,11 @@ pub fn execute_chat_stream(request: &PreparedChat, key: &str) -> Result<String> 
         if size == 0 {
             break;
         }
-        decoder.push(&chunk[..size]).map_err(protocol_error)?;
+        for event in decoder.push(&chunk[..size]).map_err(protocol_error)? {
+            if let Event::TextDelta(delta) = event {
+                on_delta(&delta);
+            }
+        }
     }
     let completion = decoder.finish().map_err(protocol_error)?;
     if !completion.tool_calls.is_empty() {

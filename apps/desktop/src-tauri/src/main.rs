@@ -2,10 +2,17 @@
 mod vault;
 
 use std::sync::{Arc, Mutex};
-use tauri::{Manager, State};
+use tauri::{Emitter, Manager, State};
 use wex_desktop_service::*;
 
 type Shared = Arc<Mutex<DesktopService>>;
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ChatDelta {
+    turn_id: String,
+    conversation_id: String,
+    delta: String,
+}
 fn locked(shared: &Shared) -> Result<std::sync::MutexGuard<'_, DesktopService>> {
     shared
         .lock()
@@ -197,9 +204,11 @@ fn create_conversation(
 
 #[tauri::command]
 async fn send_message(
+    app: tauri::AppHandle,
     state: State<'_, Shared>,
     conversation_id: String,
     prompt: String,
+    stream: bool,
 ) -> Result<()> {
     let shared = state.inner().clone();
     let request = locked(&shared)?.prepare_chat(&conversation_id, prompt)?;
@@ -208,7 +217,20 @@ async fn send_message(
     let turn_id = request.turn_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let key = vault::read(&request.credential_ref)?;
-        execute_chat(&request, &key)
+        if stream {
+            execute_chat_stream_with_progress(&request, &key, |delta| {
+                let _ = app.emit(
+                    "chat-delta",
+                    ChatDelta {
+                        turn_id: request.turn_id.clone(),
+                        conversation_id: request.conversation_id.clone(),
+                        delta: delta.to_owned(),
+                    },
+                );
+            })
+        } else {
+            execute_chat(&request, &key)
+        }
     })
     .await
     .unwrap_or_else(|_| {

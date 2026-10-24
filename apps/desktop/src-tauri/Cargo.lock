@@ -4335,6 +4335,7 @@ name = "wexpc-desktop"
 version = "0.1.1"
 dependencies = [
  "keyring",
+ "serde",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

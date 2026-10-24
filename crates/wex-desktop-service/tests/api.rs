@@ -4,7 +4,8 @@ use std::{
     thread,
 };
 use wex_desktop_service::{
-    chat_endpoint, execute_chat, execute_chat_stream, ApiMessage, PreparedChat,
+    chat_endpoint, execute_chat, execute_chat_stream, execute_chat_stream_with_progress,
+    ApiMessage, PreparedChat,
 };
 
 #[test]
@@ -162,6 +163,21 @@ fn streaming_adapter_decodes_fragmented_sse_and_sends_stream_request() {
     assert_eq!(body["stream"], true);
     assert_eq!(body["stream_options"]["include_usage"], true);
     assert_eq!(body["model"], "deepseek-chat");
+}
+
+#[test]
+fn progress_is_provisional_until_a_terminal_frame() {
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"片段\"}}]}\n\n".into(),
+    ]);
+    let mut deltas = Vec::new();
+    let error = execute_chat_stream_with_progress(&request(url), "secret-key", |delta| {
+        deltas.push(delta.to_owned());
+    })
+    .unwrap_err();
+    handle.join().unwrap();
+    assert_eq!(deltas, vec!["片段"]);
+    assert_eq!(error.code, "PROTOCOL");
 }
 
 #[test]

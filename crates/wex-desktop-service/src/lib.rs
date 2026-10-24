@@ -6,5 +6,7 @@ mod domain;
 mod infrastructure;
 
 pub use application::DesktopService;
-pub use connectors::openai_compatible::{chat_endpoint, execute_chat, execute_chat_stream};
+pub use connectors::openai_compatible::{
+    chat_endpoint, execute_chat, execute_chat_stream, execute_chat_stream_with_progress,
+};
 pub use domain::*;
