@@ -294,15 +294,6 @@ impl DesktopService {
     }
     /// Explicit human review decision; manual task notes are not verification.
     pub fn accept_task_review(&mut self, revision: u64, task_id: &str) -> Result<()> {
-        let snapshot = self.snapshot()?;
-        organization::check_revision(&snapshot, revision)?;
-        let task = snapshot.tasks.iter()
-            .find(|task| task.id == task_id)
-            .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
-        if task.status != TaskStatus::InReview {
-            return Err(ServiceError::new("INVALID_TASK_TRANSITION", "任务尚未进入待审核状态"));
-        }
-        // A manual acceptance decision is not a tool verification receipt.
         self.transition_task(revision, task_id, TaskStatus::Completed)
     }
 
