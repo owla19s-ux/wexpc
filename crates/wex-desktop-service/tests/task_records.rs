@@ -581,3 +581,22 @@ fn closed_task_rejects_progress_but_allows_manual_handoff() {
     }).unwrap();
     assert_eq!(note.kind, TaskRecordKind::Handoff);
 }
+
+#[test]
+fn active_and_reviewing_tasks_can_be_cancelled() {
+    for reviewing in [false, true] {
+        let mut app = DesktopService::memory().unwrap();
+        let t = task(&mut app, "Cancel");
+        for next in [TaskStatus::Ready, TaskStatus::InProgress] {
+            let rev = app.snapshot().unwrap().revision;
+            app.transition_task(rev, &t.id, next).unwrap();
+        }
+        if reviewing {
+            let rev = app.snapshot().unwrap().revision;
+            app.transition_task(rev, &t.id, TaskStatus::InReview).unwrap();
+        }
+        let rev = app.snapshot().unwrap().revision;
+        app.transition_task(rev, &t.id, TaskStatus::Cancelled).unwrap();
+        assert_eq!(app.snapshot().unwrap().tasks[0].status, TaskStatus::Cancelled);
+    }
+}
