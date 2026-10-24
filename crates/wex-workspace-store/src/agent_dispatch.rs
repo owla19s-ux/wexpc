@@ -48,6 +48,7 @@ pub fn validate_linked_dispatch(
         .ok_or(AgentDispatchError::MissingLink)?;
     if task.status != TaskStatus::Running
         || task.assigned_agent.as_deref() != Some(link.agent_id.as_str())
+        || link.assignment_epoch != Some(task.assignment_epoch)
     {
         return Err(AgentDispatchError::TaskNotRunning);
     }
@@ -183,6 +184,7 @@ mod tests {
                 project_id: "project_1".into(),
                 objective: "Implement".into(),
                 assigned_agent: Some("agent_1".into()),
+                assignment_epoch: 0,
                 status,
                 evidence_refs: vec![],
             }],
@@ -190,6 +192,7 @@ mod tests {
                 task_id: "task_1".into(),
                 operation_id: "op_1".into(),
                 agent_id: "agent_1".into(),
+                assignment_epoch: Some(0),
             }],
         };
         (view, ledger, intent)
@@ -256,6 +259,22 @@ mod tests {
         let (view, mut ledger, intent) = fixture(TaskStatus::Running);
         ledger.approve("op_1", &intent, 1).unwrap();
         assert_eq!(validate_linked_dispatch(&view, &ledger, "op_1"), Ok(()));
+    }
+
+    #[test]
+    fn old_assignment_cannot_dispatch_after_same_agent_returns() {
+        let (mut view, mut ledger, intent) = fixture(TaskStatus::Running);
+        ledger.approve("op_1", &intent, 1).unwrap();
+        view.tasks[0].assignment_epoch = 2;
+        assert_eq!(
+            validate_linked_dispatch(&view, &ledger, "op_1"),
+            Err(AgentDispatchError::TaskNotRunning)
+        );
+        view.links[0].assignment_epoch = None;
+        assert_eq!(
+            validate_linked_dispatch(&view, &ledger, "op_1"),
+            Err(AgentDispatchError::TaskNotRunning)
+        );
     }
 
     #[test]
