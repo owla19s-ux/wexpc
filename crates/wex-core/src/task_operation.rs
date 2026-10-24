@@ -293,8 +293,7 @@ mod tests {
             )
             .unwrap();
 
-        let restored =
-            TaskOperationIndex::restore(original.snapshot(), &tasks, &ledger).unwrap();
+        let restored = TaskOperationIndex::restore(original.snapshot(), &tasks, &ledger).unwrap();
         restored.reconcile("op_1", &mut tasks, &ledger).unwrap();
         let task = tasks.get("task_1").unwrap();
         assert_eq!(task.assigned_agent.as_deref(), Some("agent_b"));
