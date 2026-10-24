@@ -39,3 +39,12 @@ pub struct TaskRecord {
     /// Durable append order, assigned inside the same store transaction.
     pub recorded_revision: u64,
 }
+
+/// A manually supplied review note. It is not a trusted tool receipt.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NewReviewNote {
+    pub task_id: String,
+    pub body: String,
+    pub references: Vec<String>,
+}
