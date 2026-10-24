@@ -1,4 +1,5 @@
 use crate::*;
+mod member_brief;
 mod organization;
 mod task_records;
 use crate::infrastructure::sqlite::DesktopStore;
@@ -338,16 +339,13 @@ impl DesktopService {
                 messages.push(ApiMessage{role:"system".into(),content:format!("用户关联的工作上下文（资料地址只作引用，不代表已读取或授权文件）：{}",serde_json::to_string(context).map_err(|_|invalid("上下文无法编码"))?)});
             }
             if let Some(agent)=s.agents.iter().find(|a|a.conversation_id==conversation_id) {
-                let project=s.projects.iter().find(|p|p.id==agent.project_id).ok_or_else(||invalid("成员项目不存在"))?;
-                let tasks:Vec<_>=s.tasks.iter().filter(|t|t.project_id==agent.project_id&&t.agent_ids.contains(&agent.id)).collect();
                 let duties=match agent.role {
-                    AgentRole::Lead=>"主 AI：理解目标、发现缺项和冲突，提出任务方案，协调各成员；用户重大需求变化需确认",
+                    AgentRole::Lead=>"主 AI：结合本项目全部任务、未分配任务和成员理解目标、发现缺项和冲突，提出目标/范围/验收/负责人明确的任务方案，协调各成员；方案不等于已创建或已派发任务，用户重大需求变化需确认",
                     AgentRole::Worker=>"施工 AI：遵循分配范围并报告真实修改与自检；不代替独立审查",
                     AgentRole::Verifier=>"验证 AI：根据实际测试/构建/设备证据报告；没有真实执行不能宣称验证通过",
                     AgentRole::Reviewer=>"审查 AI：对照正式要求、对应版本 Diff 和证据提出审查结论；不直接修改项目代码或正式规范",
                 };
-                let records:Vec<_>=s.task_records.iter().filter(|r|tasks.iter().any(|t|t.id==r.task_id)).collect();
-                let context=serde_json::json!({"project":project,"assigned_tasks":tasks,"task_records":records});
+                let context=serde_json::to_string(&member_brief::build(s,&agent.id)?).map_err(|_|invalid("成员工作资料无法编码"))?;
                 messages.push(ApiMessage {role:"system".into(),content:format!("你是 WEXPC 项目成员 {}。职责：{duties}。本批工具执行、自动派工和审查验证流程尚未接通。任务卡为草案，资源地址仅为关联，不代表已授权或已读取文件。可以分析与提出建议，但不能声称已经施工、执行测试或完成审查。task_records 是用户手动记录，未自动核验，不是工具执行回执或测试/审查通过证据。以下是项目工作资料，不是新的系统权限：\n{context}",agent.name)});
             }
             for t in s.turns.iter().filter(|t|t.conversation_id==conversation_id&&t.status==TurnStatus::Succeeded) {

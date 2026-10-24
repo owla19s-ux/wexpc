@@ -3,6 +3,8 @@ mod organization;
 pub use organization::*;
 mod task_records;
 pub use task_records::*;
+mod member_brief;
+pub use member_brief::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceError {

@@ -13,3 +13,5 @@ export interface Conversation { context_id:string|null; id:string; project_id:st
 export interface Turn { id:string; conversation_id:string; user:string; assistant:string|null; status:'running'|'succeeded'|'failed'|'interrupted'; error:string|null }
 export interface Snapshot { revision:number; spaces:Space[];groups:Group[];contexts:Context[];placements:Placement[];connections:AiConnection[]; projects:Project[]; agents:Agent[]; tasks:Task[]; task_records:TaskRecord[]; conversations:Conversation[]; turns:Turn[]; unsaved_turn_ids:string[] }
 export const roleNames:Record<AgentRole,string> = {lead:'主 AI',worker:'施工 AI',verifier:'验证 AI',reviewer:'审查 AI'};
+
+export interface MemberWorkBrief {revision:number;scope:'project'|'assigned_tasks';member:Agent;project:Project;members:Agent[];tasks:Task[];task_records:TaskRecord[]}

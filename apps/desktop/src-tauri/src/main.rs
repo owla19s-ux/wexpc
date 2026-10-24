@@ -146,6 +146,11 @@ fn set_connection_enabled(
 }
 
 #[tauri::command]
+fn member_brief(state: State<'_, Shared>, agent_id: String) -> Result<MemberWorkBrief> {
+    locked(&state)?.member_brief(&agent_id)
+}
+
+#[tauri::command]
 fn add_agent(state: State<'_, Shared>, input: NewAgent) -> Result<Agent> {
     locked(&state)?.add_agent(input)
 }
@@ -242,6 +247,7 @@ fn main() {
             add_connection,
             set_connection_enabled,
             add_agent,
+            member_brief,
             create_task,
             update_task,
             append_task_record,

@@ -9,7 +9,7 @@
 | `apps/desktop/src` | React 页面、草稿、选择与展示 | 经 IPC 发意图，不独立写项目数据库或裁决授权 |
 | `apps/desktop/src-tauri/src` | 桌面组合入口、命令传输、Windows 凭证库 | 注入服务及平台能力，不复制业务规则 |
 | `crates/wex-desktop-service/src/domain` | 工作对象、Space/Group/Context/位置、项目/成员/任务 DTO | 不调用网络、数据库或平台 API |
-| `crates/wex-desktop-service/src/application` | 项目和组织用例、任务接续记录、关联校验、连接选择、对话生命周期与恢复 | 复用 `wex-core`；调用连接器和唯一存储入口 |
+| `crates/wex-desktop-service/src/application` | 项目和组织用例、任务接续记录、成员工作资料、关联校验、连接选择、对话生命周期与恢复 | 复用 `wex-core`；调用连接器和唯一存储入口 |
 | `crates/wex-desktop-service/src/infrastructure/sqlite.rs` | SQLite 事务、应用实例锁、schema 迁移和快照 I/O | 不发网络请求，不赋予组织关系访问权限 |
 | `crates/wex-desktop-service/src/connectors` | 现有 OpenAI 兼容 HTTP 文本执行器 | 不写项目业务状态或决定任务完成 |
 | `crates/wex-core` 与资源/授权后端 | 已有连接/权限/操作规则和 Windows 安全资源实现 | 按实际需要接入；不因保留代码就宣称所有工具已可用 |
@@ -37,6 +37,8 @@ Space 基础批增加可操作组织入口：创建空间、可选分组和 Cont
 
 
 任务接续记录由独立 `domain/task_records.rs` 与 `application/task_records.rs` 保存和追加，通过同一 SQLite 入口持久化（schema 4）。它是用户手动资料，保留当时任务快照；不等同于 Core Operation 的可信执行回执，不新增权限或替代审查/验证状态。
+
+成员工作资料由 `application/member_brief.rs` 统一组装供 Tauri 预览和正式对话请求使用：主 AI 读取本项目任务/团队/记录，其余成员读取当前分配任务/记录；不携带凭证或其他成员会话。它是只读投影，未另建业务存储或替代 Core 的请求校验。
 
 ## API 复用与 DeepSeek 施工交接（2026-10-24）
 

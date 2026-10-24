@@ -46,9 +46,26 @@
 - [x] 在 `domain/task_records.rs` 定义 NewTaskRecord、TaskRecordKind、TaskRecord（含 task_snapshot 和 recorded_revision），`domain/mod.rs` 只追加默认 task_records 数组；`application/task_records.rs` 实现 `append_task_record(revision, input) -> Result<TaskRecord>`，不改 API 执行器。复用文本检查、revision 和唯一 Store。
 - [x] `sqlite.rs` 版本升4；更新旧迁移断言。`prepare_chat` 只注入当前分配任务的记录，明确人工来源与未核验，重跑协议/持久化相关测试。
 - [x] Tauri 注册 `append_task_record`；`types.ts` 对齐 DTO，新增 `TaskJournal.tsx` 并从 `Projects.tsx` 任务详情进入。表单绑定打开时 revision，提交时禁用，失败保留输入；引用仅文本显示，不访问外部文件/URL。显示记录时任务快照，避免旧说明误配到新目标。
-- [ ] 独立审查整个批次；集中运行 workspace 测试、fmt、clippy、前端构建，提交原 PR 并验证对应 Windows Host CI。自动化只证明本批，真实服务、Windows 交互、完整调度和模拟器另列未执行。
+- [x] 独立审查整个批次；集中运行 workspace 测试、fmt、clippy、前端构建，提交原 PR 并验证对应 Windows Host CI。自动化只证明本批，真实服务、Windows 交互、完整调度和模拟器另列未执行。
 
 未覆盖完整任务状态机、工具回执/Evidence、自动任务发布、范围占用与执行隔离、独立审查验证调度；它们仍属0.1.1目标。引用 Commit/Run 不自动成为经过核验的证据。
 
 
 执行记录：首轮记录测试因新增类型/接口缺失失败；实现后7项记录回归及全部244项 Rust 测试通过，fmt/clippy/前端构建通过。独立审查未发现阻塞项。Minor（延后）：成功后立即重开表单可能在刷新返回前捕获旧修订，触发安全冲突提示；不会覆盖或错配历史快照，输入会保留。浏览器/Windows 交互尚未实际执行。当前系统上下文只注入现有分派记录，但旧会话历史中的既往讨论不会因重新分派而清除，不宣称它是权限撤销机制。
+
+任务记录批源码 `192a58300b839720a0f8b1fed0a2c1fb764445c9` 的 Rust CI 40105984624 与 Windows Host CI 40105984549 已通过；Windows 实机/真实服务仍未运行。
+
+## 接续批：主 AI 项目全貌与成员工作资料（2026-10-24）
+
+依据：PC 基线 §5.1/§6.3 的主 AI 理解目标、梳理任务及协调成员。实际差距：原 prepare_chat 对所有角色只注入 assigned_tasks，主 AI 未被逐一分配时看不到未分配任务，也没有项目成员名单。沿已确认分工补齐资料，不新增工具/文件授权，不宣称自动派工完成。
+
+设计与文件：只读 MemberWorkBrief（revision、scope、member、project、members、tasks、task_records）在 `domain/member_brief.rs` 定义；`application/member_brief.rs` 从同一快照组装，Lead 的 scope=project、任务/成员覆盖本项目，其他角色 scope=assigned_tasks、任务限当前分配且 members 仅含自身。只含工作对象，不返回连接配置/凭证或任何会话历史；旧会话已讨论的资料不因分派变化自动清除。应用 `member_brief(agent_id)` 只读且不依赖 API 启用；prepare_chat 在原事务内调用同一组装函数，仍复用 Core Catalog 判定真实请求绑定。
+
+步骤：
+- [x] `tests/member_brief.rs` 先验证 Lead 完整任务/团队、其他角色仅当前分配、跨项目隔离、只读及停用连接仍可预览、实际 prepare_chat 与预览一致且无凭证/其他历史；运行确认接口缺失。
+- [x] 实现只读 DTO/组装器和请求接线；保留原职责与人工记录/未核验提示。无持久字段变更，schema 保持4。
+- [x] Tauri member_brief 命令 + TypeScript DTO + 项目成员「查看工作资料」入口，显示角色对应资料范围、目标、成员、任务和记录；读取失败可重试，切换/关闭后旧异步结果不覆盖新对象。先展示操作入口，不冻结最终UI。
+- [ ] 独立审查与完整Rust/fmt/clippy/前端验证，原PR合批验证对应Windows CI；真实API、Windows交互与完整派工仍未执行。
+
+
+执行记录：新增4项测试先因类型/接口缺失失败，实现后4项及全部248项Rust回归通过，clippy、前端构建通过。独立代码审查未发现阻塞或Minor项；额外CodeRabbit CLI缺失，远程安装被自动审批以超出只读范围拒绝，未取得CodeRabbit结果。预览为项目工作资料，不是完整请求包；实际请求另行使用显式关联Context和自身历史，界面已说明。正式API执行器和schema未改动。对应提交的Windows CI随后记录于PR。
