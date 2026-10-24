@@ -99,7 +99,8 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     }
     for field in fields {
         let value = obj.get(*field).and_then(|v| v.as_str()).unwrap_or_default();
-        if (*field != "content" && value.is_empty()) || value.contains('\\0') || value.chars().any(char::is_control) {
+        if (*field != "content" && value.is_empty()) || value.contains('\0')
+            || (*field != "content" && value.chars().any(char::is_control)) {
             return Err(ServiceError::new("INVALID_INPUT", "工具参数包含空值或控制字符"));
         }
     }
