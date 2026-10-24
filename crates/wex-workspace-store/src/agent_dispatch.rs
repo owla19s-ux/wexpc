@@ -46,7 +46,7 @@ pub fn validate_linked_dispatch(
         .iter()
         .find(|task| task.id == link.task_id)
         .ok_or(AgentDispatchError::MissingLink)?;
-    if task.status != TaskStatus::Running || task.assigned_agent.as_deref() != Some(&link.agent_id) {
+    if task.status != TaskStatus::Running || task.assigned_agent.as_deref() != Some(link.agent_id.as_str()) {
         return Err(AgentDispatchError::TaskNotRunning);
     }
     let operation = ledger
