@@ -113,8 +113,8 @@ pub fn execute_chat_stream_with_progress(
             "API 密钥不可用",
         ));
     }
-    let endpoint = chat_endpoint(&request.base_url)?;
     let api_request = protocol_request(request)?;
+    let endpoint = api_request.endpoint.clone();
     let body =
         wex_api::encode_request(&api_request, EncodeOptions::default()).map_err(protocol_error)?;
     let options = RequestOptions::default();
