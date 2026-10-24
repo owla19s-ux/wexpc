@@ -17,6 +17,8 @@ pub struct Task {
     pub project_id: String,
     pub objective: String,
     pub assigned_agent: Option<String>,
+    /// Advances on every assignment, including reassignment to the same agent.
+    pub assignment_epoch: u64,
     pub status: TaskStatus,
     pub evidence_refs: Vec<String>,
 }
@@ -111,7 +113,12 @@ impl TaskBoard {
         if !matches!(task.status, TaskStatus::Queued | TaskStatus::Blocked) {
             return Err(TaskError::InvalidTransition);
         }
+        let epoch = task
+            .assignment_epoch
+            .checked_add(1)
+            .ok_or(TaskError::InvalidTransition)?;
         task.assigned_agent = Some(agent);
+        task.assignment_epoch = epoch;
         Ok(())
     }
 
@@ -168,6 +175,7 @@ mod tests {
             project_id: "wexpc".into(),
             objective: "Implement adapter".into(),
             assigned_agent: None,
+            assignment_epoch: 0,
             status: TaskStatus::Queued,
             evidence_refs: vec![],
         }
@@ -248,6 +256,24 @@ mod tests {
             .transition("a", TaskStatus::Running, Some("log_a".into()))
             .unwrap();
         assert_eq!(board.get("a").unwrap().evidence_refs, vec!["log_a"]);
+    }
+    #[test]
+    fn assignment_epoch_advances_without_wrap_or_partial_reassignment() {
+        let mut board = TaskBoard::default();
+        let mut t = task("a");
+        t.assigned_agent = Some("agent_a".into());
+        t.status = TaskStatus::Blocked;
+        t.assignment_epoch = u64::MAX;
+        board.insert(t).unwrap();
+        assert_eq!(
+            board.assign("a", "agent_b".into()),
+            Err(TaskError::InvalidTransition)
+        );
+        assert_eq!(
+            board.get("a").unwrap().assigned_agent.as_deref(),
+            Some("agent_a")
+        );
+        assert_eq!(board.get("a").unwrap().assignment_epoch, u64::MAX);
     }
     #[test]
     fn invalid_transitions_and_duplicate_ids() {
