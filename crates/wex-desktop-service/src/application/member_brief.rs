@@ -31,6 +31,10 @@ pub(super) fn build(s: &DesktopSnapshot, agent_id: &str) -> Result<MemberWorkBri
             && (lead || report.agent_id == member.id))
         .cloned()
         .collect();
+    let execution_receipts = s.execution_receipts.iter()
+        .filter(|r| task_ids.contains(r.task_id.as_str()) && (lead || r.agent_id == member.id))
+        .cloned()
+        .collect();
     let members = s
         .agents
         .iter()
@@ -50,6 +54,7 @@ pub(super) fn build(s: &DesktopSnapshot, agent_id: &str) -> Result<MemberWorkBri
         tasks,
         task_records,
         agent_work_reports,
+        execution_receipts,
     })
 }
 
