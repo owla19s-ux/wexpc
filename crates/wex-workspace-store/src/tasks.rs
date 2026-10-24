@@ -147,6 +147,42 @@ impl TaskStore {
 
     /// Compare-and-swap a complete task+link snapshot. This is atomic only
     /// within the task store, NOT with the separate operation store.
+    /// Reconcile a cold task snapshot against a trusted ledger and durably
+    /// commit the resulting projection with optimistic revision checking.
+    /// This does not make the separate operation store atomic with this store.
+    pub fn recover_and_commit(
+        &self,
+        expected_revision: u64,
+        ledger: &OperationLedger,
+    ) -> Result<TaskStoreView, TaskStoreError> {
+        let mut lock = self.io.lock()?;
+        let current = self.read_locked()?;
+        if current.revision != expected_revision {
+            return Err(OrganizationError::Conflict.into());
+        }
+        let recovered = Self::recover_with_ledger(current.clone(), ledger)?;
+        if recovered.tasks == current.tasks && recovered.links == current.links {
+            return Ok(current);
+        }
+        let next = current.revision.checked_add(1)
+            .ok_or(OrganizationError::RevisionExhausted)?;
+        let view = TaskStoreView { revision: next, ..recovered };
+        let bytes = serde_json::to_vec(&Snapshot {
+            schema_version: 1,
+            revision: next,
+            tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
+            links: view.links.clone().into_iter().map(Into::into).collect(),
+        }).map_err(|_| OrganizationError::Unavailable)?;
+        if bytes.len() as u64 > SNAPSHOT_LIMIT {
+            return Err(OrganizationError::LimitExceeded.into());
+        }
+        if let Err(error) = self.io.save_bytes_locked(&bytes) {
+            lock.release = false;
+            return Err(error.into());
+        }
+        Ok(view)
+    }
+
     pub fn replace(
         &self,
         expected_revision: u64,
