@@ -42,6 +42,9 @@ impl DesktopService {
             if !s.agents.iter().any(|agent| agent.id == input.agent_id && agent.project_id == task.project_id) {
                 return Err(ServiceError::new("INVALID_BINDING", "报告成员与任务项目不一致"));
             }
+            if s.agent_work_reports.iter().any(|r| r.task_id == input.task_id && r.agent_id == input.agent_id && r.body == input.body && r.references == input.references) {
+                return Err(ServiceError::new("DUPLICATE_REPORT", "相同成员的重复报告未写入"));
+            }
             let report = AgentWorkReport {
                 id: id("agent_report"),
                 task_id: task.id.clone(),
