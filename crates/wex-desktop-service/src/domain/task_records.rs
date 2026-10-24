@@ -69,3 +69,18 @@ pub struct NewAgentWorkReport {
     pub body: String,
     pub references: Vec<String>,
 }
+
+/// Receipt issued by a trusted internal executor after a tool invocation.
+/// No public NewExecutionReceipt input is exposed to model/user content.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecutionReceipt {
+    pub id: String,
+    pub task_id: String,
+    pub agent_id: String,
+    pub tool_name: String,
+    pub invocation_id: String,
+    pub succeeded: bool,
+    pub summary: String,
+    pub task_snapshot: Task,
+    pub recorded_revision: u64,
+}
