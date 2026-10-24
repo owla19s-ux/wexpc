@@ -284,6 +284,8 @@ impl DesktopService {
                 | (TaskStatus::Ready, TaskStatus::Cancelled)
                 | (TaskStatus::Draft, TaskStatus::Cancelled)
                 | (TaskStatus::Blocked, TaskStatus::Cancelled)
+                | (TaskStatus::InProgress, TaskStatus::Cancelled)
+                | (TaskStatus::InReview, TaskStatus::Cancelled)
             );
             if !allowed {
                 return Err(ServiceError::new("INVALID_TASK_TRANSITION", "任务状态不允许此转换"));
