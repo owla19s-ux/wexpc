@@ -137,7 +137,9 @@ impl TaskBoard {
             return Err(TaskError::InvalidTransition);
         }
         if let Some(reference) = evidence {
-            task.evidence_refs.push(reference);
+            if !task.evidence_refs.contains(&reference) {
+                task.evidence_refs.push(reference);
+            }
         }
         task.status = next;
         Ok(())
@@ -203,6 +205,16 @@ mod tests {
         assert_eq!(restored.get("a").unwrap().status, TaskStatus::Completed);
         assert_eq!(restored.get("a").unwrap().evidence_refs, vec!["commit_a"]);
         assert_eq!(restored.get("b").unwrap().status, TaskStatus::Blocked);
+    }
+    #[test]
+    fn duplicate_evidence_does_not_accumulate() {
+        let mut board = TaskBoard::default();
+        board.insert(task("a")).unwrap();
+        board.record_evidence("a", "log_a".into()).unwrap();
+        board.record_evidence("a", "log_a".into()).unwrap();
+        board.assign("a", "agent_a".into()).unwrap();
+        board.transition("a", TaskStatus::Running, Some("log_a".into())).unwrap();
+        assert_eq!(board.get("a").unwrap().evidence_refs, vec!["log_a"]);
     }
     #[test]
     fn invalid_transitions_and_duplicate_ids() {
