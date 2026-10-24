@@ -117,10 +117,16 @@ impl TaskStore {
         if version.schema_version != 1 { return Err(TaskStoreError::UnsupportedVersion); }
         let snapshot: Snapshot = serde_json::from_slice(&bytes)
             .map_err(|_| TaskStoreError::InvalidSnapshot)?;
+        if snapshot.revision == u64::MAX {
+            return Err(TaskStoreError::InvalidSnapshot);
+        }
         let tasks: Vec<Task> = snapshot.tasks.into_iter().map(Into::into).collect();
         // Validate all identities and task state, but preserve live state until
         // the Host explicitly requests cold recovery.
         TaskBoard::restore(tasks.clone()).map_err(|_| TaskStoreError::InvalidSnapshot)?;
+        if snapshot.links.len() > 4096 || tasks.len() > 4096 {
+            return Err(TaskStoreError::InvalidSnapshot);
+        }
         Ok(TaskStoreView {
             revision: snapshot.revision,
             tasks,
@@ -145,8 +151,6 @@ impl TaskStore {
         Ok(())
     }
 
-    /// Compare-and-swap a complete task+link snapshot. This is atomic only
-    /// within the task store, NOT with the separate operation store.
     /// Reconcile a cold task snapshot against a trusted ledger and durably
     /// commit the resulting projection with optimistic revision checking.
     /// This does not make the separate operation store atomic with this store.
@@ -183,6 +187,8 @@ impl TaskStore {
         Ok(view)
     }
 
+    /// Compare-and-swap a complete task+link snapshot. This is atomic only
+    /// within the task store, NOT with the separate operation store.
     pub fn replace(
         &self,
         expected_revision: u64,
