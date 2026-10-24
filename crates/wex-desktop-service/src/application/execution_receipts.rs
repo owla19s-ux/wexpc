@@ -198,4 +198,48 @@ mod tests {
         assert_eq!(app.snapshot().unwrap().revision, before);
     }
 
+    #[test]
+    fn executor_receipt_survives_database_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("receipts.sqlite");
+        let mut app = DesktopService::open(&path).unwrap();
+        let project = app.create_project("PC".into(), "".into(), vec![]).unwrap();
+        let connection = app.add_connection(NewConnection {
+            name: "API".into(),
+            base_url: "https://api.deepseek.com".into(),
+            models: vec!["deepseek-chat".into()],
+        }, "vault".into()).unwrap();
+        let agent = app.add_agent(NewAgent {
+            project_id: project.id.clone(),
+            name: "Worker".into(),
+            role: AgentRole::Worker,
+            connection_id: connection.id,
+            model_id: "deepseek-chat".into(),
+        }).unwrap();
+        let task = app.create_task(NewTask {
+            project_id: project.id,
+            title: "Persist".into(),
+            goal: "".into(),
+            scope: vec![],
+            acceptance: "".into(),
+            agent_ids: vec![agent.id.clone()],
+        }).unwrap();
+        let receipt = app.record_executor_outcome(ExecutorOutcome {
+            task_id: task.id,
+            agent_id: agent.id.clone(),
+            tool_name: "fixture".into(),
+            invocation_id: "persist-1".into(),
+            succeeded: false,
+            summary: "fixture failure; no tool executed".into(),
+        }).unwrap();
+        drop(app);
+        let app = DesktopService::open(&path).unwrap();
+        let snapshot = app.snapshot().unwrap();
+        assert_eq!(snapshot.execution_receipts.len(), 1);
+        assert_eq!(snapshot.execution_receipts[0].id, receipt.id);
+        assert_eq!(snapshot.execution_receipts[0].invocation_id, "persist-1");
+        assert!(snapshot.agent_work_reports.is_empty());
+        assert_eq!(app.member_brief(&agent.id).unwrap().execution_receipts.len(), 1);
+    }
+
 }
