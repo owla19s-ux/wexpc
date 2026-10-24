@@ -35,6 +35,14 @@ impl DesktopService {
                 .iter()
                 .find(|t| t.id == input.task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled)
+                && input.kind == TaskRecordKind::Progress
+            {
+                return Err(ServiceError::new(
+                    "TASK_CLOSED",
+                    "已关闭的任务不能继续登记施工进度",
+                ));
+            }
             let record = TaskRecord {
                 source: TaskRecordSource::User,
                 id: id("note"),
