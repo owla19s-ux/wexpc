@@ -326,8 +326,8 @@ impl DesktopService {
                 .iter_mut()
                 .find(|t| t.id == task_id)
                 .expect("task checked above");
-            if matches!(task.status, TaskStatus::Completed | TaskStatus::Cancelled) {
-                return Err(ServiceError::new("TASK_CLOSED", "已完成或取消的任务不能直接编辑"));
+            if matches!(task.status, TaskStatus::InReview | TaskStatus::Completed | TaskStatus::Cancelled) {
+                return Err(ServiceError::new("TASK_CLOSED", "待审核、已完成或取消的任务不能直接编辑"));
             }
             task.title = name;
             task.goal = input.goal;
