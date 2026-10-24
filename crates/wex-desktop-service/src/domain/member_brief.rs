@@ -1,4 +1,4 @@
-use super::{Agent, Project, Task, TaskRecord};
+use super::{Agent, AgentWorkReport, Project, Task, TaskRecord};
 use serde::Serialize;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -18,4 +18,5 @@ pub struct MemberWorkBrief {
     pub members: Vec<Agent>,
     pub tasks: Vec<Task>,
     pub task_records: Vec<TaskRecord>,
+    pub agent_work_reports: Vec<AgentWorkReport>,
 }
