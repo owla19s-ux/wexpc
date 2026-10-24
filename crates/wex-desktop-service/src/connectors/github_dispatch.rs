@@ -163,6 +163,38 @@ fn safe_segment(part: &str) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn content_decoder_supplies_sha_for_followup_approved_write() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let encoded = STANDARD.encode("versioned content");
+        let body = serde_json::json!({
+            "type": "file",
+            "sha": "a".repeat(40),
+            "encoding": "base64",
+            "content": encoded
+        });
+        let decoded = decode_file_content(body.to_string().as_bytes()).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&decoded).unwrap();
+        assert_eq!(parsed["sha"], "a".repeat(40));
+        assert_eq!(parsed["content"], "versioned content");
+    }
+
+    #[test]
+    fn content_decoder_rejects_nonfile_or_invalid_sha() {
+        let tree = serde_json::json!({"type":"dir", "sha":"a".repeat(40)});
+        assert_eq!(
+            decode_file_content(tree.to_string().as_bytes()).unwrap_err().code,
+            "TOOL_UNSUPPORTED_CONTENT"
+        );
+        let bad = serde_json::json!({
+            "type":"file", "sha":"broken", "encoding":"base64", "content":"YWJj"
+        });
+        assert_eq!(
+            decode_file_content(bad.to_string().as_bytes()).unwrap_err().code,
+            "GITHUB_RESPONSE_ERROR"
+        );
+    }
+
+    #[test]
     fn refuses_missing_authorization_without_network() {
         let intent = wex_core::operation::OperationIntent {
             id: "one".into(), actor_id: "actor".into(), conversation_id: "conv".into(),
