@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod vault;
+mod tool_approvals;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
@@ -229,7 +230,7 @@ async fn send_message(
                 );
             })
         } else {
-            execute_chat(&request, &key)
+            tool_approvals::run_non_streaming(&app, &request, &key)
         }
     })
     .await
