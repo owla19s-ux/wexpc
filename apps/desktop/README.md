@@ -8,7 +8,7 @@
 
 SQLite 当前 schema 为 4，可从 1/2/3 保留原 payload 升级。旧项目/对话缺少 `context_id` 时保持未关联，旧数据缺少任务记录时视为空，不猜测类别或伪造历史。版本门槛防止旧二进制写回时丢掉新增字段。普通对话与项目可分别关联 Context；基础 UI 未冻结，组织删除/共享/权限继承和完整对象图仍未实现。
 
-正式路径：React → Tauri command → `wex-desktop-service` → SQLite / reqwest。普通 API 对话不调用 Flutter FFI。界面为基础功能入口，视觉与后续交互未冻结。
+正式路径：React → Tauri command → `wex-desktop-service` → SQLite / reqwest；PR #13 的请求由 `wex-api` 编码，PR #14 的可选流式请求由其 Decoder 解析后通过 Tauri 事件预览。普通 API 对话不调用 Flutter FFI。界面为基础功能入口，视觉与后续交互未冻结。
 
 ## Windows 启动
 
@@ -33,13 +33,13 @@ API Key 保存在 Windows Credential Manager，SQLite 仅存不透明引用。�
 | --- | --- |
 | 项目、关联资料、成员/模型绑定、任务草案 | Rust 持久化与桌面命令/UI 已接线；Linux 服务测试覆盖恢复和关联校验 |
 | 任务进展、阻碍与交接 | 桌面任务详情可追加手动记录及引用；保留当时任务快照并在重启后恢复。引用未自动核验，不改变任务草案状态；主 AI 带入本项目全部任务记录，其他成员带入当前分派任务记录，普通对话不自动带入 |
-| 普通 API 文本对话 | Rust HTTP 请求/回复、错误、历史持久化已实现；本地 HTTP 测试覆盖请求格式，不等于真实 DeepSeek 验收 |
+| 普通 API 文本对话 | Rust HTTP 请求/回复、错误、历史持久化已实现；PR #14 可选择流式临时预览。模拟 HTTP 测试与前端构建不等于真实 DeepSeek 或 Windows Host 验收 |
 | 原 Rust Catalog | 正式服务调用其目录恢复、连接启停、模型/会话选择校验，无双写旧 CatalogStore |
 | 原权限/操作生命周期和 Windows 文件后端 | 原样保留，等待本地工具批按接口接入；本批未绕过它们直接给模型文件/命令工具 |
 | Windows 凭证库与 Tauri Host | Windows Host `cargo check`、服务测试与前端构建已通过；凭证真实读写和桌面实机运行尚未验证。Linux 无凭证后端时明确拒绝保存，不降级明文 |
 | 完整 Agent/Dispatcher | 未实现工具循环、范围占用、并发派工、结果集成、自动验证/审查/修复流转 |
 | GitHub、本地文件/Git/终端、Android 模拟器 | 未接通桌面正式路径，继续保留 0.1.1 要求 |
-| API 流式、模型目录/参数细化、追加排队、语音、最终 UI | 后续批次；本批文本请求不代表完整 API 模块交付 |
+| API 流式、模型目录/参数细化、追加排队、语音、最终 UI | PR #14 提供可选流式文本临时预览；其余及工具续答未接通，Host/真实服务未验收 |
 
 ## 验证
 
