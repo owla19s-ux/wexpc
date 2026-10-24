@@ -89,6 +89,8 @@ fn compatible_http_request_and_response_are_real_and_provider_errors_are_sanitiz
     let body: serde_json::Value =
         serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
     assert_eq!(body["model"], "deepseek-chat");
+    assert_eq!(body["stream"], false);
+    assert!(body.get("stream_options").is_none());
     assert_eq!(body["messages"][0]["content"], "你好");
     assert!(body.get("tools").is_none());
     let (url, handle) = server(
