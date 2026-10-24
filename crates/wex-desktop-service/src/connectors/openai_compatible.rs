@@ -33,6 +33,7 @@ pub fn chat_endpoint(base: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
+/// Encode the text-only desktop transcript without implying tool authority.
 fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
     use wex_api::{ApiRequest, EncodeOptions, Message, Role};
     let messages = request
