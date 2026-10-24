@@ -72,13 +72,9 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     let body = encode_prepared_chat(request)?;
     let response=client.post(chat_endpoint(&request.base_url)?).bearer_auth(key).json(&body).send().map_err(|e|ServiceError::new(if e.is_timeout(){"API_TIMEOUT"}else{"NETWORK_ERROR"},"API 请求未取得完整回复，请检查网络；未自动重试"))?;
     if !response.status().is_success() {
-        return Err(ServiceError::new(
-            "API_HTTP_ERROR",
-            format!(
-                "服务商返回 HTTP {}，请检查连接、模型和额度",
-                response.status().as_u16()
-            ),
-        ));
+        let status = response.status().as_u16();
+        let mapped = wex_api::error_for_status(status, None);
+        return Err(ServiceError::new("API_HTTP_ERROR", format!("{}: {}", mapped.code(), mapped.detail)));
     }
     let mut bytes = Vec::new();
     response
