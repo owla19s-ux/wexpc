@@ -557,3 +557,27 @@ fn manual_review_note_does_not_complete_task() {
     assert_eq!(snapshot.tasks[0].status, TaskStatus::Draft);
     assert_eq!(snapshot.task_records.len(), 1);
 }
+
+#[test]
+fn closed_task_rejects_progress_but_allows_manual_handoff() {
+    let mut app = DesktopService::memory().unwrap();
+    let t = task(&mut app, "Archive");
+    let revision = app.snapshot().unwrap().revision;
+    app.transition_task(revision, &t.id, TaskStatus::Cancelled).unwrap();
+    let revision = app.snapshot().unwrap().revision;
+    let result = app.append_task_record(revision, NewTaskRecord {
+        task_id: t.id.clone(),
+        kind: TaskRecordKind::Progress,
+        body: "continued work".into(),
+        references: vec![],
+    });
+    assert_eq!(result.unwrap_err().code, "TASK_CLOSED");
+    assert_eq!(app.snapshot().unwrap().revision, revision);
+    let note = app.append_task_record(revision, NewTaskRecord {
+        task_id: t.id,
+        kind: TaskRecordKind::Handoff,
+        body: "archived".into(),
+        references: vec![],
+    }).unwrap();
+    assert_eq!(note.kind, TaskRecordKind::Handoff);
+}
