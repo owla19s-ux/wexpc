@@ -27,6 +27,12 @@ pub struct TaskOperationIndex {
     links: BTreeMap<String, TaskOperationLink>,
 }
 
+fn valid_link_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'_' || c == b'-')
+}
+
 impl TaskOperationIndex {
     /// Restore only after the host validates the saved snapshot's provenance.
     pub fn restore(
@@ -52,7 +58,7 @@ impl TaskOperationIndex {
         tasks: &TaskBoard,
         ledger: &OperationLedger,
     ) -> Result<(), LinkError> {
-        if link.task_id.is_empty() || link.operation_id.is_empty() || link.agent_id.is_empty() {
+        if !valid_link_id(&link.task_id) || !valid_link_id(&link.operation_id) || !valid_link_id(&link.agent_id) {
             return Err(LinkError::InvalidLink);
         }
         if self.links.contains_key(&link.operation_id) {
@@ -67,6 +73,9 @@ impl TaskOperationIndex {
             .ok_or(LinkError::MissingOperation)?;
         if record.intent.actor_id != link.agent_id {
             return Err(LinkError::AgentMismatch);
+        }
+        if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed) {
+            return Err(LinkError::InvalidLink);
         }
         self.links.insert(link.operation_id.clone(), link);
         Ok(())
@@ -97,8 +106,12 @@ impl TaskOperationIndex {
                     .map_err(LinkError::Task)?;
             }
             OperationState::Failed { evidence_ref, .. } => {
+                if task.status != TaskStatus::Completed {
+                    tasks.record_evidence(&link.task_id, evidence_ref)
+                        .map_err(LinkError::Task)?;
+                }
                 if task.status == TaskStatus::Running {
-                    tasks.transition(&link.task_id, TaskStatus::Failed, Some(evidence_ref))
+                    tasks.transition(&link.task_id, TaskStatus::Failed, None)
                         .map_err(LinkError::Task)?;
                 }
             }
@@ -174,6 +187,19 @@ mod tests {
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Blocked);
         assert!(tasks.get("task_1").unwrap().evidence_refs.is_empty());
+    }
+
+    #[test]
+    fn failed_receipt_is_recorded_once_and_marks_running_task_failed() {
+        let (mut tasks, mut ledger) = setup();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        ledger.finish("op_1", "attempt_1", Outcome::Failed {
+            evidence_ref: "error_log_1".into(),
+        }).unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Failed);
+        assert_eq!(tasks.get("task_1").unwrap().evidence_refs, vec!["error_log_1"]);
     }
 
     #[test]
