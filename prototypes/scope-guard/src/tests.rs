@@ -108,3 +108,10 @@ fn competing_threads_cannot_hold_same_scope_simultaneously() {
     assert_eq!(winners, 1);
     assert_eq!(registry.active_count(), Ok(0));
 }
+
+#[test]
+fn redundant_separators_fail_closed_but_drive_root_is_valid() {
+    assert!(ScopePath::parse("C:/").is_ok());
+    assert!(ScopePath::parse("C:/repo//src").is_err());
+    assert!(ScopePath::parse("C:/repo/").is_err());
+}
