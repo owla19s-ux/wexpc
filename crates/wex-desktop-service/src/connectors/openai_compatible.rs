@@ -56,7 +56,7 @@ fn protocol_messages(request: &PreparedChat) -> Result<Vec<wex_api::Message>> {
     Ok(messages)
 }
 
-fn protocol_request(request: &PreparedChat) -> Result<wex_api::ApiRequest> {
+pub(super) fn protocol_request(request: &PreparedChat) -> Result<wex_api::ApiRequest> {
     Ok(wex_api::ApiRequest {
         request_id: request.turn_id.clone(),
         connection_id: request.connection_id.clone(),
