@@ -19,7 +19,7 @@ pub fn error_for_status(status: u16, retry_after: Option<Duration>) -> ApiError 
     };
     let mut error = ApiError::with_status(kind, status, status_detail(status));
     if kind == ErrorKind::RateLimited {
-        error.retry_after = retry_after;
+        error.retry_after = retry_after.map(|delay| delay.min(Duration::from_secs(3600)));
     }
     error
 }
