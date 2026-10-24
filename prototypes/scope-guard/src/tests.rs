@@ -46,6 +46,7 @@ fn reserved_device_names_and_unicode_are_rejected() {
     for path in [
         "C:/repo/CON", "C:/repo/con.txt", "C:/repo/NUL",
         "C:/repo/COM1.log", "C:/repo/LPT9", "C:/repo/文件",
+        "C:/repo/CONIN$", "C:/repo/conout$", "C:/repo/CONIN$.txt",
     ] {
         assert!(ScopePath::parse(path).is_err(), "accepted {path}");
     }
