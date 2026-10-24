@@ -105,6 +105,12 @@ pub struct NewTask {
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Draft,
+    Ready,
+    InProgress,
+    Blocked,
+    InReview,
+    Completed,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
