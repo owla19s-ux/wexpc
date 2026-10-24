@@ -40,6 +40,26 @@ pub fn execute_approved_terminal(
     trusted_root: &Path,
     task: TerminalTask,
 ) -> Result<String> {
+    let report = execute_approved_terminal_report(dispatch, resource_id, trusted_root, task)?;
+    require_success(report.success)?;
+    Ok(report.output)
+}
+
+#[derive(Debug)]
+pub struct TerminalReport {
+    pub success: bool,
+    pub exit_code: Option<i32>,
+    pub output: String,
+}
+
+/// The caller may record a confirmed nonzero exit and hand bounded diagnostic
+/// output back to the model. A nonzero exit is never a success receipt.
+pub fn execute_approved_terminal_report(
+    dispatch: &Dispatch,
+    resource_id: &str,
+    trusted_root: &Path,
+    task: TerminalTask,
+) -> Result<TerminalReport> {
     if dispatch.intent.action != Action::Write
         || dispatch.intent.capability_id != task.capability()
         || dispatch.intent.resource_id != resource_id
@@ -84,13 +104,16 @@ pub fn execute_approved_terminal(
         .map_err(|_| ServiceError::new("TOOL_ERROR", "标准输出读取失败"))?;
     let error = stderr.join().map_err(|_| ServiceError::new("TOOL_ERROR", "读取线程中断"))?
         .map_err(|_| ServiceError::new("TOOL_ERROR", "错误输出读取失败"))?;
-    if output.len() > 64 * 1024 || error.len() > 64 * 1024 {
+    if output.len().saturating_add(error.len()) > 64 * 1024 {
         return Err(ServiceError::new("TOOL_OUTPUT_LIMIT", "终端输出超过上限"));
     }
     output.extend(error);
     let report = String::from_utf8_lossy(&output);
-    require_success(status.success())?;
-    Ok(format!("exit={:?}\n{}", status.code(), report))
+    Ok(TerminalReport {
+        success: status.success(),
+        exit_code: status.code(),
+        output: report.into_owned(),
+    })
 }
 
 #[cfg(test)]
