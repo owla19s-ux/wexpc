@@ -368,3 +368,45 @@ fn journal(app: &AppHandle, attempt: &str, operation: &str, status: &str, digest
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法提交工具回执"))?;
     Ok(())
 }
+
+#[cfg(test)]
+mod proposal_preflight_tests {
+    use super::*;
+
+    fn call(name: &str, arguments_json: &str) -> ToolProposal {
+        ToolProposal {
+            id: "call_1".into(),
+            name: name.into(),
+            arguments_json: arguments_json.into(),
+        }
+    }
+
+    #[test]
+    fn invalid_batch_arguments_are_rejected_before_execution() {
+        assert!(preflight_proposal(&call("git_status", "{}"), false).is_ok());
+        assert_eq!(
+            preflight_proposal(&call("cargo_test", r#"{"command":"shell"}"#), false)
+                .unwrap_err().code,
+            "INVALID_INPUT"
+        );
+        assert_eq!(
+            preflight_proposal(&call("read_file", "{}"), false)
+                .unwrap_err().code,
+            "INVALID_INPUT"
+        );
+        assert_eq!(
+            preflight_proposal(&call("unknown", "{}"), false)
+                .unwrap_err().code,
+            "TOOL_UNSUPPORTED"
+        );
+    }
+
+    #[test]
+    fn github_calls_require_enabled_connection_and_exact_schema() {
+        let read = call("github_read_file", r#"{"owner":"a","repo":"b","path":"README.md"}"#);
+        assert_eq!(preflight_proposal(&read, false).unwrap_err().code, "TOOL_UNSUPPORTED");
+        assert!(preflight_proposal(&read, true).is_ok());
+        let unexpected = call("github_write_file", r#"{"owner":"a","repo":"b","path":"x","sha":"a","content":"x","extra":1}"#);
+        assert_eq!(preflight_proposal(&unexpected, true).unwrap_err().code, "INVALID_INPUT");
+    }
+}
