@@ -35,7 +35,7 @@ impl ScopePath {
         if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' || bytes[2] != b'\\' {
             return Err(ScopeError::Relative);
         }
-        if path.starts_with("\\\\") || path.contains(':') && bytes[1..].iter().filter(|&&c| c == b':').count() != 1 {
+        if path.starts_with("\\") || bytes[2..].contains(&b':') {
             return Err(ScopeError::Unsupported);
         }
         let mut segments = Vec::new();
