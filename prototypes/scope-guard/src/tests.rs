@@ -87,22 +87,24 @@ fn registry_clones_share_active_reservations() {
 fn competing_threads_cannot_hold_same_scope_simultaneously() {
     use std::sync::{Arc, Barrier};
     let registry = super::ScopeRegistry::default();
-    let barrier = Arc::new(Barrier::new(3));
+    let start = Arc::new(Barrier::new(3));
+    let finish = Arc::new(Barrier::new(3));
     let mut threads = Vec::new();
     for _ in 0..2 {
         let r = registry.clone();
-        let b = barrier.clone();
+        let a = start.clone();
+        let b = finish.clone();
         threads.push(std::thread::spawn(move || {
-            b.wait();
+            a.wait();
             let guard = r.reserve(&["C:/shared/file.rs".into()]);
             let acquired = guard.is_ok();
             b.wait();
             acquired
         }));
     }
-    barrier.wait();
-    barrier.wait();
-    let count = threads.into_iter().filter(|t| t.join().unwrap()).count();
-    assert_eq!(count, 1);
+    start.wait();
+    finish.wait();
+    let winners = threads.into_iter().filter(|t| t.join().unwrap()).count();
+    assert_eq!(winners, 1);
     assert_eq!(registry.active_count(), Ok(0));
 }
