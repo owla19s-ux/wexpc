@@ -199,6 +199,52 @@ pub fn execute_chat_stream_with_progress(
     Ok(completion.text)
 }
 
+/// Only a terminal, unambiguous text completion may become a durable turn.
+/// Tool intent and truncated output must not be reported as a successful reply.
+fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
+    let choices = value["choices"].as_array().ok_or_else(|| {
+        ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少 choices 数组")
+    })?;
+    if choices.len() != 1 {
+        return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商回复的候选数量不符合预期"));
+    }
+    let choice = &choices[0];
+    let message = choice["message"].as_object().ok_or_else(|| {
+        ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少消息对象")
+    })?;
+    if let Some(calls) = message.get("tool_calls").filter(|v| !v.is_null()) {
+        let calls = calls.as_array().ok_or_else(|| {
+            ServiceError::new("API_RESPONSE_ERROR", "服务商工具调用格式无效")
+        })?;
+        if !calls.is_empty() {
+            return Err(ServiceError::new(
+                "TOOLS_NOT_CONNECTED",
+                "工具执行尚未接通；没有执行服务商提出的工具调用",
+            ));
+        }
+    }
+    match choice.get("finish_reason").and_then(|v| v.as_str()) {
+        Some("tool_calls" | "function_call") => {
+            return Err(ServiceError::new("TOOLS_NOT_CONNECTED", "服务商要求工具调用，尚未接入执行"))
+        }
+        Some("length") => {
+            return Err(ServiceError::new("API_RESPONSE_INCOMPLETE", "服务商回复被截断，未保存为成功回复"))
+        }
+        Some("content_filter") => {
+            return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商未完成文本回复"))
+        }
+        Some("stop") | None => {}
+        Some(_) => {
+            return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商返回不支持的结束状态"))
+        }
+    }
+    message.get("content")
+        .and_then(|v| v.as_str())
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))
+}
+
 pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     if key.is_empty() {
         return Err(ServiceError::new(
@@ -249,23 +295,5 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     }
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效 JSON"))?;
-    let message = &value["choices"][0]["message"];
-    // Never interpret malformed tool-call payloads as a plain-text success.
-    // The dispatcher is not connected, so even a valid tool intent must fail closed.
-    if let Some(calls) = message.get("tool_calls").filter(|v| !v.is_null()) {
-        let calls = calls.as_array().ok_or_else(|| {
-            ServiceError::new("API_RESPONSE_ERROR", "服务商工具调用格式无效")
-        })?;
-        if !calls.is_empty() {
-            return Err(ServiceError::new(
-                "TOOLS_NOT_CONNECTED",
-                "本批尚未接入工具执行，未执行服务商提出的工具调用",
-            ));
-        }
-    }
-    message["content"]
-        .as_str()
-        .filter(|v| !v.is_empty())
-        .map(str::to_owned)
-        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))
+    parse_text_completion(&value)
 }
