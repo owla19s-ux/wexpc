@@ -48,3 +48,25 @@ fn failed_admission_does_not_leave_ghost_task() {
     drop(held);
     assert!(gate.start("two", &["C:/repo/sub".into()]).is_ok());
 }
+
+#[test]
+fn scoped_execution_holds_reservation_through_callback() {
+    let gate = TaskGate::default();
+    let observer = gate.clone();
+    let result = gate.execute("job", &["C:/repo/src".into()], || {
+        assert_eq!(observer.is_running("job"), Ok(true));
+        assert!(matches!(observer.start("conflict", &["C:/repo/src/a.rs".into()]), Err(TaskError::Scope(ReservationError::Conflict))));
+        Ok::<_, &'static str>(42)
+    });
+    assert_eq!(result, Ok(Ok(42)));
+    assert_eq!(gate.is_running("job"), Ok(false));
+}
+
+#[test]
+fn scoped_execution_returns_tool_error_and_releases_lease() {
+    let gate = TaskGate::default();
+    let result = gate.execute("job", &["C:/repo/src".into()], || Err::<(), _>("tool failed"));
+    assert_eq!(result, Ok(Err("tool failed")));
+    assert_eq!(gate.is_running("job"), Ok(false));
+    assert!(gate.start("retry", &["C:/repo/src".into()]).is_ok());
+}
