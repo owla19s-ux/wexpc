@@ -53,3 +53,7 @@ cargo check --locked --manifest-path src-tauri/Cargo.toml
 2026-10-24 已验证代码提交 `1b5319a8b605a66f1be55f63da9100c087b77af6`：Linux 全量 Rust 测试 230 项、clippy、格式检查和前端生产构建通过；[Linux/Windows Rust CI](https://github.com/owla19s-ux/wexpc/actions/runs/40023876374) 与 [Windows 桌面 Host/前端检查](https://github.com/owla19s-ux/wexpc/actions/runs/40023876304) 均通过。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡，Windows 编译证据来自上述 CI。
 
 这份记录之后的文档提交不改变已验证的源码。未构建安装包，未调用真实 API 服务商，未验证凭证库真实读写或 Windows 窗口体验。桌面 Windows 检查只在相关源码/工作流 PR 或按需手动触发，不在本批构建安装包。
+
+## 组织与项目编辑
+
+Space/分组可重命名，Context/项目可编辑名称、目标和资料引用；保留对象 ID、组织位置、项目/对话关联与已有成员/任务。编辑开始时记录数据修订，保存时在同一事务核对；冲突拒绝写入且保留表单，用户可重新读取、核对并重新编辑。资料引用变更不操作外部文件或自动授权。当前全局修订也会因对话更新而前进，可能需要重新核对；未冻结为永久的对象并发协议。

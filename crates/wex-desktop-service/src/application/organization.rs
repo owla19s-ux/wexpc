@@ -18,6 +18,82 @@ fn validate_placement(s: &DesktopSnapshot, space_id: &str, group_id: Option<&str
 }
 
 impl DesktopService {
+    pub fn rename_space(&mut self, revision: u64, space_id: &str, name: String) -> Result<()> {
+        let name = title(&name)?;
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            s.spaces
+                .iter_mut()
+                .find(|v| v.id == space_id)
+                .ok_or_else(|| invalid("空间不存在"))?
+                .name = name;
+            Ok(())
+        })
+    }
+    pub fn rename_group(&mut self, revision: u64, group_id: &str, name: String) -> Result<()> {
+        let name = title(&name)?;
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            s.groups
+                .iter_mut()
+                .find(|v| v.id == group_id)
+                .ok_or_else(|| invalid("分组不存在"))?
+                .name = name;
+            Ok(())
+        })
+    }
+    pub fn update_context(
+        &mut self,
+        revision: u64,
+        context_id: &str,
+        name: String,
+        goal: String,
+        resources: Vec<String>,
+    ) -> Result<()> {
+        let name = title(&name)?;
+        text(&goal)?;
+        for r in &resources {
+            text(r)?;
+        }
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            let c = s
+                .contexts
+                .iter_mut()
+                .find(|c| c.id == context_id)
+                .ok_or_else(|| invalid("上下文不存在"))?;
+            c.name = name;
+            c.goal = goal;
+            c.resources = resources;
+            Ok(())
+        })
+    }
+    pub fn update_project(
+        &mut self,
+        revision: u64,
+        project_id: &str,
+        name: String,
+        goal: String,
+        resources: Vec<String>,
+    ) -> Result<()> {
+        let name = title(&name)?;
+        text(&goal)?;
+        for r in &resources {
+            text(r)?;
+        }
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            let p = s
+                .projects
+                .iter_mut()
+                .find(|p| p.id == project_id)
+                .ok_or_else(|| invalid("项目不存在"))?;
+            p.name = name;
+            p.goal = goal;
+            p.resources = resources;
+            Ok(())
+        })
+    }
     pub fn bind_conversation_context(
         &mut self,
         conversation_id: &str,
@@ -134,4 +210,14 @@ impl DesktopService {
             Ok(())
         })
     }
+}
+
+fn check_revision(s: &DesktopSnapshot, revision: u64) -> Result<()> {
+    if s.revision != revision {
+        return Err(ServiceError::new(
+            "REVISION_CONFLICT",
+            "资料已发生变化，请刷新后核对再保存；未覆盖当前数据",
+        ));
+    }
+    Ok(())
 }

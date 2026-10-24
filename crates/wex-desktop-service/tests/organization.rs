@@ -139,3 +139,62 @@ fn independent_conversation_can_bind_context_without_a_project() {
         .context_id
         .is_none());
 }
+
+#[test]
+fn editing_context_preserves_links_and_rejects_stale_writes() {
+    let mut app = DesktopService::memory().unwrap();
+    let space = app.create_space("旧空间".into()).unwrap();
+    let group = app.create_group(&space.id, "旧组".into()).unwrap();
+    let c = app
+        .create_context(
+            "旧名称".into(),
+            "原目标".into(),
+            vec![],
+            &space.id,
+            Some(group.id.clone()),
+        )
+        .unwrap();
+    let project = app
+        .create_project("项目".into(), "".into(), vec![])
+        .unwrap();
+    app.bind_project_context(&project.id, Some(c.id.clone()))
+        .unwrap();
+    let rev = app.snapshot().unwrap().revision;
+    app.update_context(
+        rev,
+        &c.id,
+        "新名称".into(),
+        "新目标".into(),
+        vec!["D:\\参考".into()],
+    )
+    .unwrap();
+    assert_eq!(
+        app.update_context(rev, &c.id, "过期".into(), "".into(), vec![])
+            .unwrap_err()
+            .code,
+        "REVISION_CONFLICT"
+    );
+    let s = app.snapshot().unwrap();
+    assert_eq!(s.contexts[0].name, "新名称");
+    assert_eq!(s.contexts[0].id, c.id);
+    assert_eq!(s.projects[0].context_id.as_deref(), Some(c.id.as_str()));
+    assert_eq!(s.placements[0].group_id.as_deref(), Some(group.id.as_str()));
+    let rev = s.revision;
+    assert!(app.rename_space(rev, &space.id, " ".into()).is_err());
+    assert_eq!(app.snapshot().unwrap().revision, rev);
+    app.rename_space(rev, &space.id, "新空间".into()).unwrap();
+    app.rename_group(app.snapshot().unwrap().revision, &group.id, "新组".into())
+        .unwrap();
+    app.update_project(
+        app.snapshot().unwrap().revision,
+        &project.id,
+        "新项目".into(),
+        "开发目标".into(),
+        vec!["repo".into()],
+    )
+    .unwrap();
+    assert_eq!(
+        app.snapshot().unwrap().projects[0].context_id.as_deref(),
+        Some(c.id.as_str())
+    );
+}

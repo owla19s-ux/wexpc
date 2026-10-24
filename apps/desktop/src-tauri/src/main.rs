@@ -13,6 +13,47 @@ fn locked(shared: &Shared) -> Result<std::sync::MutexGuard<'_, DesktopService>> 
 }
 
 #[tauri::command]
+fn rename_space(
+    state: State<'_, Shared>,
+    revision: u64,
+    space_id: String,
+    name: String,
+) -> Result<()> {
+    locked(&state)?.rename_space(revision, &space_id, name)
+}
+#[tauri::command]
+fn rename_group(
+    state: State<'_, Shared>,
+    revision: u64,
+    group_id: String,
+    name: String,
+) -> Result<()> {
+    locked(&state)?.rename_group(revision, &group_id, name)
+}
+#[tauri::command]
+fn update_context(
+    state: State<'_, Shared>,
+    revision: u64,
+    context_id: String,
+    name: String,
+    goal: String,
+    resources: Vec<String>,
+) -> Result<()> {
+    locked(&state)?.update_context(revision, &context_id, name, goal, resources)
+}
+#[tauri::command]
+fn update_project(
+    state: State<'_, Shared>,
+    revision: u64,
+    project_id: String,
+    name: String,
+    goal: String,
+    resources: Vec<String>,
+) -> Result<()> {
+    locked(&state)?.update_project(revision, &project_id, name, goal, resources)
+}
+
+#[tauri::command]
 fn bind_conversation_context(
     state: State<'_, Shared>,
     conversation_id: String,
@@ -172,6 +213,10 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            rename_space,
+            rename_group,
+            update_context,
+            update_project,
             bind_conversation_context,
             snapshot,
             create_project,
