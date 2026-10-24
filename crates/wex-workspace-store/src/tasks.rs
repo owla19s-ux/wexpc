@@ -100,6 +100,25 @@ struct Snapshot {
 #[derive(Deserialize)]
 struct Version { schema_version: u64 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskChange {
+    Insert(Task),
+    Assign { task_id: String, agent_id: String },
+    Transition { task_id: String, status: TaskStatus, evidence: Option<String> },
+    RecordEvidence { task_id: String, evidence_ref: String },
+}
+
+fn apply_task_change(board: &mut TaskBoard, change: TaskChange) -> Result<(), TaskError> {
+    match change {
+        TaskChange::Insert(task) => board.insert(task),
+        TaskChange::Assign { task_id, agent_id } => board.assign(&task_id, agent_id),
+        TaskChange::Transition { task_id, status, evidence } =>
+            board.transition(&task_id, status, evidence),
+        TaskChange::RecordEvidence { task_id, evidence_ref } =>
+            board.record_evidence(&task_id, evidence_ref),
+    }
+}
+
 #[derive(Debug)]
 pub struct TaskStore { io: OrganizationStore }
 impl TaskStore {
@@ -174,6 +193,46 @@ impl TaskStore {
         let bytes = serde_json::to_vec(&Snapshot {
             schema_version: 1,
             revision: next,
+            tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
+            links: view.links.clone().into_iter().map(Into::into).collect(),
+        }).map_err(|_| OrganizationError::Unavailable)?;
+        if bytes.len() as u64 > SNAPSHOT_LIMIT {
+            return Err(OrganizationError::LimitExceeded.into());
+        }
+        if let Err(error) = self.io.save_bytes_locked(&bytes) {
+            lock.release = false;
+            return Err(error.into());
+        }
+        Ok(view)
+    }
+
+    /// Apply one trusted task mutation against a revisioned snapshot.
+    /// The ledger is used only to validate existing links; no tool dispatch occurs.
+    pub fn apply(
+        &self,
+        expected_revision: u64,
+        change: TaskChange,
+        ledger: &OperationLedger,
+    ) -> Result<TaskStoreView, TaskStoreError> {
+        let mut lock = self.io.lock()?;
+        let current = self.read_locked()?;
+        if current.revision != expected_revision {
+            return Err(OrganizationError::Conflict.into());
+        }
+        // Trusted live hydration: retain Running tasks during normal mutations.
+        let mut live = TaskBoard::default();
+        for task in current.tasks {
+            live.insert(task).map_err(TaskStoreError::Domain)?;
+        }
+        apply_task_change(&mut live, change).map_err(TaskStoreError::Domain)?;
+        let next = expected_revision.checked_add(1)
+            .ok_or(OrganizationError::RevisionExhausted)?;
+        let view = TaskStoreView {
+            revision: next, tasks: live.snapshot(), links: current.links,
+        };
+        Self::validate_links(&view, ledger)?;
+        let bytes = serde_json::to_vec(&Snapshot {
+            schema_version: 1, revision: next,
             tasks: view.tasks.clone().into_iter().map(Into::into).collect(),
             links: view.links.clone().into_iter().map(Into::into).collect(),
         }).map_err(|_| OrganizationError::Unavailable)?;
