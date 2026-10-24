@@ -145,5 +145,15 @@ mod tests {
             read_approved_github_file(&dispatch, "repo_one", "owner", "repo", "../private", "token")
                 .unwrap_err().code, "INVALID_INPUT"
         );
+        let mut write_dispatch = dispatch;
+        write_dispatch.intent.action = Action::Write;
+        write_dispatch.intent.capability_id = "github_file_write".into();
+        write_dispatch.intent.expected_version = Some("a".repeat(40));
+        assert_eq!(
+            update_approved_github_file(
+                &write_dispatch, "repo_one", "owner", "repo", "README.md",
+                &"b".repeat(40), b"data", "token"
+            ).unwrap_err().code, "DISPATCH_REJECTED"
+        );
     }
 }
