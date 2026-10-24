@@ -1,6 +1,4 @@
-#[cfg(test)]
-mod tests {
-    use super::{may_overlap, ScopeError, ScopePath};
+use super::{may_overlap, ScopeError, ScopePath};
 
     #[test]
     fn same_file_and_ancestor_overlap() {
@@ -37,4 +35,3 @@ mod tests {
         assert_eq!(may_overlap(&["C:\\repo".into()], &["C:\\repo\\tests".into()]), Ok(true));
         assert!(may_overlap(&["relative".into()], &["D:\\safe".into()]).is_err());
     }
-}
