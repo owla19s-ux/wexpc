@@ -24,6 +24,14 @@ impl TerminalTask {
     }
 }
 
+fn require_success(success: bool) -> Result<()> {
+    if success {
+        Ok(())
+    } else {
+        Err(ServiceError::new("TOOL_EXIT_NONZERO", "Cargo returned a nonzero exit status"))
+    }
+}
+
 /// The trusted Host must persist InFlight and record the final observed
 /// exit status as evidence. A timeout is uncertain; never auto-retry.
 pub fn execute_approved_terminal(
@@ -81,7 +89,7 @@ pub fn execute_approved_terminal(
     }
     output.extend(error);
     let report = String::from_utf8_lossy(&output);
-    if !status.success() { return Err(ServiceError::new("TOOL_EXIT_NONZERO", "Cargo returned a nonzero exit status")); }
+    require_success(status.success())?;
     Ok(format!("exit={:?}\n{}", status.code(), report))
 }
 
@@ -89,6 +97,12 @@ pub fn execute_approved_terminal(
 mod tests {
     use super::*;
     use wex_core::operation::OperationIntent;
+    #[test]
+    fn cargo_failure_is_not_a_successful_receipt() {
+        assert!(require_success(true).is_ok());
+        assert_eq!(require_success(false).unwrap_err().code, "TOOL_EXIT_NONZERO");
+    }
+
     #[test]
     fn rejects_wrong_command_before_spawn() {
         let dispatch = Dispatch {
