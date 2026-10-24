@@ -74,9 +74,6 @@ impl TaskOperationIndex {
         if record.intent.actor_id != link.agent_id {
             return Err(LinkError::AgentMismatch);
         }
-        if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed) {
-            return Err(LinkError::InvalidLink);
-        }
         self.links.insert(link.operation_id.clone(), link);
         Ok(())
     }
