@@ -91,6 +91,7 @@ pub enum ReservationError {
     Invalid(ScopeError),
     Conflict,
     Unavailable,
+    Exhausted,
 }
 
 impl ScopeRegistry {
@@ -103,7 +104,7 @@ impl ScopeRegistry {
         if held.iter().any(|(_, entry)| entry.iter().any(|a| scopes.iter().any(|b| a.overlaps(b)))) {
             return Err(ReservationError::Conflict);
         }
-        let id = held.last().map(|(id, _)| id.checked_add(1)).unwrap_or(Some(1)).ok_or(ReservationError::Unavailable)?;
+        let id = held.last().map(|(id, _)| id.checked_add(1)).unwrap_or(Some(1)).ok_or(ReservationError::Exhausted)?;
         held.push((id, scopes));
         Ok(ScopeReservation { registry: self.clone(), id })
     }
