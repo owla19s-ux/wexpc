@@ -119,6 +119,99 @@ fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<S
     content
 }
 
+
+/// Approval always displays the exact repo/path and, for writes, every byte
+/// of the bounded text update. The model never sees the GitHub PAT.
+fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> Result<String> {
+    let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "GitHub 工具参数无效"))?;
+    let field = |name: &str| -> Result<&str> {
+        args.get(name).and_then(|v| v.as_str())
+            .ok_or_else(|| ServiceError::new("INVALID_INPUT", "GitHub 缺少必要参数"))
+    };
+    let owner = field("owner")?;
+    let repo = field("repo")?;
+    let path = field("path")?;
+    let write = call.name == "github_write_file";
+    let sha = if write { field("sha")? } else { "" };
+    let content = if write { field("content")? } else { "" };
+    if owner.is_empty() || repo.is_empty() || path.is_empty()
+        || owner.len() > 255 || repo.len() > 255 || path.len() > 4096
+        || owner.chars().any(char::is_control)
+        || repo.chars().any(char::is_control)
+        || path.chars().any(char::is_control)
+        || (write && (sha.len() != 40 || content.len() > 4096))
+    {
+        return Err(ServiceError::new("INVALID_INPUT", "GitHub 审批参数或文件内容超过限制"));
+    }
+    let summary = if write {
+        format!("WEXPC 请求修改 GitHub 文件\n仓库：{owner}/{repo}\n文件：{path}\n原 SHA：{sha}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
+    } else {
+        format!("WEXPC 请求读取 GitHub 文件\n仓库：{owner}/{repo}\n文件：{path}")
+    };
+    let approved = app.dialog().message(summary)
+        .title("逐次 GitHub 工具授权")
+        .buttons(MessageDialogButtons::OkCancel)
+        .blocking_show();
+    if !approved {
+        return Err(ServiceError::new("PERMISSION_DENIED", "用户拒绝 GitHub 操作"));
+    }
+    let token = crate::github_config::credential(app)?;
+    let resource_id = digest_arguments("github_repo", "global", &[owner.as_bytes(), repo.as_bytes()]);
+    let capability = if write { "github_file_write" } else { "github_file_read" };
+    let action = if write { Action::Write } else { Action::Read };
+    let parameters: Vec<&[u8]> = if write {
+        vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes(), sha.as_bytes(), content.as_bytes()]
+    } else {
+        vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes()]
+    };
+    let operation_id = format!("op_{}", uuid::Uuid::new_v4().simple());
+    let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
+    let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
+    let intent = OperationIntent {
+        id: operation_id.clone(), actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(), context_id: None,
+        connection_id: "github".into(), capability_id: capability.into(),
+        resource_id: resource_id.clone(), action,
+        expected_version: if write { Some(sha.into()) } else { None },
+        intent_digest: digest_arguments(capability, &resource_id, &parameters),
+    };
+    let mut ledger = OperationLedger::default();
+    ledger.propose(intent.clone()).map_err(|_| core_failure())?;
+    ledger.approve(&operation_id, &intent, 1).map_err(|_| core_failure())?;
+    let dispatch = ledger.begin(&operation_id, &attempt_id, ExecutionChecks {
+        authority_revision: 1, connection_enabled: true,
+        authenticated: true, platform_available: true, resource_allowed: true,
+    }).map_err(|_| core_failure())?;
+    journal(app, &attempt_id, &operation_id, "in_flight", Some(&intent.intent_digest))?;
+    let outcome = if write {
+        wex_desktop_service::update_approved_github_file(
+            &dispatch, &resource_id, owner, repo, path, sha, content.as_bytes(), &token,
+        )
+    } else {
+        wex_desktop_service::read_approved_github_file(
+            &dispatch, &resource_id, owner, repo, path, &token,
+        )
+    };
+    let status = match &outcome {
+        Ok(_) => "succeeded",
+        Err(error) if error.code == "OUTCOME_UNKNOWN" => "unknown",
+        Err(_) => "failed",
+    };
+    let evidence_hash = outcome.as_ref().ok().map(|value|
+        digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()])
+    );
+    journal(app, &attempt_id, &operation_id, status, evidence_hash.as_deref())?;
+    let core_outcome = match status {
+        "succeeded" => Outcome::Succeeded { evidence_ref: evidence_id.clone() },
+        "unknown" => Outcome::Unknown,
+        _ => Outcome::Failed { evidence_ref: evidence_id.clone() },
+    };
+    ledger.finish(&operation_id, &attempt_id, core_outcome).map_err(|_| core_failure())?;
+    let body = outcome?;
+    Ok(serde_json::json!({"evidence_ref": evidence_id, "result":body}).to_string())
+}
+
 fn core_failure() -> ServiceError {
     ServiceError::new("OPERATION_STATE_ERROR", "Core 审批或派发状态无效")
 }
