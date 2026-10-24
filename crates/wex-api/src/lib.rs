@@ -5,9 +5,13 @@
 //! redirect refusal, cancellation wake-up and backpressure.
 
 pub mod decoder;
+pub mod encode;
+pub mod errors;
 pub mod types;
 
 pub use decoder::Decoder;
+pub use encode::{encode_request, EncodeOptions};
+pub use errors::{classify_provider_code, error_for_status, provider_error_from_body};
 pub use types::*;
 
 use std::sync::atomic::{AtomicBool, Ordering};
