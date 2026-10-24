@@ -182,4 +182,20 @@ mod tests {
         assert!(app.member_brief(&second.id).unwrap().execution_receipts.is_empty());
     }
 
+    #[test]
+    fn blank_outcome_summary_cannot_be_persisted() {
+        let mut app = DesktopService::memory().unwrap();
+        let before = app.snapshot().unwrap().revision;
+        let err = app.record_executor_outcome(ExecutorOutcome {
+            task_id: "missing".into(),
+            agent_id: "missing".into(),
+            tool_name: "fixture".into(),
+            invocation_id: "id".into(),
+            succeeded: true,
+            summary: "   ".into(),
+        }).unwrap_err();
+        assert_eq!(err.code, "INVALID_INPUT");
+        assert_eq!(app.snapshot().unwrap().revision, before);
+    }
+
 }
