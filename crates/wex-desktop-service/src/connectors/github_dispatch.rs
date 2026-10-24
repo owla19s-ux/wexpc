@@ -29,6 +29,7 @@ pub fn read_approved_github_file(
     {
         return Err(ServiceError::new("INVALID_INPUT", "仓库或文件路径无效"));
     }
+    super::intent_binding::verify_arguments(dispatch, &[owner.as_bytes(), repo.as_bytes(), path.as_bytes()])?;
     let mut url = Url::parse("https://api.github.com/")
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "GitHub API 地址错误"))?;
     url.path_segments_mut().map_err(|_| ServiceError::new("INVALID_INPUT", "路径无效"))?
@@ -91,6 +92,7 @@ pub fn update_approved_github_file(
     {
         return Err(ServiceError::new("INVALID_INPUT", "目标路径或写入大小无效"));
     }
+    super::intent_binding::verify_arguments(dispatch, &[owner.as_bytes(), repo.as_bytes(), path.as_bytes(), expected_sha.as_bytes(), content])?;
     let mut url = Url::parse("https://api.github.com/")
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "GitHub API 地址错误"))?;
     url.path_segments_mut().map_err(|_| ServiceError::new("INVALID_INPUT", "路径无效"))?
