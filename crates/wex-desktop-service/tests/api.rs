@@ -274,3 +274,41 @@ fn both_transports_reject_unsupported_transcript_roles_before_network() {
     assert_eq!(non_stream.code, "INVALID_INPUT");
     assert_eq!(stream.code, "INVALID_INPUT");
 }
+
+#[test]
+fn both_transports_encode_the_same_ordered_transcript() {
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"message":{"content":"ok"}}]}"#,
+    );
+    let mut complete = request(url);
+    complete.messages.insert(
+        0,
+        ApiMessage {
+            role: "system".into(),
+            content: "project context is not permission".into(),
+        },
+    );
+    complete.messages.push(ApiMessage {
+        role: "assistant".into(),
+        content: "previous reply".into(),
+    });
+    assert_eq!(execute_chat(&complete, "secret-key").unwrap(), "ok");
+    let sent = handle.join().unwrap();
+    let complete_body: serde_json::Value =
+        serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+
+    let (url, handle) = sse_server(vec![
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}\n\n".into(),
+        "data: [DONE]\n\n".into(),
+    ]);
+    let mut streaming = complete;
+    streaming.base_url = url;
+    assert_eq!(execute_chat_stream(&streaming, "secret-key").unwrap(), "ok");
+    let sent = handle.join().unwrap();
+    let stream_body: serde_json::Value =
+        serde_json::from_str(sent.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+    assert_eq!(complete_body["messages"], stream_body["messages"]);
+    assert_eq!(complete_body["messages"][0]["role"], "system");
+    assert_eq!(complete_body["messages"][2]["role"], "assistant");
+}
