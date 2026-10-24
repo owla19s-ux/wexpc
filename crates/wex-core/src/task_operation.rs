@@ -10,6 +10,8 @@ pub struct TaskOperationLink {
     pub task_id: String,
     pub operation_id: String,
     pub agent_id: String,
+    /// None means an older snapshot lacks assignment provenance.
+    pub assignment_epoch: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,8 +82,17 @@ impl TaskOperationIndex {
             return Err(LinkError::DuplicateOperation);
         }
         let task = tasks.get(&link.task_id).ok_or(LinkError::MissingTask)?;
-        if require_current_assignment && task.assigned_agent.as_deref() != Some(&link.agent_id) {
+        if require_current_assignment
+            && (task.assigned_agent.as_deref() != Some(&link.agent_id)
+                || link.assignment_epoch != Some(task.assignment_epoch))
+        {
             return Err(LinkError::AgentMismatch);
+        }
+        if link
+            .assignment_epoch
+            .is_some_and(|epoch| epoch > task.assignment_epoch)
+        {
+            return Err(LinkError::InvalidLink);
         }
         let record = ledger
             .view()
@@ -120,7 +131,9 @@ impl TaskOperationIndex {
         let task = tasks.get(&link.task_id).ok_or(LinkError::MissingTask)?;
         // A historical receipt remains visible after reassignment, but cannot
         // change the newly assigned agent's task progress.
-        if task.assigned_agent.as_deref() != Some(&link.agent_id) {
+        if task.assigned_agent.as_deref() != Some(&link.agent_id)
+            || link.assignment_epoch != Some(task.assignment_epoch)
+        {
             return Ok(());
         }
         let status = task.status.clone();
@@ -167,6 +180,7 @@ mod tests {
                 project_id: "pc".into(),
                 objective: "Build project".into(),
                 assigned_agent: Some("agent_a".into()),
+                assignment_epoch: 0,
                 status: TaskStatus::Running,
                 evidence_refs: vec![],
             })
@@ -207,6 +221,7 @@ mod tests {
             task_id: "task_1".into(),
             operation_id: "op_1".into(),
             agent_id: "agent_a".into(),
+            assignment_epoch: Some(0),
         }
     }
 
@@ -315,6 +330,40 @@ mod tests {
             TaskOperationIndex::restore(vec![forged], &tasks, &ledger),
             Err(LinkError::AgentMismatch)
         ));
+    }
+
+    #[test]
+    fn old_receipt_cannot_affect_new_assignment_to_same_agent() {
+        let (mut tasks, mut ledger) = setup();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Blocked, None)
+            .unwrap();
+        tasks.assign("task_1", "agent_b".into()).unwrap();
+        tasks.assign("task_1", "agent_a".into()).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Running, None)
+            .unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Failed {
+                    evidence_ref: "old_failure".into(),
+                },
+            )
+            .unwrap();
+        index.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        let current = tasks.get("task_1").unwrap();
+        assert_eq!(current.assignment_epoch, 2);
+        assert_eq!(current.status, TaskStatus::Running);
+        assert!(current.evidence_refs.is_empty());
+        assert_eq!(
+            TaskOperationIndex::restore(index.snapshot(), &tasks, &ledger)
+                .unwrap()
+                .snapshot(),
+            vec![link()]
+        );
     }
 
     #[test]
