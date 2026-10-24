@@ -131,5 +131,7 @@ impl Drop for ScopeReservation {
     }
 }
 
+pub mod task_gate;
+
 #[cfg(test)]
 mod tests;
