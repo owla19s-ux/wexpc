@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod vault;
 mod tool_approvals;
+mod github_config;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
@@ -145,6 +146,19 @@ fn add_connection(
 }
 
 #[tauri::command]
+fn configure_github(app: tauri::AppHandle, token: String) -> Result<()> {
+    github_config::configure(&app, &token)
+}
+#[tauri::command]
+fn set_github_enabled(app: tauri::AppHandle, enabled: bool) -> Result<()> {
+    github_config::set_enabled(&app, enabled)
+}
+#[tauri::command]
+fn github_status(app: tauri::AppHandle) -> Result<github_config::GithubStatus> {
+    github_config::status(&app)
+}
+
+#[tauri::command]
 fn set_connection_enabled(
     state: State<'_, Shared>,
     connection_id: String,
@@ -269,6 +283,9 @@ fn main() {
             create_project,
             add_connection,
             set_connection_enabled,
+            configure_github,
+            set_github_enabled,
+            github_status,
             add_agent,
             member_brief,
             create_task,
