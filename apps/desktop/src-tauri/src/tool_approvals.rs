@@ -97,6 +97,19 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     {
         return Err(ServiceError::new("INVALID_INPUT", "工具参数字段与声明不一致"));
     }
+    for field in fields {
+        let value = obj.get(*field).and_then(|v| v.as_str()).unwrap_or_default();
+        if (*field != "content" && value.is_empty()) || value.contains('\\0') || value.chars().any(char::is_control) {
+            return Err(ServiceError::new("INVALID_INPUT", "工具参数包含空值或控制字符"));
+        }
+    }
+    if call.name == "github_write_file" {
+        let sha = obj.get("sha").and_then(|v| v.as_str()).unwrap_or_default();
+        let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        if sha.len() != 40 || !sha.bytes().all(|c| c.is_ascii_hexdigit()) || content.len() > 4096 {
+            return Err(ServiceError::new("INVALID_INPUT", "GitHub 写入版本或大小不合法"));
+        }
+    }
     Ok(())
 }
 
