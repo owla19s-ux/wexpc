@@ -100,17 +100,18 @@ impl TaskOperationIndex {
         if task.assigned_agent.as_deref() != Some(&link.agent_id) {
             return Err(LinkError::AgentMismatch);
         }
+        let status = task.status.clone();
         match record.state {
             OperationState::Succeeded { evidence_ref, .. } => {
                 tasks.record_evidence(&link.task_id, evidence_ref)
                     .map_err(LinkError::Task)?;
             }
             OperationState::Failed { evidence_ref, .. } => {
-                if task.status != TaskStatus::Completed {
+                if status != TaskStatus::Completed {
                     tasks.record_evidence(&link.task_id, evidence_ref)
                         .map_err(LinkError::Task)?;
                 }
-                if task.status == TaskStatus::Running {
+                if status == TaskStatus::Running {
                     tasks.transition(&link.task_id, TaskStatus::Failed, None)
                         .map_err(LinkError::Task)?;
                 }
