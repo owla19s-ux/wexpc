@@ -104,6 +104,30 @@ pub fn committed_tool_messages(
     Ok(messages)
 }
 
+/// Drive bounded model/tool turns. The callback is owned by a trusted Host:
+/// it MUST await human approval and durably settle tool evidence before
+/// returning. Neither this function nor the model can authorize a tool.
+pub fn drive_tool_rounds(
+    prepared: &PreparedChat,
+    key: &str,
+    tools: Vec<ToolDefinition>,
+    mut settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
+) -> Result<String> {
+    let mut transcript = Vec::new();
+    for _ in 0..8 {
+        match execute_model_step(prepared, key, transcript.clone(), tools.clone())? {
+            ModelStep::Text(text) => return Ok(text),
+            ModelStep::Proposal { assistant_text, calls } => {
+                // The Host callback is the *only* path to execution.
+                // Rejection or interrupted approval ends the turn here.
+                let results = settle_approved(&calls)?;
+                transcript.extend(committed_tool_messages(&calls, &results, assistant_text)?);
+            }
+        }
+    }
+    Err(ServiceError::new("TOOL_ROUND_LIMIT", "工具回合已达到上限，未自动继续"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
