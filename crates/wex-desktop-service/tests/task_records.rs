@@ -498,3 +498,24 @@ fn closed_tasks_reject_definition_edits() {
     assert_eq!(result.unwrap_err().code, "TASK_CLOSED");
     assert_eq!(app.snapshot().unwrap().revision, revision);
 }
+
+#[test]
+fn review_status_rejects_task_edits_without_changing_revision() {
+    let mut app = DesktopService::memory().unwrap();
+    let t = task(&mut app, "Review");
+    for next in [TaskStatus::Ready, TaskStatus::InProgress, TaskStatus::InReview] {
+        let revision = app.snapshot().unwrap().revision;
+        app.transition_task(revision, &t.id, next).unwrap();
+    }
+    let revision = app.snapshot().unwrap().revision;
+    let error = app.update_task(revision, &t.id, NewTask {
+        project_id: t.project_id,
+        title: "Edited".into(),
+        goal: "".into(),
+        scope: vec![],
+        acceptance: "".into(),
+        agent_ids: vec![],
+    }).unwrap_err();
+    assert_eq!(error.code, "TASK_CLOSED");
+    assert_eq!(app.snapshot().unwrap().revision, revision);
+}
