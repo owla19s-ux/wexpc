@@ -2,7 +2,7 @@
 //! This is NOT an authorization engine, lock manager, canonical filesystem resolver,
 //! or a proof that two operations cannot conflict.
 //! Rejects ambiguous paths rather than allowing an unsafe parallel write.
-use std::fmt;
+use std::{fmt, sync::{Arc, Mutex}};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ScopeError {
@@ -71,6 +71,52 @@ pub fn may_overlap(left: &[String], right: &[String]) -> Result<bool, ScopeError
     let left: Vec<_> = left.iter().map(|s| ScopePath::parse(s)).collect::<Result<_, _>>()?;
     let right: Vec<_> = right.iter().map(|s| ScopePath::parse(s)).collect::<Result<_, _>>()?;
     Ok(left.iter().any(|a| right.iter().any(|b| a.overlaps(b))))
+}
+
+/// Process-local reservations only. Not an OS lock or permission grant.
+#[derive(Default, Clone)]
+pub struct ScopeRegistry(Arc<Mutex<Vec<Vec<ScopePath>>>>);
+
+pub struct ScopeReservation {
+    registry: ScopeRegistry,
+    scopes: Vec<ScopePath>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum ReservationError {
+    Empty,
+    Invalid(ScopeError),
+    Conflict,
+    Unavailable,
+}
+
+impl ScopeRegistry {
+    pub fn reserve(&self, paths: &[String]) -> Result<ScopeReservation, ReservationError> {
+        if paths.is_empty() { return Err(ReservationError::Empty); }
+        let scopes: Vec<ScopePath> = paths.iter()
+            .map(|p| ScopePath::parse(p))
+            .collect::<Result<_, _>>().map_err(ReservationError::Invalid)?;
+        let mut held = self.0.lock().map_err(|_| ReservationError::Unavailable)?;
+        if held.iter().any(|entry| entry.iter().any(|a| scopes.iter().any(|b| a.overlaps(b)))) {
+            return Err(ReservationError::Conflict);
+        }
+        held.push(scopes.clone());
+        Ok(ScopeReservation { registry: self.clone(), scopes })
+    }
+
+    pub fn active_count(&self) -> Result<usize, ReservationError> {
+        Ok(self.0.lock().map_err(|_| ReservationError::Unavailable)?.len())
+    }
+}
+
+impl Drop for ScopeReservation {
+    fn drop(&mut self) {
+        if let Ok(mut held) = self.registry.0.lock() {
+            if let Some(index) = held.iter().position(|scopes| scopes == &self.scopes) {
+                held.remove(index);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
