@@ -56,6 +56,77 @@ fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
         .map_err(|error| ServiceError::new(error.code(), error.detail))
 }
 
+
+fn protocol_error(error: wex_api::ApiError) -> ServiceError {
+    ServiceError::new(error.code(), error.detail)
+}
+
+/// Streaming transport using the same credential and endpoint safeguards as
+/// non-streaming chat. Tool calls are rejected until dispatch is connected.
+pub fn execute_chat_stream(request: &PreparedChat, key: &str) -> Result<String> {
+    use wex_api::{ApiRequest, Decoder, EncodeOptions, Message, RequestOptions, Role};
+    if key.is_empty() {
+        return Err(ServiceError::new("CREDENTIAL_UNAVAILABLE", "API 密钥不可用"));
+    }
+    let endpoint = chat_endpoint(&request.base_url)?;
+    let messages = request.messages.iter().map(|message| {
+        let role = match message.role.as_str() {
+            "system" => Role::System,
+            "user" => Role::User,
+            "assistant" => Role::Assistant,
+            _ => return Err(ServiceError::new("INVALID_INPUT", "不支持的消息角色")),
+        };
+        Ok(Message { role, content: Some(message.content.clone()), tool_calls: Vec::new(), tool_call_id: None })
+    }).collect::<Result<Vec<_>>>()?;
+    let api_request = ApiRequest {
+        request_id: request.turn_id.clone(),
+        connection_id: request.connection_id.clone(),
+        conversation_id: request.conversation_id.clone(),
+        model: request.model_id.clone(),
+        endpoint: endpoint.clone(),
+        messages,
+        tools: Vec::new(),
+        parameters_json: "{}".into(),
+        continuation: None,
+    };
+    let body = wex_api::encode_request(&api_request, EncodeOptions::default()).map_err(protocol_error)?;
+    let options = RequestOptions::default();
+    let client = Client::builder()
+        .timeout(options.total_timeout)
+        .connect_timeout(options.connect_timeout)
+        .redirect(Policy::none())
+        .build()
+        .map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 API 连接"))?;
+    let mut response = client.post(endpoint).bearer_auth(key).json(&body).send()
+        .map_err(|error| ServiceError::new(
+            if error.is_timeout() { "API_TIMEOUT" } else { "NETWORK_ERROR" },
+            "API 请求失败；未自动重试"
+        ))?;
+    if !response.status().is_success() {
+        return Err(protocol_error(wex_api::error_for_status(response.status().as_u16(), None)));
+    }
+    let mut decoder = Decoder::new(options);
+    let mut chunk = [0u8; 8192];
+    loop {
+        let size = response.read(&mut chunk).map_err(|_| {
+            ServiceError::new("API_RESPONSE_ERROR", "流式响应读取失败；未自动重试")
+        })?;
+        if size == 0 { break; }
+        decoder.push(&chunk[..size]).map_err(protocol_error)?;
+    }
+    let completion = decoder.finish().map_err(protocol_error)?;
+    if !completion.tool_calls.is_empty() {
+        return Err(ServiceError::new("TOOLS_NOT_CONNECTED", "工具执行尚未接通；没有执行工具调用"));
+    }
+    if completion.continuation.is_some() {
+        return Err(ServiceError::new("CONTINUATION_NOT_CONNECTED", "续传状态尚未接入应用层"));
+    }
+    if completion.text.is_empty() {
+        return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"));
+    }
+    Ok(completion.text)
+}
+
 pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     if key.is_empty() {
         return Err(ServiceError::new(
