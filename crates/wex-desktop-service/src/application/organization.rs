@@ -210,6 +210,70 @@ impl DesktopService {
             Ok(())
         })
     }
+    /// Revision-checked context move. Stale UI views cannot silently replace
+    /// a newer placement. Moving never grants access to referenced resources.
+    pub fn move_context_checked(
+        &mut self,
+        revision: u64,
+        context_id: &str,
+        space_id: &str,
+        group_id: Option<String>,
+    ) -> Result<()> {
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            validate_placement(s, space_id, group_id.as_deref())?;
+            if !s.contexts.iter().any(|c| c.id == context_id) {
+                return Err(invalid("上下文不存在"));
+            }
+            let location = s.placements.iter_mut()
+                .find(|p| p.context_id == context_id)
+                .ok_or_else(|| invalid("上下文位置不存在"))?;
+            location.space_id = space_id.into();
+            location.group_id = group_id;
+            Ok(())
+        })
+    }
+
+    /// Revision-checked project/context association.
+    pub fn bind_project_context_checked(
+        &mut self,
+        revision: u64,
+        project_id: &str,
+        context_id: Option<String>,
+    ) -> Result<()> {
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            if context_id.as_ref().is_some_and(|id| !s.contexts.iter().any(|c| &c.id == id)) {
+                return Err(invalid("上下文不存在"));
+            }
+            s.projects.iter_mut()
+                .find(|p| p.id == project_id)
+                .ok_or_else(|| invalid("项目不存在"))?
+                .context_id = context_id;
+            Ok(())
+        })
+    }
+
+    /// Revision-checked conversation/context association.
+    pub fn bind_conversation_context_checked(
+        &mut self,
+        revision: u64,
+        conversation_id: &str,
+        context_id: Option<String>,
+    ) -> Result<()> {
+        self.mutate(|s| {
+            check_revision(s, revision)?;
+            if context_id.as_ref().is_some_and(|id| !s.contexts.iter().any(|c| &c.id == id)) {
+                return Err(invalid("上下文不存在"));
+            }
+            s.conversations.iter_mut()
+                .find(|c| c.id == conversation_id)
+                .ok_or_else(|| invalid("对话不存在"))?
+                .context_id = context_id;
+            Ok(())
+        })
+    }
+
 }
 
 pub(super) fn check_revision(s: &DesktopSnapshot, revision: u64) -> Result<()> {
