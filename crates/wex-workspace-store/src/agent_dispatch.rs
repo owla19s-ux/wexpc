@@ -98,7 +98,12 @@ pub fn begin_linked_operation(
         // OperationStore::begin rechecks revision, approval and authority
         // and persists InFlight before releasing the dispatch.
         operations
-            .begin(expected_operation_revision, operation_id, attempt_id, checks)
+            .begin(
+                expected_operation_revision,
+                operation_id,
+                attempt_id,
+                checks,
+            )
             .map_err(Into::into)
     })
 }
@@ -238,7 +243,9 @@ mod tests {
                 },
             )
             .unwrap();
-        ledger.finish("op_1", "attempt_1", Outcome::Unknown).unwrap();
+        ledger
+            .finish("op_1", "attempt_1", Outcome::Unknown)
+            .unwrap();
         let recovered = TaskStore::recover_with_ledger(view, &ledger).unwrap();
         assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
         assert!(recovered.tasks[0].evidence_refs.is_empty());
