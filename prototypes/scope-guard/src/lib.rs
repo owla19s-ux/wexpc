@@ -75,11 +75,11 @@ pub fn may_overlap(left: &[String], right: &[String]) -> Result<bool, ScopeError
 
 /// Process-local reservations only. Not an OS lock or permission grant.
 #[derive(Default, Clone)]
-pub struct ScopeRegistry(Arc<Mutex<Vec<Vec<ScopePath>>>>);
+pub struct ScopeRegistry(Arc<Mutex<Vec<(u64, Vec<ScopePath>)>>>);
 
 pub struct ScopeReservation {
     registry: ScopeRegistry,
-    scopes: Vec<ScopePath>,
+    id: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -97,11 +97,12 @@ impl ScopeRegistry {
             .map(|p| ScopePath::parse(p))
             .collect::<Result<_, _>>().map_err(ReservationError::Invalid)?;
         let mut held = self.0.lock().map_err(|_| ReservationError::Unavailable)?;
-        if held.iter().any(|entry| entry.iter().any(|a| scopes.iter().any(|b| a.overlaps(b)))) {
+        if held.iter().any(|(_, entry)| entry.iter().any(|a| scopes.iter().any(|b| a.overlaps(b)))) {
             return Err(ReservationError::Conflict);
         }
-        held.push(scopes.clone());
-        Ok(ScopeReservation { registry: self.clone(), scopes })
+        let id = held.last().map(|(id, _)| id.checked_add(1)).unwrap_or(Some(1)).ok_or(ReservationError::Unavailable)?;
+        held.push((id, scopes));
+        Ok(ScopeReservation { registry: self.clone(), id })
     }
 
     pub fn active_count(&self) -> Result<usize, ReservationError> {
@@ -112,7 +113,7 @@ impl ScopeRegistry {
 impl Drop for ScopeReservation {
     fn drop(&mut self) {
         if let Ok(mut held) = self.registry.0.lock() {
-            if let Some(index) = held.iter().position(|scopes| scopes == &self.scopes) {
+            if let Some(index) = held.iter().position(|(id, _)| *id == self.id) {
                 held.remove(index);
             }
         }
