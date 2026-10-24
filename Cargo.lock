@@ -1255,6 +1255,7 @@ dependencies = [
  "base64",
  "fs2",
  "reqwest",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",
