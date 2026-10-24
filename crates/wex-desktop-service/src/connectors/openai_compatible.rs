@@ -72,6 +72,19 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     parse_chat_response(&value)
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposedToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments_json: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChatResponse {
+    Text(String),
+    ToolCalls(Vec<ProposedToolCall>),
+}
+
 pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
     let choice = value.get("choices").and_then(|v| v.as_array()).and_then(|v| v.first())
         .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效候选回复"))?;
