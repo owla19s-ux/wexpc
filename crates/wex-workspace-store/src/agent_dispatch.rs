@@ -191,6 +191,60 @@ mod tests {
     }
 
     #[test]
+    fn successful_receipt_adds_evidence_without_completing_task() {
+        let (view, mut ledger, intent) = fixture(TaskStatus::Running);
+        ledger.approve("op_1", &intent, 1).unwrap();
+        ledger
+            .begin(
+                "op_1",
+                "attempt_1",
+                ExecutionChecks {
+                    authority_revision: 1,
+                    connection_enabled: true,
+                    authenticated: true,
+                    platform_available: true,
+                    resource_allowed: true,
+                },
+            )
+            .unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Succeeded {
+                    evidence_ref: "receipt_1".into(),
+                },
+            )
+            .unwrap();
+        let recovered = TaskStore::recover_with_ledger(view, &ledger).unwrap();
+        assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
+        assert_eq!(recovered.tasks[0].evidence_refs, vec!["receipt_1"]);
+    }
+
+    #[test]
+    fn unknown_receipt_blocks_running_task_without_evidence() {
+        let (view, mut ledger, intent) = fixture(TaskStatus::Running);
+        ledger.approve("op_1", &intent, 1).unwrap();
+        ledger
+            .begin(
+                "op_1",
+                "attempt_1",
+                ExecutionChecks {
+                    authority_revision: 1,
+                    connection_enabled: true,
+                    authenticated: true,
+                    platform_available: true,
+                    resource_allowed: true,
+                },
+            )
+            .unwrap();
+        ledger.finish("op_1", "attempt_1", Outcome::Unknown).unwrap();
+        let recovered = TaskStore::recover_with_ledger(view, &ledger).unwrap();
+        assert_eq!(recovered.tasks[0].status, TaskStatus::Blocked);
+        assert!(recovered.tasks[0].evidence_refs.is_empty());
+    }
+
+    #[test]
     fn approved_running_task_passes_preflight() {
         let (view, mut ledger, intent) = fixture(TaskStatus::Running);
         ledger.approve("op_1", &intent, 1).unwrap();
