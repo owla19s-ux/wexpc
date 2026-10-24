@@ -35,3 +35,8 @@ use super::{may_overlap, ScopeError, ScopePath};
         assert_eq!(may_overlap(&["C:\\repo".into()], &["C:\\repo\\tests".into()]), Ok(true));
         assert!(may_overlap(&["relative".into()], &["D:\\safe".into()]).is_err());
     }
+#[test]
+fn alternate_data_stream_suffix_is_rejected() {
+    assert!(ScopePath::parse("C:/repo/file.txt:stream").is_err());
+    assert!(ScopePath::parse("C:/repo/file.txt").is_ok());
+}
