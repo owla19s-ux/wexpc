@@ -262,6 +262,36 @@ impl DesktopService {
             Ok(task)
         })
     }
+    pub fn transition_task(
+        &mut self,
+        revision: u64,
+        task_id: &str,
+        next: TaskStatus,
+    ) -> Result<()> {
+        self.mutate(|snapshot| {
+            organization::check_revision(snapshot, revision)?;
+            let task = snapshot.tasks.iter_mut()
+                .find(|task| task.id == task_id)
+                .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            let allowed = matches!((task.status, next),
+                (TaskStatus::Draft, TaskStatus::Ready)
+                | (TaskStatus::Ready, TaskStatus::InProgress)
+                | (TaskStatus::InProgress, TaskStatus::Blocked)
+                | (TaskStatus::Blocked, TaskStatus::InProgress)
+                | (TaskStatus::InProgress, TaskStatus::InReview)
+                | (TaskStatus::InReview, TaskStatus::InProgress)
+                | (TaskStatus::InReview, TaskStatus::Completed)
+                | (TaskStatus::Ready, TaskStatus::Cancelled)
+                | (TaskStatus::Draft, TaskStatus::Cancelled)
+                | (TaskStatus::Blocked, TaskStatus::Cancelled)
+            );
+            if !allowed {
+                return Err(ServiceError::new("INVALID_TASK_TRANSITION", "任务状态不允许此转换"));
+            }
+            task.status = next;
+            Ok(())
+        })
+    }
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
         let name = title(&input.title)?;
         text(&input.goal)?;
