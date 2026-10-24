@@ -81,6 +81,7 @@ pub fn execute_approved_terminal(
     }
     output.extend(error);
     let report = String::from_utf8_lossy(&output);
+    if !status.success() { return Err(ServiceError::new("TOOL_EXIT_NONZERO", "Cargo returned a nonzero exit status")); }
     Ok(format!("exit={:?}\n{}", status.code(), report))
 }
 
