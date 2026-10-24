@@ -66,14 +66,14 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             {
                 return Err(ServiceError::new("INVALID_INPUT", "工具只能请求单个文件名"));
             }
-            let content = review_and_read(app, chat, leaf)?;
-            let result = serde_json::json!({"content":content,"approved":true});
+            let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
+            let result = serde_json::json!({"content":content,"evidence_ref":evidence_ref});
             Ok((call.id.clone(), result.to_string()))
         }).collect::<Result<Vec<_>>>()
     })
 }
 
-fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<String> {
+fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<(String, String)> {
     let selected = app.dialog().file()
         .set_title(format!("WEXPC 请求读取文件「{leaf}」：请选择同名文件以批准本次读取"))
         .blocking_pick_file()
@@ -124,12 +124,12 @@ fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<S
         receipt_digest.as_deref(),
     )?;
     let outcome = if content.is_ok() {
-        Outcome::Succeeded { evidence_ref: evidence_id }
+        Outcome::Succeeded { evidence_ref: evidence_id.clone() }
     } else {
-        Outcome::Failed { evidence_ref: evidence_id }
+        Outcome::Failed { evidence_ref: evidence_id.clone() }
     };
     ledger.finish(&operation_id, &attempt_id, outcome).map_err(|_| core_failure())?;
-    content
+    content.map(|body| (body, evidence_id))
 }
 
 
