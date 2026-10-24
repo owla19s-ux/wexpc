@@ -13,6 +13,9 @@ pub fn approved_git_status(dispatch: &Dispatch, repo_id: &str, trusted_root: &Pa
     if !trusted_root.is_absolute() || !trusted_root.is_dir() {
         return Err(ServiceError::new("RESOURCE_UNAVAILABLE", "受信任仓库目录不可用"));
     }
+    let root = trusted_root.to_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "仓库路径编码不可用"))?;
+    super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("git")
         .arg("--no-optional-locks")
         .args(["-C"]).arg(trusted_root)
