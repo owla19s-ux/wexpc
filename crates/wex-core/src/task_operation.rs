@@ -44,7 +44,7 @@ impl TaskOperationIndex {
     ) -> Result<Self, LinkError> {
         let mut index = Self::default();
         for link in links {
-            index.attach(link, tasks, ledger)?;
+            index.attach_checked(link, tasks, ledger, false)?;
         }
         Ok(index)
     }
@@ -60,6 +60,16 @@ impl TaskOperationIndex {
         tasks: &TaskBoard,
         ledger: &OperationLedger,
     ) -> Result<(), LinkError> {
+        self.attach_checked(link, tasks, ledger, true)
+    }
+
+    fn attach_checked(
+        &mut self,
+        link: TaskOperationLink,
+        tasks: &TaskBoard,
+        ledger: &OperationLedger,
+        require_current_assignment: bool,
+    ) -> Result<(), LinkError> {
         if !valid_link_id(&link.task_id)
             || !valid_link_id(&link.operation_id)
             || !valid_link_id(&link.agent_id)
@@ -70,7 +80,7 @@ impl TaskOperationIndex {
             return Err(LinkError::DuplicateOperation);
         }
         let task = tasks.get(&link.task_id).ok_or(LinkError::MissingTask)?;
-        if task.assigned_agent.as_deref() != Some(&link.agent_id) {
+        if require_current_assignment && task.assigned_agent.as_deref() != Some(&link.agent_id) {
             return Err(LinkError::AgentMismatch);
         }
         let record = ledger
@@ -108,8 +118,10 @@ impl TaskOperationIndex {
             return Err(LinkError::AgentMismatch);
         }
         let task = tasks.get(&link.task_id).ok_or(LinkError::MissingTask)?;
+        // A historical receipt remains visible after reassignment, but cannot
+        // change the newly assigned agent's task progress.
         if task.assigned_agent.as_deref() != Some(&link.agent_id) {
-            return Err(LinkError::AgentMismatch);
+            return Ok(());
         }
         let status = task.status.clone();
         match record.state {
@@ -261,6 +273,34 @@ mod tests {
             .unwrap();
         let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
         assert_eq!(index.snapshot().len(), 1);
+    }
+
+    #[test]
+    fn reassignment_preserves_historical_link_without_replaying_old_receipt() {
+        let (mut tasks, mut ledger) = setup();
+        let original = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        tasks
+            .transition("task_1", TaskStatus::Blocked, None)
+            .unwrap();
+        tasks.assign("task_1", "agent_b".into()).unwrap();
+        ledger
+            .finish(
+                "op_1",
+                "attempt_1",
+                Outcome::Failed {
+                    evidence_ref: "old_failure".into(),
+                },
+            )
+            .unwrap();
+
+        let restored =
+            TaskOperationIndex::restore(original.snapshot(), &tasks, &ledger).unwrap();
+        restored.reconcile("op_1", &mut tasks, &ledger).unwrap();
+        let task = tasks.get("task_1").unwrap();
+        assert_eq!(task.assigned_agent.as_deref(), Some("agent_b"));
+        assert_eq!(task.status, TaskStatus::Blocked);
+        assert!(task.evidence_refs.is_empty());
+        assert_eq!(restored.snapshot(), vec![link()]);
     }
 
     #[test]
