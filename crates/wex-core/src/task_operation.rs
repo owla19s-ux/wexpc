@@ -114,7 +114,7 @@ impl TaskOperationIndex {
                 }
             }
             OperationState::OutcomeUnknown { .. } => {
-                if task.status == TaskStatus::Running {
+                if status == TaskStatus::Running {
                     tasks.transition(&link.task_id, TaskStatus::Blocked, None)
                         .map_err(LinkError::Task)?;
                 }
@@ -198,6 +198,14 @@ mod tests {
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Failed);
         assert_eq!(tasks.get("task_1").unwrap().evidence_refs, vec!["error_log_1"]);
+    }
+
+    #[test]
+    fn restored_completed_task_retains_historical_operation_link() {
+        let (mut tasks, ledger) = setup();
+        tasks.transition("task_1", TaskStatus::Completed, Some("review_a".into())).unwrap();
+        let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
+        assert_eq!(index.snapshot().len(), 1);
     }
 
     #[test]
