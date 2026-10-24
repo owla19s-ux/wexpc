@@ -304,6 +304,21 @@ mod tests {
     }
 
     #[test]
+    fn restore_rejects_historical_link_with_wrong_operation_actor() {
+        let (mut tasks, ledger) = setup();
+        tasks
+            .transition("task_1", TaskStatus::Blocked, None)
+            .unwrap();
+        tasks.assign("task_1", "agent_b".into()).unwrap();
+        let mut forged = link();
+        forged.agent_id = "agent_c".into();
+        assert!(matches!(
+            TaskOperationIndex::restore(vec![forged], &tasks, &ledger),
+            Err(LinkError::AgentMismatch)
+        ));
+    }
+
+    #[test]
     fn reject_agent_mismatch_and_duplicate_operation_link() {
         let (tasks, ledger) = setup();
         let mut index = TaskOperationIndex::default();
