@@ -235,6 +235,9 @@ impl DesktopService {
         }
         self.mutate(|s| {
             project_exists(s, &input.project_id)?;
+            if input.agent_ids.iter().collect::<std::collections::HashSet<_>>().len() != input.agent_ids.len() {
+                return Err(ServiceError::new("INVALID_BINDING", "任务成员不可重复分配"));
+            }
             if input.agent_ids.iter().any(|id| {
                 !s.agents
                     .iter()
