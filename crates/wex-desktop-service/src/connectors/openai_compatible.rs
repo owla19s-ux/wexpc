@@ -69,6 +69,10 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     }
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效 JSON"))?;
+    parse_chat_response(&value)
+}
+
+pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
     let message = &value["choices"][0]["message"];
     if message
         .get("tool_calls")
