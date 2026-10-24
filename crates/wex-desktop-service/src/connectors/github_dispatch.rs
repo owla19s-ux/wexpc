@@ -58,6 +58,67 @@ pub fn read_approved_github_file(
         .map_err(|_| ServiceError::new("TOOL_UNSUPPORTED_CONTENT", "GitHub 文件不是 UTF-8 文本"))
 }
 
+
+/// Update an existing GitHub file only with a pinned blob SHA.
+/// The trusted Host must bind repo/path/content to the approved intent digest,
+/// persist InFlight, and supply the GitHub credential. Never call on model data.
+pub fn update_approved_github_file(
+    dispatch: &Dispatch,
+    authorized_resource_id: &str,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    expected_sha: &str,
+    content: &[u8],
+    token: &str,
+) -> Result<String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    if dispatch.intent.action != Action::Write
+        || dispatch.intent.capability_id != "github_file_write"
+        || dispatch.intent.resource_id != authorized_resource_id
+        || dispatch.intent.expected_version.as_deref() != Some(expected_sha)
+    {
+        return Err(ServiceError::new("DISPATCH_REJECTED", "GitHub 写入未获匹配授权"));
+    }
+    if token.is_empty() || expected_sha.len() != 40
+        || !expected_sha.bytes().all(|b| b.is_ascii_hexdigit())
+    {
+        return Err(ServiceError::new("INVALID_INPUT", "凭证或预期版本不可用"));
+    }
+    if !safe_segment(owner) || !safe_segment(repo) || path.is_empty()
+        || path.len() > 4096 || path.split('/').any(|p| !safe_segment(p))
+        || content.len() > 256 * 1024
+    {
+        return Err(ServiceError::new("INVALID_INPUT", "目标路径或写入大小无效"));
+    }
+    let mut url = Url::parse("https://api.github.com/")
+        .map_err(|_| ServiceError::new("NETWORK_ERROR", "GitHub API 地址错误"))?;
+    url.path_segments_mut().map_err(|_| ServiceError::new("INVALID_INPUT", "路径无效"))?
+        .extend(["repos", owner, repo, "contents"].into_iter().chain(path.split('/')));
+    let body = serde_json::json!({
+        "message": "WEXPC approved file update",
+        "content": STANDARD.encode(content),
+        "sha": expected_sha,
+    });
+    let client = Client::builder().connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60)).redirect(Policy::none())
+        .build().map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 GitHub 请求"))?;
+    let response = client.put(url).header("User-Agent", "WEXPC/0.1.1")
+        .header("Accept", "application/vnd.github+json")
+        .bearer_auth(token).json(&body).send()
+        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 更新结果不确定，不得自动重试"))?;
+    if !response.status().is_success() {
+        return Err(ServiceError::new("GITHUB_WRITE_REJECTED", "GitHub 未确认更新成功"));
+    }
+    let value: serde_json::Value = response.json()
+        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 更新响应无法核验"));
+    let value = value?;
+    let sha = value.pointer("/content/sha").and_then(|v| v.as_str())
+        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 未返回有效文件版本"))?;
+    Ok(sha.to_owned())
+}
+
 fn safe_segment(part: &str) -> bool {
     !part.is_empty() && part.len() <= 255
         && part != "." && part != ".."
