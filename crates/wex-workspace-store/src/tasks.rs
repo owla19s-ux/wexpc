@@ -3,7 +3,7 @@
 use super::{OrganizationError, OrganizationStore, SNAPSHOT_LIMIT};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use wex_core::operation::OperationLedger;
+use wex_core::operation::{OperationLedger, OperationState};
 use wex_core::task::{Task, TaskBoard, TaskError, TaskStatus};
 use wex_core::task_operation::{LinkError, TaskOperationIndex, TaskOperationLink};
 
@@ -329,6 +329,18 @@ impl TaskStore {
         }
         let task = board.get(&link.task_id).ok_or(TaskStoreError::Link(LinkError::MissingTask))?;
         if matches!(task.status, TaskStatus::Completed | TaskStatus::Failed) {
+            return Err(TaskStoreError::Domain(TaskError::InvalidTransition));
+        }
+        let operation = ledger
+            .view()
+            .records
+            .into_iter()
+            .find(|record| record.intent.id == link.operation_id)
+            .ok_or(TaskStoreError::Link(LinkError::MissingOperation))?;
+        if !matches!(
+            operation.state,
+            OperationState::PendingApproval | OperationState::Approved { .. }
+        ) {
             return Err(TaskStoreError::Domain(TaskError::InvalidTransition));
         }
         let mut index = TaskOperationIndex::restore(current.links, &board, ledger)
