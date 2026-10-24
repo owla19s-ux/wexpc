@@ -205,6 +205,21 @@ impl TaskStore {
         self.read_locked()
     }
 
+    /// Hold the task snapshot lock across a trusted dispatch decision.
+    /// The callback must not reenter TaskStore. Lock order for linked dispatch
+    /// is task store then operation store.
+    pub(crate) fn with_locked_view<T, E>(
+        &self,
+        callback: impl FnOnce(TaskStoreView) -> Result<T, E>,
+    ) -> Result<T, E>
+    where
+        E: From<TaskStoreError>,
+    {
+        let _lock = self.io.lock().map_err(TaskStoreError::from)?;
+        let view = self.read_locked()?;
+        callback(view)
+    }
+
     /// Validate link ownership against the authoritative operation ledger.
     /// The caller must ensure the ledger is a trusted consistent snapshot.
     pub fn validate_links(
