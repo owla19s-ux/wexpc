@@ -90,3 +90,32 @@ pub fn parse_chat_response(value: &serde_json::Value) -> Result<String> {
         .map(str::to_owned)
         .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回文本回复"))
 }
+
+#[cfg(test)]
+mod response_tests {
+    use super::*;
+
+    #[test]
+    fn parses_ordinary_compatible_chat_reply() {
+        let value = serde_json::json!({"choices":[{"message":{"role":"assistant","content":"hello"}}]});
+        assert_eq!(parse_chat_response(&value).unwrap(), "hello");
+    }
+
+    #[test]
+    fn tool_calls_are_not_misrepresented_as_text() {
+        let value = serde_json::json!({"choices":[{"message":{
+            "role":"assistant",
+            "content":"I will run the tool",
+            "tool_calls":[{"id":"call_1","type":"function","function":{"name":"example","arguments":"{}"}}]
+        }}]});
+        assert_eq!(parse_chat_response(&value).unwrap_err().code, "TOOLS_NOT_CONNECTED");
+    }
+
+    #[test]
+    fn malformed_reply_does_not_succeed() {
+        for value in [serde_json::json!({}), serde_json::json!({"choices":[]}),
+            serde_json::json!({"choices":[{"message":{"content":null}}]})] {
+            assert_eq!(parse_chat_response(&value).unwrap_err().code, "API_RESPONSE_ERROR");
+        }
+    }
+}
