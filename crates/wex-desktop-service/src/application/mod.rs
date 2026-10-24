@@ -288,6 +288,9 @@ impl DesktopService {
             if !allowed {
                 return Err(ServiceError::new("INVALID_TASK_TRANSITION", "任务状态不允许此转换"));
             }
+            if next == TaskStatus::InProgress && task.agent_ids.is_empty() {
+                return Err(ServiceError::new("TASK_UNASSIGNED", "任务尚未分配成员，不能开始执行"));
+            }
             task.status = next;
             Ok(())
         })
