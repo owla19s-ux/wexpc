@@ -33,6 +33,29 @@ pub fn chat_endpoint(base: &str) -> Result<String> {
     Ok(url.to_string())
 }
 
+fn encode_prepared_chat(request: &PreparedChat) -> Result<serde_json::Value> {
+    use wex_api::{ApiRequest, EncodeOptions, Message, Role};
+    let messages = request.messages.iter().map(|message| {
+        let role = match message.role.as_str() {
+            "system" => Role::System,
+            "user" => Role::User,
+            "assistant" => Role::Assistant,
+            _ => return Err(ServiceError::new("INVALID_INPUT", "不支持的消息角色")),
+        };
+        Ok(Message { role, content: Some(message.content.clone()), tool_calls: Vec::new(), tool_call_id: None })
+    }).collect::<Result<Vec<_>>>()?;
+    let api_request = ApiRequest {
+        request_id: request.turn_id.clone(),
+        connection_id: request.connection_id.clone(),
+        conversation_id: request.conversation_id.clone(),
+        model: request.model_id.clone(),
+        endpoint: chat_endpoint(&request.base_url)?,
+        messages, tools: Vec::new(), parameters_json: "{}".into(), continuation: None,
+    };
+    wex_api::encode_request(&api_request, EncodeOptions { stream: false, include_usage: false, replay_continuation: false })
+        .map_err(|error| ServiceError::new(error.code(), error.detail))
+}
+
 pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     if key.is_empty() {
         return Err(ServiceError::new(
@@ -46,7 +69,8 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
         .redirect(Policy::none())
         .build()
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 API 连接"))?;
-    let response=client.post(chat_endpoint(&request.base_url)?).bearer_auth(key).json(&serde_json::json!({"model":request.model_id,"messages":request.messages,"stream":false})).send().map_err(|e|ServiceError::new(if e.is_timeout(){"API_TIMEOUT"}else{"NETWORK_ERROR"},"API 请求未取得完整回复，请检查网络；未自动重试"))?;
+    let body = encode_prepared_chat(request)?;
+    let response=client.post(chat_endpoint(&request.base_url)?).bearer_auth(key).json(&body).send().map_err(|e|ServiceError::new(if e.is_timeout(){"API_TIMEOUT"}else{"NETWORK_ERROR"},"API 请求未取得完整回复，请检查网络；未自动重试"))?;
     if !response.status().is_success() {
         return Err(ServiceError::new(
             "API_HTTP_ERROR",
