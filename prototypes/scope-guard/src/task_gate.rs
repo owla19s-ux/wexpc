@@ -34,6 +34,17 @@ pub struct TaskLease {
 }
 
 impl TaskGate {
+    /// Create an independent task-ID gate sharing an existing path registry.
+    /// Different gates with this registry exclude overlapping scopes, but
+    /// task IDs remain local to each gate. The Host must coordinate identities,
+    /// permissions, persistence and external-process lifetime separately.
+    pub fn with_registry(registry: ScopeRegistry) -> Self {
+        Self {
+            registry,
+            state: Arc::new(Mutex::new(State::default())),
+        }
+    }
+
     /// Admission is atomic across both the task ID and all requested path scopes.
     pub fn start(&self, task_id: &str, paths: &[String]) -> Result<TaskLease, TaskError> {
         if task_id.trim().is_empty() { return Err(TaskError::Unavailable); }
