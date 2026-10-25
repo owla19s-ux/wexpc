@@ -378,26 +378,29 @@ impl DesktopService {
             }
             // Publication must never create a task the Core dispatcher will
             // subsequently reject for intrinsic task format constraints.
-            let candidate = wex_core::task::Task {
-                id: task.id.clone(),
-                project_id: task.project_id.clone(),
-                objective: task.goal.clone(),
-                assigned_agent: Some(task.agent_ids[0].clone()),
-                assignment_epoch: s.revision.checked_add(1).ok_or_else(|| {
-                    ServiceError::new("STORAGE_ERROR", "任务发布版本无法保存")
-                })?,
-                status: wex_core::task::TaskStatus::Queued,
-                evidence_refs: vec![],
-            };
-            let mut board = wex_core::task::TaskBoard::default();
-            board.insert(candidate).map_err(|_| {
-                ServiceError::new("INVALID_TASK", "任务目标或标识不符合 Core 调度格式")
-            })?;
-            let task = s.tasks.iter_mut().find(|task| task.id == task_id)
-                .expect("task checked above");
-            task.publication_epoch = s.revision.checked_add(1).ok_or_else(|| {
+            let epoch = s.revision.checked_add(1).ok_or_else(|| {
                 ServiceError::new("STORAGE_ERROR", "任务发布版本无法保存")
             })?;
+            // Every assignee must be compatible with Core, not only the first:
+            // subsequent dispatch admission can target any assigned member.
+            for agent_id in &task.agent_ids {
+                let candidate = wex_core::task::Task {
+                    id: task.id.clone(),
+                    project_id: task.project_id.clone(),
+                    objective: task.goal.clone(),
+                    assigned_agent: Some(agent_id.clone()),
+                    assignment_epoch: epoch,
+                    status: wex_core::task::TaskStatus::Queued,
+                    evidence_refs: vec![],
+                };
+                let mut board = wex_core::task::TaskBoard::default();
+                board.insert(candidate).map_err(|_| {
+                    ServiceError::new("INVALID_TASK", "任务目标或成员标识不符合 Core 调度格式")
+                })?;
+            }
+            let task = s.tasks.iter_mut().find(|task| task.id == task_id)
+                .expect("task checked above");
+            task.publication_epoch = epoch;
             task.status = TaskStatus::Published;
             Ok(task.clone())
         })
