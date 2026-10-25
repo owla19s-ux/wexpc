@@ -316,11 +316,11 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
         return Err(ServiceError::new("INVALID_INPUT", "GitHub 审批参数或文件内容超过限制"));
     }
     let summary = if write {
-        format!("WEXPC 请求修改 GitHub 文件\n仓库：{owner}/{repo}\n文件：{path}\n原 SHA：{sha}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
+        format!("WEXPC 请求修改 GitHub 文件\n仓库：{owner}/{repo}（默认分支）\n文件：{path}\n原 SHA：{sha}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
     } else if create {
-        format!("WEXPC 请求新建 GitHub 文件（仅当路径尚不存在）\n仓库：{owner}/{repo}\n文件：{path}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
+        format!("WEXPC 请求新建 GitHub 文件（仅当路径尚不存在）\n仓库：{owner}/{repo}（默认分支）\n文件：{path}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
     } else {
-        format!("WEXPC 请求读取 GitHub 文件\n仓库：{owner}/{repo}\n文件：{path}")
+        format!("WEXPC 请求读取 GitHub 文件\n仓库：{owner}/{repo}（默认分支）\n文件：{path}")
     };
     let approved = app.dialog().message(summary)
         .title("逐次 GitHub 工具授权")
