@@ -160,6 +160,28 @@ mod tests {
     }
 
     #[test]
+    fn failed_test_receipt_is_preserved_for_model_continuation() {
+        let calls = vec![ToolProposal {
+            id: "cargo_1".into(),
+            name: "cargo_test".into(),
+            arguments_json: "{}".into(),
+        }];
+        let payload = serde_json::json!({
+            "evidence_ref": "ev_failed",
+            "success": false,
+            "exit_code": 101,
+            "output": "test failed"
+        }).to_string();
+        let messages = committed_tool_messages(
+            &calls, &[("cargo_1".into(), payload.clone())], None
+        ).unwrap();
+        assert_eq!(messages[0].role, Role::Assistant);
+        assert_eq!(messages[1].role, Role::Tool);
+        assert_eq!(messages[1].content.as_deref(), Some(payload.as_str()));
+        assert_eq!(messages[1].tool_call_id.as_deref(), Some("cargo_1"));
+    }
+
+    #[test]
     fn tool_receipt_ids_must_match_exactly() {
         let calls = vec![ToolProposal{id:"x".into(), name:"read_file".into(),arguments_json:"{}".into()}];
         assert_eq!(committed_tool_messages(&calls, &[("y".into(), "ok".into())], None).unwrap_err().code, "INVALID_INPUT");
