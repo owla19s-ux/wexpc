@@ -229,3 +229,51 @@ fn distinct_task_gates_share_registry_without_sharing_task_state() {
     drop(disjoint);
     assert!(second.start("agent-d", &["C:/repo/src".into()]).is_ok());
 }
+
+#[test]
+fn independent_gates_racing_for_shared_scope_allow_only_one_lease() {
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::time::Duration;
+
+    // Distinct TaskGate instances must share one atomic admission boundary.
+    // This is process-local only; it does not test separate OS processes.
+    let registry = ScopeRegistry::default();
+    let gates = [
+        TaskGate::with_registry(registry.clone()),
+        TaskGate::with_registry(registry.clone()),
+    ];
+    let start = Arc::new(Barrier::new(3));
+    let (result_tx, result_rx) = mpsc::channel();
+    let mut release_senders = Vec::new();
+    let mut workers = Vec::new();
+
+    for (index, gate) in gates.into_iter().enumerate() {
+        let start = start.clone();
+        let result_tx = result_tx.clone();
+        let (release_tx, release_rx) = mpsc::channel();
+        release_senders.push(release_tx);
+        workers.push(std::thread::spawn(move || {
+            start.wait();
+            let attempt = gate.start(&format!("agent-{index}"), &["C:/repo/shared.rs".into()]);
+            result_tx.send(attempt.is_ok()).unwrap();
+            if let Ok(lease) = attempt {
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                lease.finish(TaskPhase::Completed).unwrap();
+            }
+        }));
+    }
+    drop(result_tx);
+
+    start.wait();
+    let first = result_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let second = result_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(u8::from(first) + u8::from(second), 1);
+
+    for release in release_senders {
+        let _ = release.send(());
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    assert_eq!(registry.active_count(), Ok(0));
+}
