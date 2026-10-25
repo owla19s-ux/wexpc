@@ -15,7 +15,13 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
   const generation=useRef(0);
   const epoch=task.publication_epoch;
   const selected=Boolean(agentId&&task.agent_ids.includes(agentId));
-  const alreadyQueued=attempts.some(a=>a.task_id===task.id&&a.publication_epoch===epoch);
+  const taskAttempts=attempts.filter(a=>a.task_id===task.id);
+  const alreadyQueued=taskAttempts.some(a=>a.publication_epoch===epoch);
+  const statusText:Record<DispatchAttempt['status'],string>={
+    pending:'待领取（尚未执行）',
+    in_flight:'已领取（不代表执行完成）',
+    outcome_unknown:'结果未知（须核查，禁止自动重试）',
+  };
   const currentPreview=preview&&preview.taskId===task.id&&preview.agentId===agentId
     &&preview.revision===revision&&preview.publicationEpoch===epoch?preview:null;
 
@@ -73,6 +79,10 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     <button type="button" disabled={!selected||queueing} onClick={previewAdmission}>核对调度准入（不执行）</button>
     {currentPreview&&<p role="status">仅通过准入预检：{currentPreview.agentId}（分配版本 {currentPreview.assignmentEpoch}，读取修订 {currentPreview.revision}），未占用资源或启动工具。</p>}
     <button type="button" disabled={!selected||alreadyQueued||queueing} onClick={queue}>登记待派工尝试（不启动工具）</button>
-    {attempts.filter(a=>a.task_id===task.id).map(a=><p key={a.id}>派工记录 {a.id} · {a.status} · 发布版本 {a.publication_epoch}</p>)}
+    {alreadyQueued&&<p className="muted">当前发布版本已登记派工尝试，不能重复登记；如结果未知，必须先核查实际执行事实。</p>}
+    {taskAttempts.map(a=>{
+      const assignee=agents.find(agent=>agent.id===a.agent_id);
+      return <p key={a.id}>派工记录 {a.id} · 成员 {assignee?.name||`未知成员（${a.agent_id}）`}（{a.agent_id}） · {statusText[a.status]} · 发布版本 {a.publication_epoch}</p>;
+    })}
   </div>;
 }
