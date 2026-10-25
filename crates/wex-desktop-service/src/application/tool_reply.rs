@@ -64,6 +64,105 @@ fn matches_binding(current: &PreparedChat, frozen: &PreparedChat) -> bool {
             .is_some_and(|m| m.role == "user" && m.content == current.messages[0].content)
 }
 impl DesktopService {
+    /// Keep a disk copy before SQLite settlement. If both writes fail, the
+    /// existing pending-results path still owns the complete in-memory reply.
+    pub fn finish_chat_with_backup(
+        &mut self,
+        root: &Path,
+        request: &PreparedChat,
+        response: String,
+    ) -> Result<()> {
+        let state = self.store.load()?;
+        let turn = state
+            .turns
+            .iter()
+            .find(|t| t.id == request.turn_id && t.conversation_id == request.conversation_id)
+            .ok_or_else(|| ServiceError::new("TURN_NOT_FOUND", "原回合不存在"))?;
+        if turn.status != TurnStatus::Running
+            || !request
+                .messages
+                .last()
+                .is_some_and(|m| m.role == "user" && m.content == turn.user)
+        {
+            return Err(ServiceError::new(
+                "INVALID_STATE",
+                "原回合已变化，未保存其他请求的回复",
+            ));
+        }
+        let backup = save_chat_reply(root, request, &response);
+        let result = self.finish_chat(&request.turn_id, response);
+        if matches!(&result,Err(error) if error.code=="STORAGE_ERROR") && backup.is_err() {
+            return Err(ServiceError::new(
+                "STORAGE_ERROR",
+                "最终回复的本地备份与数据库保存均失败，结果仍留在内存；请保持应用打开并重试保存",
+            ));
+        }
+        result
+    }
+    /// Local result recovery does not depend on provider enablement.
+    pub fn saved_reply_candidate(&self, conversation: &str, turn: &str) -> Result<String> {
+        if self.pending_results.contains_key(turn) {
+            return Err(ServiceError::new(
+                "UNSAVED_RESULT",
+                "已有待保存结果，请先重试保存",
+            ));
+        }
+        let s = self.store.load()?;
+        let t = s
+            .turns
+            .iter()
+            .find(|t| t.id == turn && t.conversation_id == conversation)
+            .ok_or_else(|| ServiceError::new("TURN_NOT_FOUND", "原对话回合不存在"))?;
+        if !matches!(t.status, TurnStatus::Failed | TurnStatus::Interrupted) {
+            return Err(ServiceError::new(
+                "INVALID_STATE",
+                "该回合已完成或正在处理，未覆盖先前结果",
+            ));
+        }
+        if s.turns
+            .iter()
+            .any(|t| t.conversation_id == conversation && t.status == TurnStatus::Running)
+        {
+            return Err(ServiceError::new(
+                "CONVERSATION_BUSY",
+                "当前对话有请求正在处理",
+            ));
+        }
+        Ok(t.user.clone())
+    }
+    pub fn restore_saved_reply(
+        &mut self,
+        conversation: &str,
+        turn: &str,
+        original_user: &str,
+        response: String,
+    ) -> Result<()> {
+        if self.saved_reply_candidate(conversation, turn)? != original_user {
+            return Err(ServiceError::new(
+                "INVALID_STATE",
+                "原请求内容已变化，未恢复其他请求的回复",
+            ));
+        }
+        self.mutate(|s| {
+            let t = s
+                .turns
+                .iter_mut()
+                .find(|t| t.id == turn && t.conversation_id == conversation)
+                .ok_or_else(|| invalid("原回合不存在"))?;
+            if !matches!(t.status, TurnStatus::Failed | TurnStatus::Interrupted)
+                || t.user != original_user
+            {
+                return Err(ServiceError::new(
+                    "INVALID_STATE",
+                    "回合已变化，未覆盖先前结果",
+                ));
+            }
+            t.assistant = Some(response);
+            t.status = TurnStatus::Succeeded;
+            t.error = None;
+            Ok(())
+        })
+    }
     /// Read-only preflight. It neither creates a turn nor reads a credential.
     pub fn tool_reply_candidate(&self, conversation: &str, turn: &str) -> Result<PreparedChat> {
         if self.pending_results.contains_key(turn) {
