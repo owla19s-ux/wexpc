@@ -9,13 +9,27 @@ const state={revision:3,directories:[directory]};
 beforeEach(()=>ipc.mockImplementation(async(name:string,args:Record<string,unknown>)=>{
  if(name==='local_directory_status')return state;
  if(name==='local_read_policy')return {policy:'ask',revision:0};
+ if(name==='local_create_policy')return {policy:'ask',revision:0};
  if(name==='set_local_read_policy')return {policy:args.policy,revision:1};
+ if(name==='set_local_create_policy')return {policy:args.policy,revision:1};
  if(name==='authorize_local_directory')return {revision:4,directories:[directory,{id:'root_B',path:'/project/B',access:args.access,available:true}]};
  if(name==='edit_local_directory')return {revision:4,directories:[{...directory,access:args.access}]};
  if(name==='revoke_local_directory')return {revision:4,directories:[]};
  throw new Error(name);
 }));
 afterEach(()=>{cleanup();ipc.mockReset();});
+it('saves create policy independently of read policy and directory grants',async()=>{
+ const changed=vi.fn().mockResolvedValue(undefined);
+ render(<LocalDirectories conversationId="conv_A" onChanged={changed}/>);
+ const create=await screen.findByRole('combobox',{name:'本地文件新建策略'});
+ expect((create as HTMLSelectElement).value).toBe('ask');
+ fireEvent.change(create,{target:{value:'automatic'}});
+ await waitFor(()=>expect(ipc).toHaveBeenCalledWith('set_local_create_policy',{conversationId:'conv_A',expectedRevision:0,policy:'automatic'}));
+ await waitFor(()=>expect(changed).toHaveBeenCalledOnce());
+ expect((create as HTMLSelectElement).value).toBe('automatic');
+ expect((screen.getByRole('combobox',{name:'本地文件读取策略'}) as HTMLSelectElement).value).toBe('ask');
+ expect(ipc.mock.calls.some(([n])=>n==='authorize_local_directory'||n==='edit_local_directory'||n==='set_local_read_policy')).toBe(false);
+});
 it('adds another directory through native selection with independent read/write scope',async()=>{
  render(<LocalDirectories conversationId="conv_A" onChanged={async()=>{}}/>);
  await screen.findByText('/project/A');fireEvent.change(screen.getByRole('combobox',{name:'新目录权限'}),{target:{value:'read_write'}});
