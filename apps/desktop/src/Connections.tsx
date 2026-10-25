@@ -46,9 +46,9 @@ export function GithubConnection({run}:{run:Run}) {
       await refresh();
     })}>{status.enabled?'关闭 GitHub 全局访问':'启用 GitHub 全局访问'}</button>}
     {status?.configured&&<button type="button" onClick={()=>{
-      if(!window.confirm('删除本机保存的 GitHub 凭证并关闭后续访问？已派发的外部操作不会自动撤销。'))return;
+      if(!window.confirm('删除本机 GitHub 凭证并关闭 WEXPC 后续访问？已派发操作不会自动撤销；此操作不会使 GitHub 服务端的 Token 失效。'))return;
       void run(async()=>{await command('revoke_github');await refresh();});
-    }}>删除 GitHub 凭证并撤销访问</button>}
+    }}>删除本机 GitHub 凭证并关闭访问</button>}
     <p className="muted">总开关只允许 AI 提出 GitHub 操作。具体仓库、文件及写入内容仍需要逐次确认。</p>
   </div>;
 }
