@@ -7,6 +7,7 @@ fn marker(state: &str) -> ToolReceiptMarker {
         content_digest: None,
         conversation_id: Some("conversation_1".into()),
         turn_id: Some("turn_1".into()),
+        policy: None,
     }
 }
 #[test]
@@ -71,4 +72,25 @@ fn missing_directory_is_empty_and_conflicting_turn_binding_is_rejected() {
     result.turn_id = Some("turn_other".into());
     append_tool_marker(dir.path(), &result).unwrap();
     assert!(read_tool_markers(dir.path(), "conversation_1").is_err());
+}
+
+#[test]
+fn execution_records_keep_the_policy_used_at_dispatch_not_current_preferences() {
+    use wex_desktop_service::{PolicyChoice, ToolPolicySetting};
+    let dir = tempfile::tempdir().unwrap();
+    let mut pending = marker("in_flight");
+    pending.policy = Some(ToolPolicySetting {
+        conversation_id: "conversation_1".into(),
+        capability_id: "github_file_write".into(),
+        policy: PolicyChoice::Automatic,
+        revision: 2,
+    });
+    append_tool_marker(dir.path(), &pending).unwrap();
+    let mut complete = pending.clone();
+    complete.state = "succeeded".into();
+    append_tool_marker(dir.path(), &complete).unwrap();
+    assert_eq!(
+        read_tool_markers(dir.path(), "conversation_1").unwrap()[0].policy,
+        complete.policy
+    );
 }

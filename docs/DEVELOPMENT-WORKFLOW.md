@@ -28,7 +28,7 @@
 | 真实DeepSeek/API请求 | 当前未发现可用DeepSeek凭证或调用入口，不能宣称已测 | 仅在手机具备可用凭证、网络且实际请求后报告 | 与模拟服务分开；凭证留在各自环境，不贴到仓库、日志或聊天 |
 | TypeScript检查、React生产构建 | 可运行，已验证前端构建；当前Node24与既有CI Node22有版本差异 | 有可用Node/依赖时可补测，当前未核验 | 主要由Work承担；类型/构建通过不代表界面交互已验收 |
 | Windows Host编译、凭证库、文件/ACL语义、窗口与安装包 | 当前是Linux，无Windows运行环境；不能运行Windows行为测试 | Android同样不能替代Windows运行验证 | 编码可继续，新增改动按Commit列待验证；11月1日后评估Windows CI，买电脑后补本机体验 |
-| Linux原生Tauri Host | 已在执行工作区部署独立pkg-config/GTK 3.24.41/WebKitGTK 2.52.3依赖，正式Host check、严格Clippy及6项Host预检/派发边界测试通过；窗口交互未验收 | 不作为Windows桌面验证环境 | 使用工作区内的依赖前缀和PKG_CONFIG/PKG_CONFIG_SYSROOT_DIR，不要求写系统安装目录；Linux编译不替代Windows运行 |
+| Linux原生Tauri Host | 已在执行工作区部署独立pkg-config/GTK 3.24.41/WebKitGTK 2.52.3依赖，正式Host check、严格Clippy及8项Host预检/派发边界测试通过；窗口交互未验收 | 不作为Windows桌面验证环境 | 使用工作区内的依赖前缀和PKG_CONFIG/PKG_CONFIG_SYSROOT_DIR，不要求写系统安装目录；Linux编译不替代Windows运行 |
 | Android SDK/模拟器/adb/Flutter | 当前PATH未发现adb、emulator、sdkmanager、flutter、dart | 手机可承担APK真机体验；SDK/构建/自动化工具是否具备需另报 | 手机真机、模拟器、构建与安装四类证据分开；不预设手机能编译整个工程 |
 
 Work环境是可变化的临时执行环境；上述版本和可用工具只代表本次检查。手机端网站可访问、磁盘充足或apt配置已修，均不能代替Rust及依赖实际编译运行。Android专属路径、应用前缀和本地C/TLS依赖由手机端先确认，不能默认标准Linux安装包适用。
@@ -100,7 +100,7 @@ cargo fmt --all -- --check
 cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
 ```
 
-前端在 `apps/desktop` 目录执行 `npm ci`（依赖变化或环境缺失时）与 `npm run build`。命令成功只证明对应检查；Rust平台条件编译未执行的Windows用例、缺失桌面依赖时未执行的Host编译，必须单列NOT_RUN。手机测试通过后由Work做受影响集成验证，不要求双方机械地重复全部测试。
+前端在 `apps/desktop` 目录执行 `npm ci`（依赖变化或环境缺失时）、`npm test`（React DOM，模拟IPC）与 `npm run build`。本批增加固定版本Vitest/Happy DOM/Testing Library作为开发测试依赖，原有产品依赖解析版本未变；测试使用Node22.12+或24，当前Work为24.22.1。命令成功只证明对应检查；Rust平台条件编译未执行的Windows用例、缺失桌面依赖时未执行的Host编译，必须单列NOT_RUN。手机测试通过后由Work做受影响集成验证，不要求双方机械地重复全部测试。
 
 ### 证据交接、失败处理和待验证项
 

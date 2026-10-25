@@ -229,7 +229,8 @@ impl OperationLedger {
         Ok(())
     }
 
-    /// Trusted human approval of this exact immutable intent; never an AI tool.
+    /// Trusted approval of this exact intent from an explicit user decision or
+    /// current user-configured policy; never from an AI suggestion or project link.
     pub fn approve(
         &mut self,
         id: &str,

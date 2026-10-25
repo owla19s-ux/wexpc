@@ -39,7 +39,7 @@ impl DesktopStore {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if version > 5 {
+        if version > 6 {
             return Err(ServiceError::new(
                 "UNSUPPORTED_VERSION",
                 "数据由更新版本创建，请使用相应版本打开",
@@ -55,10 +55,10 @@ impl DesktopStore {
                 [serde_json::to_string(&DesktopSnapshot::default()).map_err(storage)?],
             )
             .map_err(storage)?;
-            tx.pragma_update(None, "user_version", 5).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 6).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
-        if (1..=4).contains(&version) {
+        if (1..=5).contains(&version) {
             let tx = db
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
@@ -72,7 +72,7 @@ impl DesktopStore {
             })?;
             // Defaulted fields are read additively. Keep the exact old payload,
             // but fence out older binaries before any write can erase records.
-            tx.pragma_update(None, "user_version", 5).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 6).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
         Ok(Self {
