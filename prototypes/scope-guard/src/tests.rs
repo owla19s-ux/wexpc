@@ -47,6 +47,10 @@ fn reserved_device_names_and_unicode_are_rejected() {
         "C:/repo/CON", "C:/repo/con.txt", "C:/repo/NUL",
         "C:/repo/COM1.log", "C:/repo/LPT9", "C:/repo/文件",
         "C:/repo/CONIN$", "C:/repo/conout$", "C:/repo/CONIN$.txt",
+        // On Windows 10 and earlier, spaces before the extension are stripped
+        // when matching reserved DOS device names.
+        "C:/repo/COM1 .txt", "C:/repo/con . .ext",
+        "C:/repo/NUL .log", "C:/repo/CONOUT$ .txt",
     ] {
         assert!(ScopePath::parse(path).is_err(), "accepted {path}");
     }
