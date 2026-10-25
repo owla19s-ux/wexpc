@@ -118,3 +118,39 @@ impl DesktopStore {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod publication_schema_tests {
+    use super::*;
+
+    #[test]
+    fn newly_created_store_uses_schema_seven() {
+        let store = DesktopStore::memory().unwrap();
+        let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 7);
+    }
+
+    #[test]
+    fn previous_schema_is_upgraded_without_replacing_desktop_snapshot() {
+        let mut db = Connection::open_in_memory().unwrap();
+        db.execute_batch(
+            "CREATE TABLE desktop_state (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL); PRAGMA user_version=6;"
+        ).unwrap();
+        let prior = serde_json::json!({
+            "revision": 42,
+            "connections": [],
+            "projects": [],
+            "agents": [],
+            "tasks": [],
+            "conversations": [],
+            "turns": []
+        }).to_string();
+        db.execute("INSERT INTO desktop_state(id,body) VALUES (1,?1)", [&prior]).unwrap();
+        let store = DesktopStore::init(db, None).unwrap();
+        let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 7);
+        assert_eq!(store.load().unwrap().revision, 42);
+        let preserved: String = store.db.query_row("SELECT body FROM desktop_state WHERE id=1", [], |row| row.get(0)).unwrap();
+        assert_eq!(preserved, prior);
+    }
+}
