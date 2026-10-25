@@ -1036,6 +1036,12 @@ mod publication_tests {
         let second = service.queue_dispatch_attempt(rev, "task_other", "a_other").unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.claim_dispatch_attempt(rev, &first.id).unwrap();
+        let active_rev = service.snapshot().unwrap().revision;
+        assert_eq!(
+            service.claim_dispatch_attempt(active_rev, &second.id).unwrap_err().code,
+            "ACTIVE_DISPATCH_BLOCKED"
+        );
+        assert_eq!(service.snapshot().unwrap().revision, active_rev);
         service.mutate(|snapshot| {
             snapshot.dispatch_attempts.iter_mut().find(|a| a.id == first.id).unwrap().status =
                 DispatchAttemptStatus::OutcomeUnknown;
