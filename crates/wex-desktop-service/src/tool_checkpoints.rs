@@ -112,6 +112,9 @@ fn validate(history: &[Message], pending: bool) -> Result<()> {
         return Err(error());
     }
     let mut offset = 0;
+    // IDs identify receipts across the whole turn, not merely within a batch.
+    // Reject ambiguous restored checkpoints before any new model request.
+    let mut seen_all = std::collections::HashSet::new();
     while offset < history.len() {
         let assistant = &history[offset];
         if assistant.role != Role::Assistant
@@ -138,6 +141,7 @@ fn validate(history: &[Message], pending: bool) -> Result<()> {
                 || call.name.len() > 128
                 || call.arguments_json.len() > 1024 * 1024
                 || !seen.insert(&call.id)
+                || !seen_all.insert(&call.id)
                 || !serde_json::from_str::<serde_json::Value>(&call.arguments_json)
                     .is_ok_and(|v| v.is_object())
             {
