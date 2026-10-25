@@ -164,6 +164,29 @@ pub fn read(dispatch: &Dispatch, store: &Store, revision: u64, leaf: &str) -> Re
         .map_err(|_| ServiceError::new("TOOL_UNSUPPORTED_CONTENT", "当前读取工具仅支持UTF-8文本"))
 }
 
+/// Bind Core's exact create intent to the live conversation grant revision.
+/// The store never exposes a path-based write token to a model.
+pub fn create(
+    dispatch: &Dispatch,
+    store: &Store,
+    revision: u64,
+    leaf: &str,
+    content: &str,
+) -> Result<()> {
+    if dispatch.intent.action != Action::Create
+        || dispatch.intent.capability_id != "local_file_create"
+        || dispatch.intent.intent_digest
+            != digest_arguments("local_file_create", &dispatch.intent.resource_id,
+                &[leaf.as_bytes(), content.as_bytes()])
+    {
+        return Err(ServiceError::new("DISPATCH_REJECTED", "新建参数与Core派发不匹配"));
+    }
+    store.create_authorized_at(Some(revision), &dispatch.intent.resource_id,
+        leaf, content.as_bytes(), true)
+        .map_err(|e| ServiceError::new("LOCAL_CREATE_UNKNOWN",
+            format!("文件新建可能已产生副作用，请核对后再决定是否重试：{e:?}")))
+}
+
 fn conversation_exists(shared: &crate::Shared, id: &str) -> Result<()> {
     if !crate::locked(shared)?
         .snapshot()?
