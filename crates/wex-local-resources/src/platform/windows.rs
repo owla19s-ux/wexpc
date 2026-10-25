@@ -425,3 +425,25 @@ fn stamp(info: &ByHandleFileInformation) -> (u32, u32, u32, u64, u32, u32, u32) 
         info.links,
     )
 }
+
+#[cfg(test)]
+mod leaf_name_tests {
+    use super::*;
+
+    #[test]
+    fn windows_device_names_never_become_file_targets() {
+        for name in ["CON", "con.txt", "PRN", "aux.rs", "NUL", "COM1", "com9.log", "LPT1", "lpt9.txt", "CONIN$", "CONOUT$"] {
+            assert!(!valid_leaf(name), "reserved: {name}");
+        }
+        for name in ["main.rs", "README.md", ".gitignore", "file name.txt", "com10.rs"] {
+            assert!(valid_leaf(name), "ordinary: {name}");
+        }
+    }
+
+    #[test]
+    fn windows_paths_and_alternate_streams_are_not_leaf_names() {
+        for name in ["", ".", "..", "../config", r"sub\file", "file:stream", "file.", "file ", "a?b", "a*b", "a\nline"] {
+            assert!(!valid_leaf(name), "invalid: {name:?}");
+        }
+    }
+}
