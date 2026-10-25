@@ -356,7 +356,7 @@ fn review_local_command(
         "git_status" => (
             "git_status",
             Action::Read,
-            "git --no-optional-locks status --porcelain=v1 -uno",
+            "git --no-optional-locks -c core.fsmonitor=false -C <所选仓库目录> status --porcelain=v1 --untracked-files=all",
         ),
         "git_diff" => (
             "git_diff",
