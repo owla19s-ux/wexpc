@@ -124,6 +124,12 @@ fn is_hex(value: &str, lengths: &[usize]) -> bool {
 }
 
 impl PreparedCommit {
+    /// The parent version that the Core operation must carry. None means an
+    /// unborn branch, whose branch name is still included in binding_parts.
+    pub fn expected_head(&self) -> Option<&str> {
+        self.version.head.as_deref()
+    }
+
     pub fn new(
         message: String,
         paths: Vec<String>,

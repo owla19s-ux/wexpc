@@ -35,3 +35,25 @@ rustfmt --edition 2021 --check git_commit_policy.rs git_commit_evidence.rs
 harness 内容为 `mod git_commit_policy; mod git_commit_evidence;`，与两份源码同目录；不替换依赖或业务实现。18 项通过、0 失败，其中一项在独立临时仓库实际 init/add/commit/cat-file/diff-tree，验证原始对象和范围拒绝，结束清理临时目录。路径和消息控制字符测试已在旧实现复现失败，再修正通过；无 author/committer 对象也已复现误接收后修正。
 
 未执行：Cargo workspace/严格 Clippy、正式 Linux Tauri Host、真实模型工具回合、Windows 构建/运行/安装。当前执行区无完整仓库依赖与项目所需工具链；1.75 模块检查不能冒充项目 1.99.1 的全量证据。未运行 Actions，提交使用 `[skip ci]`。
+
+## 后续增量：Core 审批绑定与真实对象读取（2026-10-26）
+
+新增 `git_commit_binding.rs`：`git_commit_intent_digest` 复用现有长度前缀 SHA-256，绑定绝对仓库目录及 PreparedCommit 的所有参数；`verify_git_commit_dispatch` 验证真实 Core Dispatch 的 Write / git_commit / resource / expected HEAD / digest 后，再比较当前 RepositoryVersion。普通 Git 读取 Dispatch 不能作为 Commit 许可；消息、范围、目录、父版本或当前快照变化均拒绝。对象类型、错误及服务函数已通过 crate 根导出，Host 后续可调用；不把目录存在性检查当成句柄身份验证。
+
+新增 `git_commit_reader.rs`：`read_approved_git_commit_object` 用同一 Commit 审批校验，读取已派发操作的原始提交对象；后置读取不能要求旧 HEAD 仍未变化。Git 程序由可信 Host 环境配置选择绝对路径，不接受模型传入的程序；OID 只接受小写 40/64 位十六进制，不接受 HEAD、选项或 revision 表达式。清空继承环境，禁用对象替换、可选锁、lazy fetch、fsmonitor、hooks、自动维护及传输协议；不支持 `--no-lazy-fetch` 的 Git 版本明确失败，不回退到可能取回远端对象的命令。复用既有 PipeReader/CaptureReader 的有界输出和可终止读取线程，15 秒截止，失败路径终止/回收直接子进程；超出 64 KiB、输出不完整、非零退出或对象解析失败均不形成成功证据。
+
+读取后独立计算 Git 对象哈希 `commit <原始字节数>\0<原始正文>`（SHA-1 或 SHA-256）并匹配请求 OID，再解析正文。真实 Git 回归已复现“标签 OID 被剥离成提交”及“损坏 loose object 路径返回其他正文”两个误接收案例，现均拒绝。此处是 Git 既有对象格式校验，不使用 SHA-1 生成新的安全授权摘要。
+
+**调用边界仍保留**：Core 绑定器与对象读取器已有正式服务 API、互相调用及真实 Git/真实 Core 测试，尚未接入 `tool_approvals.rs` 的生产模型工具表。目录/Git 目录身份与选中文件内容版本仍必须由可信平台后端采集，当前没有完整采集器，不用普通路径 open 伪造身份。未实现资源锁、独立索引写入、条件更新引用、持久执行/回执及 UNKNOWN 恢复，所以仍不是可执行 Commit 闭环。
+
+本增量重新部署 Rust/Cargo 1.99.1、rustfmt、Clippy，并从固定父提交恢复完整 Cargo workspace 文本源码及锁文件。上述历史 18 项单模块验证不再作为本增量的全部证据；本次按以下正式命令验证，结果登记在对应 PR/Commit：
+
+```sh
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo fmt --all -- --check
+```
+
+新增 16 项 Core/Reader 测试，包括实际 Core 审批消费、请求篡改/五类版本变化、真实提交对象与 HEAD 推进、替换引用、损坏对象、标签剥离、超大对象、缺失对象、带成功普通取回对照的本地 promisor 仓库、超时后确认子进程不存在。超时终止测试仅在 Unix 执行，Windows 不外推。全量 fmt 首次发现原有 `wex-core/src/dispatch.rs`、`dispatch_leases.rs` 不符合当前格式，只做 rustfmt 整理，不改 Dispatcher 语义。
+
+独立代码审查发现的对象 OID 身份问题已按失败回归→修复→通过处理，补齐其提出的 HEAD 推进、timeout 与 promisor 覆盖建议。Linux Tauri Host、真实模型回合、Windows 构建/运行/安装仍 NOT_RUN；提交使用 skip ci，不触发 Actions。

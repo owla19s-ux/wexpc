@@ -1,7 +1,7 @@
 //! Pure dispatch admission rules. This module never invokes tools or grants authority.
 //! The Host must separately validate current permissions, credentials and resource locks.
+use crate::dispatch_leases::{LeaseError, ResourceLease, ResourceLeases};
 use crate::task::{TaskBoard, TaskStatus};
-use crate::dispatch_leases::{ResourceLease, ResourceLeases, LeaseError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchRefusal {
@@ -40,7 +40,10 @@ pub fn admit(
     if !matches!(task.status, TaskStatus::Queued | TaskStatus::Blocked) {
         return Err(DispatchRefusal::NotReady);
     }
-    let assigned = task.assigned_agent.as_deref().ok_or(DispatchRefusal::Unassigned)?;
+    let assigned = task
+        .assigned_agent
+        .as_deref()
+        .ok_or(DispatchRefusal::Unassigned)?;
     if assigned != agent_id {
         return Err(DispatchRefusal::WrongAgent);
     }
@@ -61,7 +64,9 @@ pub fn admit(
 /// Recheck a previously issued ticket before an operation begins. A task that
 /// has already entered Running may continue only under the same assignment.
 pub fn validate_ticket(board: &TaskBoard, ticket: &DispatchTicket) -> Result<(), DispatchRefusal> {
-    let task = board.get(&ticket.task_id).ok_or(DispatchRefusal::MissingTask)?;
+    let task = board
+        .get(&ticket.task_id)
+        .ok_or(DispatchRefusal::MissingTask)?;
     if task.project_id != ticket.project_id {
         return Err(DispatchRefusal::WrongProject);
     }
@@ -71,12 +76,14 @@ pub fn validate_ticket(board: &TaskBoard, ticket: &DispatchTicket) -> Result<(),
     if task.assignment_epoch != ticket.assignment_epoch {
         return Err(DispatchRefusal::StaleAssignment);
     }
-    if !matches!(task.status, TaskStatus::Queued | TaskStatus::Blocked | TaskStatus::Running) {
+    if !matches!(
+        task.status,
+        TaskStatus::Queued | TaskStatus::Blocked | TaskStatus::Running
+    ) {
         return Err(DispatchRefusal::NotReady);
     }
     Ok(())
 }
-
 
 #[derive(Debug)]
 pub struct DispatchGuard {
@@ -103,7 +110,9 @@ pub fn reserve(
 ) -> Result<DispatchGuard, DispatchStartError> {
     let ticket = admit(board, task_id, project_id, agent_id, epoch, true)
         .map_err(DispatchStartError::Refused)?;
-    let lease = leases.acquire(agent_id, scopes).map_err(DispatchStartError::Lease)?;
+    let lease = leases
+        .acquire(agent_id, scopes)
+        .map_err(DispatchStartError::Lease)?;
     validate_ticket(board, &ticket).map_err(DispatchStartError::Refused)?;
     Ok(DispatchGuard { ticket, lease })
 }
@@ -115,15 +124,17 @@ mod tests {
 
     fn board() -> TaskBoard {
         let mut board = TaskBoard::default();
-        board.insert(Task {
-            id: "task_1".into(),
-            project_id: "pc".into(),
-            objective: "Implement dispatcher".into(),
-            assigned_agent: Some("agent_a".into()),
-            assignment_epoch: 2,
-            status: TaskStatus::Queued,
-            evidence_refs: vec![],
-        }).unwrap();
+        board
+            .insert(Task {
+                id: "task_1".into(),
+                project_id: "pc".into(),
+                objective: "Implement dispatcher".into(),
+                assigned_agent: Some("agent_a".into()),
+                assignment_epoch: 2,
+                status: TaskStatus::Queued,
+                evidence_refs: vec![],
+            })
+            .unwrap();
         board
     }
 
@@ -132,10 +143,22 @@ mod tests {
         let board = board();
         let ticket = admit(&board, "task_1", "pc", "agent_a", 2, true).unwrap();
         assert_eq!(validate_ticket(&board, &ticket), Ok(()));
-        assert_eq!(admit(&board, "task_1", "other", "agent_a", 2, true), Err(DispatchRefusal::WrongProject));
-        assert_eq!(admit(&board, "task_1", "pc", "agent_b", 2, true), Err(DispatchRefusal::WrongAgent));
-        assert_eq!(admit(&board, "task_1", "pc", "agent_a", 1, true), Err(DispatchRefusal::StaleAssignment));
-        assert_eq!(admit(&board, "task_1", "pc", "agent_a", 2, false), Err(DispatchRefusal::ResourceBusy));
+        assert_eq!(
+            admit(&board, "task_1", "other", "agent_a", 2, true),
+            Err(DispatchRefusal::WrongProject)
+        );
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_b", 2, true),
+            Err(DispatchRefusal::WrongAgent)
+        );
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_a", 1, true),
+            Err(DispatchRefusal::StaleAssignment)
+        );
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_a", 2, false),
+            Err(DispatchRefusal::ResourceBusy)
+        );
     }
 
     #[test]
@@ -143,26 +166,47 @@ mod tests {
         let mut board = board();
         let ticket = admit(&board, "task_1", "pc", "agent_a", 2, true).unwrap();
         board.assign("task_1", "agent_b".into()).unwrap();
-        assert_eq!(validate_ticket(&board, &ticket), Err(DispatchRefusal::WrongAgent));
-        assert_eq!(admit(&board, "task_1", "pc", "agent_a", 2, true), Err(DispatchRefusal::WrongAgent));
+        assert_eq!(
+            validate_ticket(&board, &ticket),
+            Err(DispatchRefusal::WrongAgent)
+        );
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_a", 2, true),
+            Err(DispatchRefusal::WrongAgent)
+        );
     }
 
     #[test]
     fn completed_and_failed_tasks_are_not_dispatchable() {
         let mut board = board();
-        board.transition("task_1", TaskStatus::Running, None).unwrap();
-        assert_eq!(admit(&board, "task_1", "pc", "agent_a", 2, true), Err(DispatchRefusal::NotReady));
-        board.transition("task_1", TaskStatus::Completed, None).unwrap();
-        assert_eq!(admit(&board, "task_1", "pc", "agent_a", 2, true), Err(DispatchRefusal::NotReady));
+        board
+            .transition("task_1", TaskStatus::Running, None)
+            .unwrap();
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_a", 2, true),
+            Err(DispatchRefusal::NotReady)
+        );
+        board
+            .transition("task_1", TaskStatus::Completed, None)
+            .unwrap();
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_a", 2, true),
+            Err(DispatchRefusal::NotReady)
+        );
     }
 
     #[test]
     fn running_ticket_can_be_revalidated_but_not_readmitted() {
         let mut board = board();
         let ticket = admit(&board, "task_1", "pc", "agent_a", 2, true).unwrap();
-        board.transition("task_1", TaskStatus::Running, None).unwrap();
+        board
+            .transition("task_1", TaskStatus::Running, None)
+            .unwrap();
         assert_eq!(validate_ticket(&board, &ticket), Ok(()));
-        assert_eq!(admit(&board, "task_1", "pc", "agent_a", 2, true), Err(DispatchRefusal::NotReady));
+        assert_eq!(
+            admit(&board, "task_1", "pc", "agent_a", 2, true),
+            Err(DispatchRefusal::NotReady)
+        );
     }
     #[test]
     fn reserve_rejects_conflicts_and_releases_on_drop() {
@@ -189,5 +233,4 @@ mod tests {
         ));
         assert!(!leases.is_busy("src/main.rs").unwrap());
     }
-
 }

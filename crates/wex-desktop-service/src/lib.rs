@@ -10,6 +10,13 @@ pub use application::process_control::{
     ActiveProcess, ProcessCancellation, ProcessLease, ProcessSupervisor,
 };
 pub use application::DesktopService;
+pub use connectors::git_commit_binding::{git_commit_intent_digest, verify_git_commit_dispatch};
+pub use connectors::git_commit_evidence::{
+    parse_commit_object, CommitEvidenceError, CommitObject, CommitReadback, PreparedCommit,
+    RepositoryVersion,
+};
+pub use connectors::git_commit_policy::CommitPreflightError;
+pub use connectors::git_commit_reader::read_approved_git_commit_object;
 pub use connectors::git_dispatch::{approved_git_diff, approved_git_status};
 pub use connectors::github_dispatch::{
     create_approved_github_file, read_approved_github_file, update_approved_github_file,
