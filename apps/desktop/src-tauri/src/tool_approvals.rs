@@ -74,42 +74,58 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         let result = calls
             .iter()
             .map(|call| {
-                if matches!(
-                    call.name.as_str(),
-                    "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check"
-                ) {
-                    return Ok((call.id.clone(), review_local_command(app, chat, call)?));
-                }
-                if matches!(
-                    call.name.as_str(),
-                    "github_read_file" | "github_write_file" | "github_create_file"
-                ) {
-                    return Ok((call.id.clone(), review_github(app, chat, call)?));
-                }
-                if call.name != "read_file" {
-                    return Err(ServiceError::new(
-                        "TOOL_UNSUPPORTED",
-                        "模型请求了未提供的工具",
-                    ));
-                }
-                let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
-                    .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数无法解析"))?;
-                let leaf = value
-                    .get("file_name")
-                    .and_then(|v| v.as_str())
-                    .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
-                if value.as_object().is_none_or(|v| v.len() != 1)
-                    || leaf.is_empty()
-                    || leaf.len() > 255
-                    || leaf.contains('/')
-                    || leaf.contains('\\')
-                    || leaf.chars().any(char::is_control)
-                {
-                    return Err(ServiceError::new("INVALID_INPUT", "工具只能请求单个文件名"));
-                }
-                let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
-                let result = serde_json::json!({"content":content,"evidence_ref":evidence_ref});
-                Ok((call.id.clone(), result.to_string()))
+                let output: (String, String) = (|| -> Result<(String, String)> {
+                    if matches!(
+                        call.name.as_str(),
+                        "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check"
+                    ) {
+                        return Ok((call.id.clone(), review_local_command(app, chat, call)?));
+                    }
+                    if matches!(
+                        call.name.as_str(),
+                        "github_read_file" | "github_write_file" | "github_create_file"
+                    ) {
+                        return Ok((call.id.clone(), review_github(app, chat, call)?));
+                    }
+                    if call.name != "read_file" {
+                        return Err(ServiceError::new(
+                            "TOOL_UNSUPPORTED",
+                            "模型请求了未提供的工具",
+                        ));
+                    }
+                    let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
+                        .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数无法解析"))?;
+                    let leaf = value
+                        .get("file_name")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
+                    if value.as_object().is_none_or(|v| v.len() != 1)
+                        || leaf.is_empty()
+                        || leaf.len() > 255
+                        || leaf.contains('/')
+                        || leaf.contains('\\')
+                        || leaf.chars().any(char::is_control)
+                    {
+                        return Err(ServiceError::new("INVALID_INPUT", "工具只能请求单个文件名"));
+                    }
+                    let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
+                    let result = serde_json::json!({"content":content,"evidence_ref":evidence_ref});
+                    Ok((call.id.clone(), result.to_string()))
+                })()?;
+                let root = app.path().app_data_dir().map_err(|_| {
+                    ServiceError::new(
+                        "TOOL_RESULT_STORAGE_ERROR",
+                        "工具可能已执行，但无法定位回执目录；不要直接重试工具",
+                    )
+                })?;
+                wex_desktop_service::save_tool_result(
+                    &root.join("tool-results"),
+                    &chat.conversation_id,
+                    &chat.turn_id,
+                    call,
+                    &output.1,
+                )?;
+                Ok(output)
             })
             .inspect(|item| {
                 if item.is_ok() {

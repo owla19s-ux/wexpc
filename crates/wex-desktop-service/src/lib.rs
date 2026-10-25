@@ -26,3 +26,6 @@ pub use domain::*;
 
 mod tool_journal;
 pub use tool_journal::{append_tool_marker, read_tool_markers, ToolReceiptMarker};
+
+mod tool_results;
+pub use tool_results::{read_tool_results, save_tool_result, SavedToolResult};

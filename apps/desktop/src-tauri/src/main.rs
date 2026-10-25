@@ -283,6 +283,19 @@ fn tool_receipts(app: tauri::AppHandle, conversation_id: String) -> Result<Vec<T
     read_tool_markers(&root.join("tool-receipts"), &conversation_id)
 }
 
+#[tauri::command]
+fn tool_results(
+    app: tauri::AppHandle,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<Vec<SavedToolResult>> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ServiceError::new("TOOL_RESULT_STORAGE_ERROR", "无法定位工具回执目录"))?;
+    read_tool_results(&root.join("tool-results"), &conversation_id, &turn_id)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -314,6 +327,7 @@ fn main() {
             create_conversation,
             send_message,
             tool_receipts,
+            tool_results,
             retry_chat_result,
             create_space,
             create_group,
