@@ -857,6 +857,37 @@ mod publication_tests {
     }
 
     #[test]
+    fn corrupted_dispatch_snapshot_is_rejected_before_recovery() {
+        let mut service = draft_service();
+        let revision = service.snapshot().unwrap().revision;
+        service.publish_task(revision, "task_1").unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        let attempt = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        let valid = service.snapshot().unwrap();
+        assert!(validate_dispatch_snapshot(&valid).is_ok());
+
+        let mut duplicate = valid.clone();
+        duplicate.dispatch_attempts.push(attempt.clone());
+        assert_eq!(validate_dispatch_snapshot(&duplicate).unwrap_err().code, "INVALID_SNAPSHOT");
+
+        let mut orphan = valid.clone();
+        orphan.dispatch_attempts[0].task_id = "missing".into();
+        assert_eq!(validate_dispatch_snapshot(&orphan).unwrap_err().code, "INVALID_SNAPSHOT");
+
+        let mut forged_epoch = valid.clone();
+        forged_epoch.dispatch_attempts[0].publication_epoch += 1;
+        assert_eq!(validate_dispatch_snapshot(&forged_epoch).unwrap_err().code, "INVALID_SNAPSHOT");
+
+        let mut forged_agent = valid.clone();
+        forged_agent.dispatch_attempts[0].agent_id = "other_agent".into();
+        assert_eq!(validate_dispatch_snapshot(&forged_agent).unwrap_err().code, "INVALID_SNAPSHOT");
+
+        let mut future_revision = valid;
+        future_revision.dispatch_attempts[0].recorded_revision = future_revision.revision + 1;
+        assert_eq!(validate_dispatch_snapshot(&future_revision).unwrap_err().code, "INVALID_SNAPSHOT");
+    }
+
+    #[test]
     fn dispatch_queue_rejects_stale_revision_without_creating_attempt() {
         let mut service = draft_service();
         let initial = service.snapshot().unwrap().revision;
