@@ -10,7 +10,7 @@ pub use connectors::git_dispatch::{approved_git_diff, approved_git_status};
 pub use connectors::github_dispatch::{
     create_approved_github_file, read_approved_github_file, update_approved_github_file,
 };
-pub use connectors::intent_binding::digest_arguments;
+pub use connectors::intent_binding::{digest_arguments, file_content_sha256};
 pub use connectors::local_dispatch::read_approved_file;
 pub use connectors::openai_compatible::{
     chat_endpoint, execute_chat, execute_chat_stream, execute_chat_stream_with_progress,
