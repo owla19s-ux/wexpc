@@ -123,7 +123,6 @@ fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
             || !snapshot.agents.iter().any(|agent| agent.id == attempt.agent_id)
             || task.publication_epoch != attempt.publication_epoch
             || !task.agent_ids.contains(&attempt.agent_id)
-            || !task_member_assigned(snapshot, &attempt.agent_id, &attempt.project_id)
             || !identities.insert(attempt.id.clone())
             || !publications.insert((attempt.task_id.clone(), attempt.publication_epoch))
         {
@@ -868,6 +867,28 @@ mod publication_tests {
         assert_eq!(
             service.snapshot().unwrap().dispatch_attempts.iter().find(|a| a.id == second.id).unwrap().status,
             DispatchAttemptStatus::Pending
+        );
+    }
+
+    #[test]
+    fn historical_dispatch_survives_member_duty_changes_at_restart() {
+        let mut service = draft_service();
+        let revision = service.snapshot().unwrap().revision;
+        service.publish_task(revision, "task_1").unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        service.mutate(|snapshot| {
+            snapshot.agents[0].project_id = "another_project".into();
+            Ok(())
+        }).unwrap();
+        let persisted = service.snapshot().unwrap();
+        // Restoring history does not grant current authority. Claim must
+        // separately enforce today's project duty and assignment.
+        assert!(validate_dispatch_snapshot(&persisted).is_ok());
+        assert_eq!(
+            service.claim_dispatch_attempt(persisted.revision, &persisted.dispatch_attempts[0].id)
+                .unwrap_err().code,
+            "DISPATCH_REFUSED"
         );
     }
 
