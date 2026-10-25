@@ -109,6 +109,8 @@ pub struct NewTask {
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Draft,
+    /// Published for dispatch consideration; not an execution approval.
+    Published,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
