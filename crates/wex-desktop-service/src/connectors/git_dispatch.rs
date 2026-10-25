@@ -197,12 +197,12 @@ mod tests {
         std::fs::write(trusted.path().join("trusted.txt"), b"allowed").unwrap();
         std::fs::write(hostile.path().join("hostile.txt"), b"wrong repo").unwrap();
         let mut cmd = Command::new("git");
-        // Simulate inherited environment without modifying global env: the
-        // sanitized process receives a clean set of Git overrides.
+        // Inject an actively hostile repository override into this Command.
+        // A plain git -C trusted_root would read the hostile repository.
+        cmd.env("GIT_DIR", hostile.path().join(".git"))
+            .env("GIT_WORK_TREE", hostile.path());
         sanitize_git_environment(&mut cmd);
-        cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE")
-            .arg("-C").arg(trusted.path())
-            .args(GIT_STATUS_ARGS);
+        cmd.arg("-C").arg(trusted.path()).args(GIT_STATUS_ARGS);
         let output = cmd.output().unwrap();
         assert!(output.status.success());
         let status = String::from_utf8(output.stdout).unwrap();
