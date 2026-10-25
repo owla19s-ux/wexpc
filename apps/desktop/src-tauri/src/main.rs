@@ -157,6 +157,10 @@ fn set_github_enabled(app: tauri::AppHandle, enabled: bool) -> Result<()> {
 fn github_status(app: tauri::AppHandle) -> Result<github_config::GithubStatus> {
     github_config::status(&app)
 }
+#[tauri::command]
+fn revoke_github(app: tauri::AppHandle) -> Result<()> {
+    github_config::revoke(&app)
+}
 
 #[tauri::command]
 fn set_connection_enabled(
@@ -296,6 +300,7 @@ fn main() {
             configure_github,
             set_github_enabled,
             github_status,
+            revoke_github,
             add_agent,
             assign_agent_duty,
             member_brief,
