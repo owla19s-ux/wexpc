@@ -343,6 +343,41 @@ impl DesktopService {
         })
     }
 
+    /// A read-only bridge to Core admission. This does not persist a dispatch
+    /// attempt, reserve a lease or grant a tool permission.
+    pub fn task_dispatch_candidate(
+        &self,
+        revision: u64,
+        task_id: &str,
+        agent_id: &str,
+    ) -> Result<wex_core::dispatch::DispatchTicket> {
+        use wex_core::task::{Task as CoreTask, TaskBoard, TaskStatus as CoreStatus};
+        let state = self.snapshot()?;
+        organization::check_revision(&state, revision)?;
+        let task = state.tasks.iter().find(|task| task.id == task_id)
+            .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+        if task.status != TaskStatus::Published {
+            return Err(ServiceError::new("TASK_NOT_PUBLISHED", "任务尚未发布"));
+        }
+        if !task.agent_ids.iter().any(|id| id == agent_id)
+            || !task_member_assigned(&state, agent_id, &task.project_id)
+        {
+            return Err(ServiceError::new("AGENT_NOT_ASSIGNED", "成员未获该项目有效任务分配"));
+        }
+        let mut board = TaskBoard::default();
+        board.insert(CoreTask {
+            id: task.id.clone(),
+            project_id: task.project_id.clone(),
+            objective: task.goal.clone(),
+            assigned_agent: Some(agent_id.to_owned()),
+            assignment_epoch: revision,
+            status: CoreStatus::Queued,
+            evidence_refs: vec![],
+        }).map_err(|_| ServiceError::new("INVALID_TASK", "任务无法映射到调度核心"))?;
+        wex_core::dispatch::admit(&board, task_id, &task.project_id, agent_id, revision, true)
+            .map_err(|_| ServiceError::new("DISPATCH_REFUSED", "任务未通过调度准入核查"))
+    }
+
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
         let name = title(&input.title)?;
         text(&input.goal)?;
