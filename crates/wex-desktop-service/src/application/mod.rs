@@ -863,7 +863,7 @@ mod publication_tests {
         let rev = service.snapshot().unwrap().revision;
         assert_eq!(
             service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
-            "PROJECT_DISPATCH_BLOCKED"
+            "UNKNOWN_DISPATCH_BLOCKED"
         );
         assert_eq!(
             service.snapshot().unwrap().dispatch_attempts.iter().find(|a| a.id == second.id).unwrap().status,
@@ -900,6 +900,49 @@ mod publication_tests {
         let mut future_revision = valid;
         future_revision.dispatch_attempts[0].recorded_revision = future_revision.revision + 1;
         assert_eq!(validate_dispatch_snapshot(&future_revision).unwrap_err().code, "INVALID_SNAPSHOT");
+    }
+
+    #[test]
+    fn unknown_attempt_blocks_claims_even_in_another_project() {
+        let mut service = draft_service();
+        let mut other = service.snapshot().unwrap().tasks[0].clone();
+        other.id = "task_other".into();
+        other.project_id = "p_other".into();
+        service.mutate(|snapshot| {
+            snapshot.projects.push(Project {
+                id: "p_other".into(), name: "Other".into(), goal: String::new(),
+                resources: vec![], context_id: None,
+            });
+            snapshot.agents.push(Agent {
+                id: "a_other".into(), project_id: "p_other".into(),
+                name: "Other worker".into(), role: AgentRole::Worker,
+                connection_id: "c_1".into(), model_id: "model".into(),
+                conversation_id: "conv_other".into(),
+            });
+            other.agent_ids = vec!["a_other".into()];
+            snapshot.tasks.push(other);
+            Ok(())
+        }).unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        service.publish_task(rev, "task_1").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        service.publish_task(rev, "task_other").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        let first = service.queue_dispatch_attempt(rev, "task_1", "a_1").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        let second = service.queue_dispatch_attempt(rev, "task_other", "a_other").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        service.claim_dispatch_attempt(rev, &first.id).unwrap();
+        service.mutate(|snapshot| {
+            snapshot.dispatch_attempts.iter_mut().find(|a| a.id == first.id).unwrap().status =
+                DispatchAttemptStatus::OutcomeUnknown;
+            Ok(())
+        }).unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        assert_eq!(
+            service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
+            "UNKNOWN_DISPATCH_BLOCKED"
+        );
     }
 
     #[test]
