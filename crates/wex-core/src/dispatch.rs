@@ -164,4 +164,30 @@ mod tests {
         assert_eq!(validate_ticket(&board, &ticket), Ok(()));
         assert_eq!(admit(&board, "task_1", "pc", "agent_a", 2, true), Err(DispatchRefusal::NotReady));
     }
+    #[test]
+    fn reserve_rejects_conflicts_and_releases_on_drop() {
+        let board = board();
+        let leases = ResourceLeases::default();
+        let scopes = vec!["src/main.rs".to_owned()];
+        let first = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &scopes).unwrap();
+        assert!(matches!(
+            reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &scopes),
+            Err(DispatchStartError::Lease(LeaseError::Busy))
+        ));
+        drop(first);
+        assert!(reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &scopes).is_ok());
+    }
+
+    #[test]
+    fn reserve_does_not_lock_scopes_for_rejected_assignment() {
+        let board = board();
+        let leases = ResourceLeases::default();
+        let scopes = vec!["src/main.rs".to_owned()];
+        assert!(matches!(
+            reserve(&board, &leases, "task_1", "pc", "agent_b", 2, &scopes),
+            Err(DispatchStartError::Refused(DispatchRefusal::WrongAgent))
+        ));
+        assert!(!leases.is_busy("src/main.rs").unwrap());
+    }
+
 }
