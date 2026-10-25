@@ -377,6 +377,16 @@ pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
     Ok(())
 }
 
+/// Non-mutating precondition for a future versioned replacement transaction.
+/// This is NOT a write authorization token; the commit must revalidate atomically.
+pub(super) fn prepare_replace_leaf(root: &File, leaf: &str, expected: &[u8]) -> Result<(), FileReadError> {
+    if !valid_leaf(leaf) || expected.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    if read_leaf(root, leaf)? != expected { return Err(FileReadError::Changed); }
+    Ok(())
+}
+
 fn information(file: &File) -> Result<ByHandleFileInformation, ResourceError> {
     let mut info = ByHandleFileInformation {
         attributes: 0,
