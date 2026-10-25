@@ -698,6 +698,37 @@ mod publication_tests {
     }
 
     #[test]
+    fn dispatch_queue_is_durable_and_duplicate_registration_is_refused() {
+        let mut service = draft_service();
+        let initial = service.snapshot().unwrap().revision;
+        service.publish_task(initial, "task_1").unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        let attempt = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        assert_eq!(attempt.status, DispatchAttemptStatus::Pending);
+        let saved = service.snapshot().unwrap();
+        assert_eq!(saved.dispatch_attempts.len(), 1);
+        assert_eq!(saved.dispatch_attempts[0].id, attempt.id);
+        assert_eq!(saved.dispatch_attempts[0].publication_epoch, saved.tasks[0].publication_epoch);
+        assert_eq!(
+            service.queue_dispatch_attempt(saved.revision, "task_1", "a_1").unwrap_err().code,
+            "DUPLICATE_DISPATCH"
+        );
+        assert_eq!(service.snapshot().unwrap().revision, saved.revision);
+    }
+
+    #[test]
+    fn dispatch_queue_rejects_stale_revision_without_creating_attempt() {
+        let mut service = draft_service();
+        let initial = service.snapshot().unwrap().revision;
+        service.publish_task(initial, "task_1").unwrap();
+        assert_eq!(
+            service.queue_dispatch_attempt(initial, "task_1", "a_1").unwrap_err().code,
+            "REVISION_CONFLICT"
+        );
+        assert!(service.snapshot().unwrap().dispatch_attempts.is_empty());
+    }
+
+    #[test]
     fn unrelated_snapshot_revision_does_not_change_published_assignment_epoch() {
         let mut service = draft_service();
         let initial = service.snapshot().unwrap().revision;
