@@ -8,6 +8,7 @@ WEX 的 **PC 优先工程仓库**，首期交付目标为 Windows。它与 `WEX`
 
 1. [项目共识说明](docs/PROJECT-CONSENSUS.md)：PC与Android关系、首版使用效果、后续候选及实例；双方接手先读并各自回执。
 2. [PC 产品、功能与技术基线](docs/PC-PRODUCT-AND-TECH-BASELINE.md)：产品目标、已确认边界、待验证选型与阶段建议。
+   [0.1.1 施工路线与链路验收计划](docs/WEXPC-0.1.1-IMPLEMENTATION-PLAN.md)：六批次、工作包、依赖、完成判定和未运行验证登记。
 3. [仓库结构与代码状态](docs/REPOSITORY-STRUCTURE.md)：当前目录职责、历史参考代码与未来 PC Host 的位置。
 4. [开发及 GitHub 操作](docs/DEVELOPMENT-WORKFLOW.md)：开工核对、分支/PR、Actions 成本和证据纪律。
 5. [AGENTS.md](AGENTS.md)：给进入仓库施工的 AI 的简明入口。
