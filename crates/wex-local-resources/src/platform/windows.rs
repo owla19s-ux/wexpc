@@ -202,7 +202,23 @@ pub(super) fn valid_leaf(leaf: &str) -> bool {
     if leaf.ends_with('.') || leaf.ends_with(' ') {
         return false;
     }
-    !leaf.contains(['/', '\\', ':', '<', '>', '"', '|', '?', '*'])
+    if leaf.contains(['/', '\\', ':', '<', '>', '"', '|', '?', '*'])
+        || leaf.chars().any(char::is_control)
+    {
+        return false;
+    }
+    // Avoid Win32 device names even when the NT relative-name API would
+    // interpret them differently. An extension does not make one safe.
+    let stem = leaf.split('.').next().unwrap_or(leaf).to_ascii_uppercase();
+    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
+        return false;
+    }
+    if stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
+        && matches!(stem.as_bytes()[3], b'1'..=b'9')
+    {
+        return false;
+    }
+    true
 }
 
 pub(super) fn random_id() -> Result<String, ResourceError> {
