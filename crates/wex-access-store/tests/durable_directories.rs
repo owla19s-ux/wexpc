@@ -201,3 +201,33 @@ fn capacity_rejected_addition_does_not_quarantine_existing_authority() {
     );
     assert_eq!(reopened.revoke(revision, &first.id), Ok(revision + 1));
 }
+
+#[test]
+fn exclusive_authorized_create_is_durable_and_never_overwrites() {
+    let s = Sandbox::new();
+    let store = s.store();
+    let directory = store.authorize_directory(0, s.0.join("a"), Access::Write).unwrap();
+    assert!(store.create_authorized_at(Some(1), &directory.id, "new.txt", b"created", true).is_ok());
+    assert_eq!(fs::read(s.0.join("a/new.txt")).unwrap(), b"created");
+    assert!(store.create_authorized_at(Some(1), &directory.id, "new.txt", b"replace", true).is_err());
+    assert_eq!(fs::read(s.0.join("a/new.txt")).unwrap(), b"created");
+    assert!(store.create_authorized_at(Some(0), &directory.id, "other.txt", b"stale", true).is_err());
+    assert!(!s.0.join("a/other.txt").exists());
+    assert!(store.create_authorized_at(Some(1), &directory.id, "../escape", b"bad", true).is_err());
+    assert!(!s.0.join("escape").exists());
+    store.revoke(1, &directory.id).unwrap();
+    assert!(store.create_authorized_at(Some(2), &directory.id, "after.txt", b"bad", true).is_err());
+    assert!(!s.0.join("a/after.txt").exists());
+}
+
+#[test]
+fn read_only_grant_and_other_conversation_cannot_create_files() {
+    let s = Sandbox::new();
+    let store = s.store();
+    let directory = store.authorize_directory(0, s.0.join("a"), Access::Read).unwrap();
+    assert!(store.create_authorized_at(Some(1), &directory.id, "denied.txt", b"data", true).is_err());
+    assert!(!s.0.join("a/denied.txt").exists());
+    let different_store = Store::open(s.0.join("other-auth")).unwrap();
+    assert!(different_store.create_authorized_at(None, &directory.id, "foreign.txt", b"data", true).is_err());
+    assert!(!s.0.join("a/foreign.txt").exists());
+}
