@@ -370,7 +370,7 @@ impl DesktopService {
             if task.status != TaskStatus::Draft {
                 return Err(ServiceError::new("INVALID_TRANSITION", "任务不是草案，无法重复发布"));
             }
-            if task.agent_ids.is_empty() || task.scope.is_empty() || task.goal.trim().is_empty() || task.acceptance.trim().is_empty() {
+            if task.agent_ids.is_empty() || task.scope.is_empty() || task.scope.iter().any(|scope| scope.trim().is_empty() || scope.chars().any(char::is_control)) || task.goal.trim().is_empty() || task.acceptance.trim().is_empty() {
                 return Err(ServiceError::new("INVALID_INPUT", "发布任务需要目标、成员、工作范围与验收标准"));
             }
             if task.agent_ids.iter().any(|id| !task_member_assigned(s, id, &task.project_id)) {
