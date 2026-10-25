@@ -516,3 +516,78 @@ impl DesktopService {
     }
 }
 pub(crate) mod process_control;
+
+#[cfg(test)]
+mod publication_tests {
+    use super::*;
+
+    fn draft_service() -> DesktopService {
+        let mut service = DesktopService::memory().unwrap();
+        service.mutate(|snapshot| {
+            snapshot.projects.push(Project {
+                id: "p_1".into(),
+                name: "Project".into(),
+                goal: String::new(),
+                resources: vec![],
+                context_id: None,
+            });
+            snapshot.agents.push(Agent {
+                id: "a_1".into(),
+                project_id: "p_1".into(),
+                name: "Worker".into(),
+                role: AgentRole::Worker,
+                connection_id: "c_1".into(),
+                model_id: "model".into(),
+                conversation_id: "conv_1".into(),
+            });
+            snapshot.tasks.push(Task {
+                id: "task_1".into(),
+                project_id: "p_1".into(),
+                title: "Implement".into(),
+                goal: "Make change".into(),
+                scope: vec!["src".into()],
+                acceptance: "Tests pass".into(),
+                agent_ids: vec!["a_1".into()],
+                status: TaskStatus::Draft,
+            });
+            Ok(())
+        }).unwrap();
+        service
+    }
+
+    #[test]
+    fn publication_persists_and_cannot_be_repeated_or_edited_as_draft() {
+        let mut service = draft_service();
+        let revision = service.snapshot().unwrap().revision;
+        let published = service.publish_task(revision, "task_1").unwrap();
+        assert_eq!(published.status, TaskStatus::Published);
+        let state = service.snapshot().unwrap();
+        assert_eq!(state.tasks[0].status, TaskStatus::Published);
+        assert_eq!(service.publish_task(state.revision, "task_1").unwrap_err().code, "INVALID_TRANSITION");
+        assert_eq!(service.update_task(state.revision, "task_1", NewTask {
+            project_id: "p_1".into(),
+            title: "Overwritten".into(),
+            goal: "Changed".into(),
+            scope: vec!["src".into()],
+            acceptance: "Done".into(),
+            agent_ids: vec!["a_1".into()],
+        }).unwrap_err().code, "INVALID_TRANSITION");
+        assert_eq!(service.snapshot().unwrap().revision, state.revision);
+    }
+
+    #[test]
+    fn publication_rejects_stale_revision_and_missing_scope_without_mutating_snapshot() {
+        let mut service = draft_service();
+        let revision = service.snapshot().unwrap().revision;
+        assert_eq!(service.publish_task(revision - 1, "task_1").unwrap_err().code, "REVISION_CONFLICT");
+        service.mutate(|state| {
+            state.tasks[0].scope.clear();
+            Ok(())
+        }).unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        assert_eq!(service.publish_task(revision, "task_1").unwrap_err().code, "INVALID_INPUT");
+        let state = service.snapshot().unwrap();
+        assert_eq!(state.revision, revision);
+        assert_eq!(state.tasks[0].status, TaskStatus::Draft);
+    }
+}
