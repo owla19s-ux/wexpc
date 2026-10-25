@@ -141,3 +141,27 @@ fn schema_five_migration_preserves_payload_and_does_not_invent_auto_authorizatio
         raw
     );
 }
+
+#[test]
+fn local_read_policy_is_independent_of_github_and_other_conversations() {
+    let mut app = DesktopService::memory().unwrap();
+    let (_, a, b) = conversations(&mut app);
+    let saved = app
+        .set_tool_policy(&a.id, "local_file_read", 0, PolicyChoice::Automatic)
+        .unwrap();
+    assert_eq!(
+        app.tool_policy(&b.id, "local_file_read").unwrap().policy,
+        PolicyChoice::Ask
+    );
+    assert_eq!(
+        app.tool_policy(&a.id, "github_file_read").unwrap().policy,
+        PolicyChoice::Ask
+    );
+    app.check_tool_policy(&saved).unwrap();
+    app.set_tool_policy(&a.id, "local_file_read", 1, PolicyChoice::Block)
+        .unwrap();
+    assert_eq!(
+        app.check_tool_policy(&saved).unwrap_err().code,
+        "POLICY_CHANGED"
+    );
+}

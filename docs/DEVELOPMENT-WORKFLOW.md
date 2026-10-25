@@ -23,12 +23,12 @@
 | 工作项 | GPT Work当前环境 | 大肥鱼手机本地环境 | 使用方式 |
 | --- | --- | --- | --- |
 | 环境现状 | Linux x86_64；已通过绝对路径确认cargo/rustc 1.99.1（当前默认PATH未包含cargo）、Node 24.22.1、npm 11.9.0、C编译器可用 | 据手机端报告为Android/类Termux环境且有自定义应用前缀；Rust安装及可执行性尚未收到证据 | 每批核对版本和源码；手机安装成功前不标“手机可测已验证” |
-| Rust核心、任务/状态、持久化/恢复、协议单元及模拟HTTP测试 | 已在本地运行过workspace测试，最近业务源码248项通过 | 纯Rust/依赖兼容的用例在工具链就绪后可以承担；SQLite等含C依赖需实际编译确认 | 所属模块先由施工者本地测试；集成后由Work跑受影响回归，不逐文件重复全套 |
+| Rust核心、任务/状态、持久化/恢复、协议单元及模拟HTTP测试 | 已在本地运行过workspace测试，本批业务源码434项通过（服务118、Core72） | 纯Rust/依赖兼容的用例在工具链就绪后可以承担；SQLite等含C依赖需实际编译确认 | 所属模块先由施工者本地测试；集成后由Work跑受影响回归，不逐文件重复全套 |
 | AI API请求、SSE/工具协议、错误/取消及隔离测试 | 可承担本地模拟服务和协议回归 | 手机环境验通后优先交大肥鱼执行API模块本地测试 | 使用成熟HTTP/基础组件、自有协议封装；模块可测试不等于完整API已接入 |
 | 真实DeepSeek/API请求 | 当前未发现可用DeepSeek凭证或调用入口，不能宣称已测 | 仅在手机具备可用凭证、网络且实际请求后报告 | 与模拟服务分开；凭证留在各自环境，不贴到仓库、日志或聊天 |
 | TypeScript检查、React生产构建 | 可运行，已验证前端构建；当前Node24与既有CI Node22有版本差异 | 有可用Node/依赖时可补测，当前未核验 | 主要由Work承担；类型/构建通过不代表界面交互已验收 |
 | Windows Host编译、凭证库、文件/ACL语义、窗口与安装包 | 当前是Linux，无Windows运行环境；不能运行Windows行为测试 | Android同样不能替代Windows运行验证 | 编码可继续，新增改动按Commit列待验证；11月1日后评估Windows CI，买电脑后补本机体验 |
-| Linux原生Tauri Host | 已在执行工作区部署独立pkg-config/GTK 3.24.41/WebKitGTK 2.52.3依赖，正式Host check、严格Clippy及8项Host预检/派发边界测试通过；窗口交互未验收 | 不作为Windows桌面验证环境 | 使用工作区内的依赖前缀和PKG_CONFIG/PKG_CONFIG_SYSROOT_DIR，不要求写系统安装目录；Linux编译不替代Windows运行 |
+| Linux原生Tauri Host | 已在执行工作区部署独立pkg-config/GTK 3.24.41/WebKitGTK 2.52.3依赖，正式Host check、严格Clippy及10项Host预检/派发边界与本地授权读取测试通过；窗口交互未验收 | 不作为Windows桌面验证环境 | 使用工作区内的依赖前缀和PKG_CONFIG/PKG_CONFIG_SYSROOT_DIR，不要求写系统安装目录；Linux编译不替代Windows运行 |
 | Android SDK/模拟器/adb/Flutter | 当前PATH未发现adb、emulator、sdkmanager、flutter、dart | 手机可承担APK真机体验；SDK/构建/自动化工具是否具备需另报 | 手机真机、模拟器、构建与安装四类证据分开；不预设手机能编译整个工程 |
 
 Work环境是可变化的临时执行环境；上述版本和可用工具只代表本次检查。手机端网站可访问、磁盘充足或apt配置已修，均不能代替Rust及依赖实际编译运行。Android专属路径、应用前缀和本地C/TLS依赖由手机端先确认，不能默认标准Linux安装包适用。

@@ -55,7 +55,32 @@ fn run_with_history(
         description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
         parameters_json: r#"{"type":"object","properties":{"file_name":{"type":"string"}},"required":["file_name"],"additionalProperties":false}"#.into(),
     };
-        let mut tools = vec![tool];
+        let readable = policies
+            .policy("local_file_read")
+            .is_ok_and(|s| s.policy != wex_desktop_service::PolicyChoice::Block);
+        let mut tools = if readable { vec![tool] } else { Vec::new() };
+        if readable {
+            if let Ok(status) = crate::local_access::open(app, &chat.conversation_id)
+                .and_then(|store| crate::local_access::status(&store))
+            {
+                let directories: Vec<_> = status
+                    .directories
+                    .into_iter()
+                    .filter(|d| {
+                        d.available
+                            && matches!(
+                                d.access,
+                                crate::local_access::Scope::Read
+                                    | crate::local_access::Scope::ReadWrite
+                            )
+                    })
+                    .collect();
+                if !directories.is_empty() {
+                    let ids: Vec<_> = directories.iter().map(|d| d.id.clone()).collect();
+                    tools.push(ToolDefinition{name:"read_authorized_file".into(),description:format!("Read a direct UTF-8 file from a directory explicitly authorized to this conversation. Execution follows the current local read policy. Authorized directories: {}",serde_json::to_string(&directories).unwrap_or_default()),parameters_json:serde_json::json!({"type":"object","properties":{"directory_id":{"type":"string","enum":ids},"file_name":{"type":"string"}},"required":["directory_id","file_name"],"additionalProperties":false}).to_string()});
+                }
+            }
+        }
         for (name, description) in [
             (
                 "git_status",
@@ -130,6 +155,12 @@ fn run_with_history(
                 .iter()
                 .map(|call| {
                     let output: (String, String) = (|| -> Result<(String, String)> {
+                        if call.name == "read_authorized_file" {
+                            return Ok((
+                                call.id.clone(),
+                                review_saved_read(app, chat, call, &before_step, policies)?,
+                            ));
+                        }
                         if matches!(
                             call.name.as_str(),
                             "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check"
@@ -175,7 +206,7 @@ fn run_with_history(
                             ));
                         }
                         let (content, evidence_ref) =
-                            review_and_read(app, chat, leaf, &before_step)?;
+                            review_and_read(app, chat, leaf, &before_step, policies)?;
                         let result =
                             serde_json::json!({"content":content,"evidence_ref":evidence_ref});
                         Ok((call.id.clone(), result.to_string()))
@@ -255,6 +286,7 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "工具参数必须是对象"))?;
     let fields: &[&str] = match call.name.as_str() {
         "read_file" => &["file_name"],
+        "read_authorized_file" => &["directory_id", "file_name"],
         "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check" => &[],
         "github_read_file" if github_enabled => &["owner", "repo", "path"],
         "github_write_file" if github_enabled => &["owner", "repo", "path", "sha", "content"],
@@ -281,6 +313,20 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
             return Err(ServiceError::new(
                 "INVALID_INPUT",
                 "工具参数包含空值或控制字符",
+            ));
+        }
+    }
+    if matches!(call.name.as_str(), "read_file" | "read_authorized_file") {
+        let leaf = obj["file_name"].as_str().unwrap_or_default();
+        if leaf.len() > 255
+            || leaf == "."
+            || leaf == ".."
+            || leaf.contains('/')
+            || leaf.contains('\\')
+        {
+            return Err(ServiceError::new(
+                "INVALID_INPUT",
+                "当前读取工具仅支持目录内直接文件名",
             ));
         }
     }
@@ -316,7 +362,10 @@ fn review_and_read(
     chat: &PreparedChat,
     leaf: &str,
     authority: &impl Fn() -> Result<()>,
+    policies: &impl ToolPolicyAuthority,
 ) -> Result<(String, String)> {
+    let policy = policies.policy("local_file_read")?;
+    policies.check(&policy)?;
     let selected = app
         .dialog()
         .file()
@@ -363,20 +412,23 @@ fn review_and_read(
     let mut ledger = OperationLedger::default();
     ledger.propose(intent.clone()).map_err(|_| core_failure())?;
     ledger
-        .approve(&operation_id, &intent, 1)
+        .approve(&operation_id, &intent, policy.revision)
         .map_err(|_| core_failure())?;
     let dispatch = begin_approved_dispatch(
         &mut ledger,
         &operation_id,
         &attempt_id,
         ExecutionChecks {
-            authority_revision: 1,
+            authority_revision: policy.revision,
             connection_enabled: true,
             authenticated: true,
             platform_available: wex_local_resources::platform_supported(),
             resource_allowed: true,
         },
-        authority,
+        &|| {
+            authority()?;
+            policies.check(&policy)
+        },
     )?;
     // A durable "in flight" marker must exist BEFORE touching the file.
     journal(
@@ -386,7 +438,7 @@ fn review_and_read(
         &operation_id,
         "in_flight",
         None,
-        None,
+        Some(&policy),
     )?;
     let grants = [DirectoryGrant {
         directory_id: &directory_id,
@@ -409,7 +461,7 @@ fn review_and_read(
             "failed"
         },
         receipt_digest.as_deref(),
-        None,
+        Some(&policy),
     )?;
     let outcome = if content.is_ok() {
         Outcome::Succeeded {
@@ -661,7 +713,7 @@ fn review_github(
     } else {
         format!("WEXPC 请求读取 GitHub 文件\n仓库：{owner}/{repo}（默认分支）\n文件：{path}")
     };
-    authorize_github_policy(policy.policy, || {
+    authorize_execution_policy(policy.policy, || {
         app.dialog()
             .message(summary)
             .title("GitHub 工具授权")
@@ -814,7 +866,7 @@ fn review_github(
     Ok(serde_json::json!({"evidence_ref": evidence_id, "result":body}).to_string())
 }
 
-fn authorize_github_policy(
+fn authorize_execution_policy(
     policy: wex_desktop_service::PolicyChoice,
     ask: impl FnOnce() -> bool,
 ) -> Result<()> {
@@ -823,11 +875,11 @@ fn authorize_github_policy(
         PolicyDecision::Execute => Ok(()),
         PolicyDecision::RequestApproval if ask() => Ok(()),
         PolicyDecision::RequestApproval => {
-            Err(ServiceError::new("PERMISSION_DENIED", "用户拒绝GitHub操作"))
+            Err(ServiceError::new("PERMISSION_DENIED", "用户拒绝工具操作"))
         }
         PolicyDecision::Blocked => Err(ServiceError::new(
             "POLICY_BLOCKED",
-            "本对话已拦截该GitHub能力",
+            "本对话已拦截该工具能力",
         )),
     }
 }
@@ -876,6 +928,135 @@ fn journal(
             policy: policy.cloned(),
         },
     )
+}
+
+/// Saved resource scope and execution strategy are independent authorities.
+fn review_saved_read(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    call: &ToolProposal,
+    authority: &impl Fn() -> Result<()>,
+    policies: &impl ToolPolicyAuthority,
+) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "读取参数无效"))?;
+    let id = value["directory_id"]
+        .as_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少授权目录"))?;
+    let leaf = value["file_name"]
+        .as_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
+    let policy = policies.policy("local_file_read")?;
+    policies.check(&policy)?;
+    let store = crate::local_access::open(app, &chat.conversation_id)?;
+    let state = store.load().map_err(crate::local_access::error)?;
+    let directory = state
+        .directories
+        .iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "该目录未授权给当前对话"))?;
+    let grant = state
+        .grants
+        .iter()
+        .find(|g| g.directory_id == id)
+        .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "目录授权已撤销"))?;
+    if !matches!(grant.access, Access::Read | Access::ReadWrite) {
+        return Err(ServiceError::new("PERMISSION_DENIED", "当前目录未授权读取"));
+    }
+    authorize_execution_policy(policy.policy, || {
+        app.dialog()
+            .message(format!(
+                "读取已授权目录中的文件？\n目录：{}\n文件：{leaf}\n对话：{}",
+                directory.path.display(),
+                chat.conversation_id
+            ))
+            .title("WEXPC 本地读取确认")
+            .buttons(MessageDialogButtons::OkCancel)
+            .blocking_show()
+    })?;
+    let operation_id = format!("op_{}", uuid::Uuid::new_v4().simple());
+    let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
+    let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
+    let intent = OperationIntent {
+        id: operation_id.clone(),
+        actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(),
+        context_id: None,
+        connection_id: "local".into(),
+        capability_id: "local_file_read".into(),
+        resource_id: id.into(),
+        action: Action::Read,
+        expected_version: None,
+        intent_digest: digest_arguments("local_file_read", id, &[leaf.as_bytes()]),
+    };
+    let mut ledger = OperationLedger::default();
+    ledger.propose(intent.clone()).map_err(|_| core_failure())?;
+    ledger
+        .approve(&operation_id, &intent, policy.revision)
+        .map_err(|_| core_failure())?;
+    let dispatch = begin_approved_dispatch(
+        &mut ledger,
+        &operation_id,
+        &attempt_id,
+        ExecutionChecks {
+            authority_revision: policy.revision,
+            connection_enabled: true,
+            authenticated: true,
+            platform_available: wex_local_resources::platform_supported(),
+            resource_allowed: true,
+        },
+        &|| {
+            authority()?;
+            policies.check(&policy)?;
+            if store.load().map_err(crate::local_access::error)?.revision != state.revision {
+                return Err(ServiceError::new(
+                    "AUTHORIZATION_CHANGED",
+                    "目录授权已变化，本次未派发读取",
+                ));
+            }
+            Ok(())
+        },
+    )?;
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        "in_flight",
+        Some(&intent.intent_digest),
+        Some(&policy),
+    )?;
+    // The store checks its revision and live grant under the same lock as I/O.
+    let body = crate::local_access::read(&dispatch, &store, state.revision, leaf);
+    let digest = body
+        .as_ref()
+        .ok()
+        .map(|b| digest_arguments("tool_receipt", &evidence_id, &[b.as_bytes()]));
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        if body.is_ok() { "succeeded" } else { "failed" },
+        digest.as_deref(),
+        Some(&policy),
+    )?;
+    ledger
+        .finish(
+            &operation_id,
+            &attempt_id,
+            if body.is_ok() {
+                Outcome::Succeeded {
+                    evidence_ref: evidence_id.clone(),
+                }
+            } else {
+                Outcome::Failed {
+                    evidence_ref: evidence_id.clone(),
+                }
+            },
+        )
+        .map_err(|_| core_failure())?;
+    Ok(serde_json::json!({"content":body?,"evidence_ref":evidence_id,"directory_id":id,"authorization_revision":state.revision}).to_string())
 }
 
 #[cfg(test)]
@@ -930,7 +1111,7 @@ mod proposal_preflight_tests {
         let mut ledger = OperationLedger::default();
         ledger.propose(intent.clone()).unwrap();
         ledger.approve("op_1", &intent, selected.revision).unwrap();
-        authorize_github_policy(selected.policy, || {
+        authorize_execution_policy(selected.policy, || {
             panic!("automatic policy must not open a dialog")
         })
         .unwrap();
@@ -959,17 +1140,17 @@ mod proposal_preflight_tests {
         assert_eq!(ledger.view(), before);
     }
     #[test]
-    fn github_execution_modes_do_not_conflate_policy_with_resource_authorization() {
+    fn execution_modes_do_not_conflate_policy_with_resource_authorization() {
         use wex_desktop_service::PolicyChoice;
         let mut prompts = 0;
-        authorize_github_policy(PolicyChoice::Automatic, || {
+        authorize_execution_policy(PolicyChoice::Automatic, || {
             prompts += 1;
             false
         })
         .unwrap();
         assert_eq!(prompts, 0);
         assert_eq!(
-            authorize_github_policy(PolicyChoice::Block, || {
+            authorize_execution_policy(PolicyChoice::Block, || {
                 prompts += 1;
                 true
             })
@@ -978,14 +1159,14 @@ mod proposal_preflight_tests {
             "POLICY_BLOCKED"
         );
         assert_eq!(prompts, 0);
-        authorize_github_policy(PolicyChoice::Ask, || {
+        authorize_execution_policy(PolicyChoice::Ask, || {
             prompts += 1;
             true
         })
         .unwrap();
         assert_eq!(prompts, 1);
         assert_eq!(
-            authorize_github_policy(PolicyChoice::Ask, || false)
+            authorize_execution_policy(PolicyChoice::Ask, || false)
                 .unwrap_err()
                 .code,
             "PERMISSION_DENIED"
@@ -1123,6 +1304,27 @@ mod proposal_preflight_tests {
             preflight_proposal(&wrong, true).unwrap_err().code,
             "INVALID_INPUT"
         );
+    }
+
+    #[test]
+    fn saved_directory_read_has_exact_parameters_and_cannot_become_a_path_authorization_tool() {
+        let valid = call(
+            "read_authorized_file",
+            r#"{"directory_id":"opaque","file_name":"file.txt"}"#,
+        );
+        assert!(preflight_proposal(&valid, false).is_ok());
+        for json in [
+            r#"{"directory_id":"opaque","file_name":"../secret"}"#,
+            r#"{"directory_id":"opaque","file_name":"sub/file"}"#,
+            r#"{"directory_id":"opaque","file_name":"file","path":"/new/root"}"#,
+        ] {
+            assert_eq!(
+                preflight_proposal(&call("read_authorized_file", json), false)
+                    .unwrap_err()
+                    .code,
+                "INVALID_INPUT"
+            );
+        }
     }
 
     #[test]

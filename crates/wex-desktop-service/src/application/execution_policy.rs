@@ -2,7 +2,7 @@ use super::*;
 fn supported(capability: &str) -> bool {
     matches!(
         capability,
-        "github_file_read" | "github_file_create" | "github_file_write"
+        "github_file_read" | "github_file_create" | "github_file_write" | "local_file_read"
     )
 }
 fn setting(

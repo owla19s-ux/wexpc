@@ -34,7 +34,7 @@ export function GithubConnection({run}:{run:Run}) {
     void run(async()=>{await command('configure_github',{token});await refresh();});
   };
   return <div>
-    <p>{status?.configured?(status.enabled?'GitHub 已启用（操作仍逐次审批）':'GitHub 已配置，尚未启用'):'尚未配置 GitHub 凭证'}</p>
+    <p>{status?.configured?(status.enabled?'GitHub 已启用（按各对话执行策略）':'GitHub 已配置，尚未启用'):'尚未配置 GitHub 凭证'}</p>
     {failure&&<p className="error">{failure}</p>}
     <form onSubmit={e=>{e.preventDefault();save(e.currentTarget);}}>
       <label>GitHub Personal Access Token<input name="token" type="password" autoComplete="off" required/></label>
@@ -45,6 +45,6 @@ export function GithubConnection({run}:{run:Run}) {
       await command('set_github_enabled',{enabled:!status.enabled});
       await refresh();
     })}>{status.enabled?'关闭 GitHub 全局访问':'启用 GitHub 全局访问'}</button>}
-    <p className="muted">总开关只允许 AI 提出 GitHub 操作。具体仓库、文件及写入内容仍需要逐次确认。</p>
+    <p className="muted">开发测试阶段，总开关允许在 PAT 已授权的所有仓库范围内读写。各对话分别选择自动执行、询问后执行或拦截；总开关不扩展 PAT 权限。</p>
   </div>;
 }

@@ -1,5 +1,5 @@
-//! Trusted Linux/Android directory bindings and metadata-only preflight checks.
-//! Includes bounded direct-file reads; no durable registry, FFI or write API.
+//! Trusted platform directory bindings and metadata-only preflight checks.
+//! Includes bounded direct-file reads and trusted binding checkpoints; no write API.
 //! A successful check is NOT a token for a later ordinary path-based open.
 mod exclusion;
 mod platform;
@@ -73,8 +73,35 @@ impl Binding {
     }
 }
 
-/// In-memory trusted host state. Recreating it deliberately creates fresh IDs;
-/// persisted grants alone cannot restore a binding or reclassify a directory.
+/// Trusted checkpoint, stored only inside the private authorization store.
+/// This is not a grant and must never be accepted from model tool arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedDirectory {
+    pub id: String,
+    pub path: PathBuf,
+    pub protection: Protection,
+    pub platform: String,
+    pub stamp: [u64; 4],
+}
+
+fn durable_stamp(file: &File) -> Result<[u64; 4], ResourceError> {
+    let identity = platform::identity_of_file(file)?;
+    let birth = file
+        .metadata()
+        .and_then(|m| m.created())
+        .map_err(|_| ResourceError::Unsupported)?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| ResourceError::Unsupported)?;
+    Ok([
+        identity.device,
+        identity.inode,
+        birth.as_secs(),
+        u64::from(birth.subsec_nanos()),
+    ])
+}
+
+/// In-memory trusted host state. New registration creates fresh IDs.
+/// Only an identity-verified trusted checkpoint may restore an existing ID.
 /// Do not expose register/classification as an AI tool or a Space association.
 #[derive(Default)]
 pub struct DirectoryRegistry {
@@ -84,6 +111,62 @@ pub struct DirectoryRegistry {
 impl DirectoryRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn export_binding(&self, id: &str) -> Result<SavedDirectory, ResourceError> {
+        let b = self
+            .bindings
+            .iter()
+            .find(|b| b.id == id)
+            .ok_or(ResourceError::UnknownDirectory)?;
+        b.verify()?;
+        Ok(SavedDirectory {
+            id: b.id.clone(),
+            path: b.path.clone(),
+            protection: b.protection,
+            platform: std::env::consts::OS.into(),
+            stamp: durable_stamp(&b._pin)?,
+        })
+    }
+
+    /// Reopen the same native object; a matching path alone is insufficient.
+    /// Trusted private snapshots only. Restoring does not grant any access.
+    pub fn restore_binding(
+        &mut self,
+        saved: &SavedDirectory,
+        internal_roots: &[&Path],
+    ) -> Result<(), ResourceError> {
+        if saved.platform != std::env::consts::OS
+            || saved.id.len() != 64
+            || !saved.id.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(ResourceError::InvalidPath);
+        }
+        let canonical = fs::canonicalize(&saved.path).map_err(|_| ResourceError::Unavailable)?;
+        if canonical != saved.path {
+            return Err(ResourceError::Unavailable);
+        }
+        // Register into a temporary registry so failure never leaves a live binding.
+        let mut candidate = Self::new();
+        let id =
+            candidate.register_with_exclusions(&saved.path, saved.protection, internal_roots)?;
+        if candidate.export_binding(&id)?.stamp != saved.stamp {
+            return Err(ResourceError::Unavailable);
+        }
+        if self.bindings.len() >= 128 {
+            return Err(ResourceError::LimitExceeded);
+        }
+        let mut binding = candidate.bindings.remove(0);
+        if self
+            .bindings
+            .iter()
+            .any(|b| b.id == saved.id || b.path == binding.path || b.identity == binding.identity)
+        {
+            return Err(ResourceError::AlreadyRegistered);
+        }
+        binding.id = saved.id.clone();
+        self.bindings.push(binding);
+        Ok(())
     }
 
     pub fn register(

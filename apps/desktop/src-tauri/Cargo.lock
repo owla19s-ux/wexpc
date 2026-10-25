@@ -4314,6 +4314,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "wex-access-store"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "wex-core",
+ "wex-local-resources",
+]
+
+[[package]]
 name = "wex-api"
 version = "0.1.1"
 dependencies = [
@@ -4360,6 +4370,7 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "uuid",
+ "wex-access-store",
  "wex-api",
  "wex-core",
  "wex-desktop-service",

@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod github_config;
+mod local_access;
 mod tool_approvals;
 mod vault;
 
@@ -528,6 +529,12 @@ fn main() {
             configure_github,
             set_github_enabled,
             github_status,
+            local_access::local_directory_status,
+            local_access::authorize_local_directory,
+            local_access::edit_local_directory,
+            local_access::revoke_local_directory,
+            local_access::local_read_policy,
+            local_access::set_local_read_policy,
             github_tool_policies,
             set_github_tool_policy,
             add_agent,
