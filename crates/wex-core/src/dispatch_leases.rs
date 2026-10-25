@@ -137,7 +137,7 @@ mod tests {
     fn busy_probe_rejects_invalid_scope() {
         let registry = ResourceLeases::default();
         assert_eq!(registry.is_busy(""), Err(LeaseError::InvalidScope));
-        assert_eq!(registry.is_busy("bad\\npath"), Err(LeaseError::InvalidScope));
+        assert_eq!(registry.is_busy("bad\npath"), Err(LeaseError::InvalidScope));
     }
 
     #[test]
