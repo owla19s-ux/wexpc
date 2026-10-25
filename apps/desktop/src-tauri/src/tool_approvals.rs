@@ -1089,7 +1089,9 @@ fn review_saved_read(
             },
         )
         .map_err(|_| core_failure())?;
-    Ok(serde_json::json!({"content":body?,"evidence_ref":evidence_id,"directory_id":id,"authorization_revision":state.revision}).to_string())
+    let content = body?;
+    let sha256 = wex_desktop_service::file_content_sha256(content.as_bytes());
+    Ok(serde_json::json!({"content":content,"sha256":sha256,"evidence_ref":evidence_id,"directory_id":id,"authorization_revision":state.revision}).to_string())
 }
 
 fn review_saved_create(
