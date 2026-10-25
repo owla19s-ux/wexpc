@@ -215,6 +215,15 @@ fn create_task(state: State<'_, Shared>, input: NewTask) -> Result<Task> {
 }
 
 #[tauri::command]
+fn publish_task(
+    state: State<'_, Shared>,
+    revision: u64,
+    task_id: String,
+) -> Result<Task> {
+    locked(&state)?.publish_task(revision, &task_id)
+}
+
+#[tauri::command]
 fn update_task(
     state: State<'_, Shared>,
     revision: u64,
@@ -568,6 +577,7 @@ fn main() {
             create_task,
             update_task,
             append_task_record,
+            publish_task,
             create_conversation,
             send_message,
             active_processes,
