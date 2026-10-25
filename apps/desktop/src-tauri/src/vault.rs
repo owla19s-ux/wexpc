@@ -45,3 +45,18 @@ pub fn remove(reference: &str) {
     #[cfg(not(windows))]
     let _ = reference;
 }
+
+/// Unlike best-effort cleanup, explicit user revocation must report failure.
+pub fn remove_checked(reference: &str) -> Result<()> {
+    #[cfg(windows)]
+    {
+        entry(reference)?
+            .delete_credential()
+            .map_err(|_| unavailable())
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = reference;
+        Err(unavailable())
+    }
+}
