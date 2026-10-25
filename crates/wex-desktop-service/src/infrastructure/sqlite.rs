@@ -39,7 +39,7 @@ impl DesktopStore {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if version > 7 {
+        if version > 8 {
             return Err(ServiceError::new(
                 "UNSUPPORTED_VERSION",
                 "数据由更新版本创建，请使用相应版本打开",
@@ -55,10 +55,10 @@ impl DesktopStore {
                 [serde_json::to_string(&DesktopSnapshot::default()).map_err(storage)?],
             )
             .map_err(storage)?;
-            tx.pragma_update(None, "user_version", 7).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 8).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
-        if (1..=6).contains(&version) {
+        if (1..=7).contains(&version) {
             let tx = db
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
@@ -127,7 +127,7 @@ mod publication_schema_tests {
     fn newly_created_store_uses_schema_seven() {
         let store = DesktopStore::memory().unwrap();
         let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
-        assert_eq!(version, 7);
+        assert_eq!(version, 8);
     }
 
     #[test]
