@@ -33,3 +33,6 @@ pub use tool_results::{read_tool_results, save_tool_result, SavedToolResult};
 
 mod tool_checkpoints;
 pub use tool_checkpoints::{load_tool_checkpoint, restore_tool_checkpoint, save_tool_checkpoint};
+
+mod saved_chat_reply;
+pub use saved_chat_reply::{read_chat_reply, save_chat_reply};

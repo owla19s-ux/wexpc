@@ -74,13 +74,13 @@ export function App() {
     catch(e){setError(errorMessage(e));}
     finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});await refresh().then(admitted).catch(e=>setError(errorMessage(e)));}
   }
-  async function resumeReply(turnId:string) {
+  async function resumeReply(turnId:string,mode:"local"|"model") {
     if(!conversation)return;
     const id=conversation.id;
     setError('');setPending(prev=>new Set(prev).add(id));
     setRecovering(prev=>new Set(prev).add(turnId));
     const timer=window.setTimeout(()=>void refresh().catch(()=>{}),200);
-    try {await command('resume_tool_reply',{conversationId:id,turnId});}
+    try {await command(mode==='local'?'restore_saved_chat_reply':'resume_tool_reply',{conversationId:id,turnId});}
     catch(error){setError(errorMessage(error));}
     finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});setRecovering(prev=>{const next=new Set(prev);next.delete(turnId);return next;});await refresh().catch(error=>setError(errorMessage(error)));}
   }
@@ -114,7 +114,7 @@ export function App() {
       {page==='conversation'&&!conversation&&data&&<section><h1>新建普通对话</h1><form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void run(async()=>{const c=await command<Conversation>('create_conversation',{projectId:null,title:fields.get('title'),connectionId:fields.get('connection'),modelId:fields.get('model')});showConversation(c);});}}><label>对话名称<input name="title" required maxLength={128} defaultValue="普通对话"/></label><Selection connections={data.connections}/><button className="primary" disabled={!data.connections.some(c=>c.enabled)}>创建对话</button></form></section>}
       {page==='conversation'&&conversation&&data&&<label>关联上下文<select value={conversation.context_id||''} onChange={e=>{const contextId=e.target.value||null;void run(async()=>{await command('bind_conversation_context',{conversationId:conversation.id,contextId});});}}><option value="">独立对话，不关联上下文</option>{data.contexts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
       {page==='conversation'&&conversation&&data&&<Chat conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} resume={resumeReply} recovering={recovering} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
-    </main></div><footer>{pending.size?`${pending.size} 个对话正在请求 API`:'本地项目数据由桌面服务保存'} · 任务仍为草案；非流式工具支持人工逐次审批，自动多 Agent 施工尚未完成</footer>
+    </main></div><footer>{pending.size?`${pending.size} 个对话正在处理`:'本地项目数据由桌面服务保存'} · 任务仍为草案；非流式工具支持人工逐次审批，自动多 Agent 施工尚未完成</footer>
   </div>;
 }
 
