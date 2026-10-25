@@ -173,7 +173,7 @@ pub fn create(
     leaf: &str,
     content: &str,
 ) -> Result<()> {
-    if dispatch.intent.action != Action::Create
+    if dispatch.intent.action != Action::Write
         || dispatch.intent.capability_id != "local_file_create"
         || dispatch.intent.intent_digest
             != digest_arguments("local_file_create", &dispatch.intent.resource_id,
