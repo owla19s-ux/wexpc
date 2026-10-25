@@ -102,3 +102,23 @@ pub fn credential(app: &AppHandle) -> Result<String> {
         .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "GitHub 总开关未开启"))?;
     crate::vault::read(&config.credential_ref)
 }
+
+/// Revoke future GitHub access and remove the stored credential reference.
+/// In-flight external operations are not cancelled by this action.
+pub fn revoke(app: &AppHandle) -> Result<()> {
+    let Some(mut config) = load(app)? else {
+        return Ok(());
+    };
+    // Fail closed before attempting credential deletion. If deletion fails,
+    // leave the connection configured but disabled so the user can retry.
+    if config.enabled {
+        config.enabled = false;
+        persist(app, &config)?;
+    }
+    crate::vault::remove_checked(&config.credential_ref)?;
+    match fs::remove_file(location(app)?) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(_) => Err(ServiceError::new("STORAGE_ERROR", "凭证已删除，但无法清除 GitHub 配置，请重试")),
+    }
+}
