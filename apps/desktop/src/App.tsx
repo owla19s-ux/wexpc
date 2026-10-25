@@ -19,6 +19,7 @@ export function App() {
   const [pending,setPending]=useState<Set<string>>(new Set());
   const [drafts,setDrafts]=useState<Record<string,string>>({});
   const [previews,setPreviews]=useState<Record<string,string>>({});
+  const [recovering,setRecovering]=useState<Set<string>>(new Set());
   useEffect(()=>{
     if(!desktopAvailable)return;
     let active=true;
@@ -73,6 +74,16 @@ export function App() {
     catch(e){setError(errorMessage(e));}
     finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});await refresh().then(admitted).catch(e=>setError(errorMessage(e)));}
   }
+  async function resumeReply(turnId:string) {
+    if(!conversation)return;
+    const id=conversation.id;
+    setError('');setPending(prev=>new Set(prev).add(id));
+    setRecovering(prev=>new Set(prev).add(turnId));
+    const timer=window.setTimeout(()=>void refresh().catch(()=>{}),200);
+    try {await command('resume_tool_reply',{conversationId:id,turnId});}
+    catch(error){setError(errorMessage(error));}
+    finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});setRecovering(prev=>{const next=new Set(prev);next.delete(turnId);return next;});await refresh().catch(error=>setError(errorMessage(error)));}
+  }
   return <div className="app">
     <header><strong>WEXPC</strong><span>0.1.1 · 开发中</span></header>
     <div className="shell"><nav aria-label="主导航">
@@ -102,7 +113,7 @@ export function App() {
       {page==='connections'&&<section><h1>连接与服务</h1><h2>AI API</h2>{data?.connections.map(c=><div className="item" key={c.id}><strong>{c.name}</strong><span>{c.base_url}</span><span>{c.models.join(' · ')}</span><button onClick={()=>void run(async()=>{await command('set_connection_enabled',{connectionId:c.id,enabled:!c.enabled});})}>{c.enabled?'停用':'启用'}</button></div>)}<ConnectionForm run={run}/><hr/><h2>GitHub</h2><GithubConnection run={run}/><hr/><h2>后续接入项</h2><p>完整本地文件写入、任意终端指令、Git 提交与 Android 模拟器尚未完成桌面执行验收。</p></section>}
       {page==='conversation'&&!conversation&&data&&<section><h1>新建普通对话</h1><form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void run(async()=>{const c=await command<Conversation>('create_conversation',{projectId:null,title:fields.get('title'),connectionId:fields.get('connection'),modelId:fields.get('model')});showConversation(c);});}}><label>对话名称<input name="title" required maxLength={128} defaultValue="普通对话"/></label><Selection connections={data.connections}/><button className="primary" disabled={!data.connections.some(c=>c.enabled)}>创建对话</button></form></section>}
       {page==='conversation'&&conversation&&data&&<label>关联上下文<select value={conversation.context_id||''} onChange={e=>{const contextId=e.target.value||null;void run(async()=>{await command('bind_conversation_context',{conversationId:conversation.id,contextId});});}}><option value="">独立对话，不关联上下文</option>{data.contexts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
-      {page==='conversation'&&conversation&&data&&<Chat conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
+      {page==='conversation'&&conversation&&data&&<Chat conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} resume={resumeReply} recovering={recovering} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
     </main></div><footer>{pending.size?`${pending.size} 个对话正在请求 API`:'本地项目数据由桌面服务保存'} · 任务仍为草案；非流式工具支持人工逐次审批，自动多 Agent 施工尚未完成</footer>
   </div>;
 }
@@ -111,3 +122,4 @@ export type Run = (action:()=>Promise<void>)=>Promise<void>;
 export type OpenChat = (conversation:Conversation)=>void;
 export type AgentDraft = {project_id:string;name:string;role:AgentRole;connection_id:string;model_id:string};
 export async function createAgent(draft:AgentDraft):Promise<Agent>{return command<Agent>('add_agent',{input:draft});}
+

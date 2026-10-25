@@ -2,6 +2,7 @@ use crate::*;
 mod member_brief;
 mod organization;
 mod task_records;
+mod tool_reply;
 use crate::infrastructure::sqlite::DesktopStore;
 use std::{collections::BTreeMap, path::Path};
 use wex_core::connection_session::{
@@ -483,3 +484,4 @@ impl DesktopService {
         })
     }
 }
+

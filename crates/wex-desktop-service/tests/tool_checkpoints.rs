@@ -92,3 +92,32 @@ fn complete_checkpoint_cannot_change_the_pre_dispatch_proposal() {
     save_tool_checkpoint(dir.path(), &request, 1, &h, false).unwrap();
     assert!(load_tool_checkpoint(dir.path(), &request).is_err());
 }
+
+#[test]
+fn restore_recovers_original_context_but_uses_current_credential_reference() {
+    use wex_desktop_service::restore_tool_checkpoint;
+    let dir = tempfile::tempdir().unwrap();
+    let mut original = request();
+    original.messages.insert(
+        0,
+        ApiMessage {
+            role: "system".into(),
+            content: "original frozen system context".into(),
+        },
+    );
+    let h = history();
+    save_tool_checkpoint(dir.path(), &original, 0, &h[..1], true).unwrap();
+    save_tool_checkpoint(dir.path(), &original, 1, &h, false).unwrap();
+    let mut current = request();
+    current.credential_ref = "new_current_vault_reference".into();
+    let (restored, messages) = restore_tool_checkpoint(dir.path(), &current).unwrap();
+    assert_eq!(restored.messages.len(), 2);
+    assert_eq!(
+        restored.messages[0].content,
+        "original frozen system context"
+    );
+    assert_eq!(restored.credential_ref, "new_current_vault_reference");
+    assert_eq!(messages, h);
+    current.messages[0].content = "unrelated turn prompt".into();
+    assert!(restore_tool_checkpoint(dir.path(), &current).is_err());
+}

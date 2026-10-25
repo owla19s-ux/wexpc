@@ -32,4 +32,4 @@ mod tool_results;
 pub use tool_results::{read_tool_results, save_tool_result, SavedToolResult};
 
 mod tool_checkpoints;
-pub use tool_checkpoints::{load_tool_checkpoint, save_tool_checkpoint};
+pub use tool_checkpoints::{load_tool_checkpoint, restore_tool_checkpoint, save_tool_checkpoint};

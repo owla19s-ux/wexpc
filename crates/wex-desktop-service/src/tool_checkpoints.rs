@@ -288,3 +288,42 @@ pub fn load_tool_checkpoint(root: &Path, request: &PreparedChat) -> Result<Vec<M
         _ => Err(error()),
     }
 }
+
+/// Recover original context using current, application-validated connection metadata.
+/// Neither the credential nor a new user prompt is recovered from disk.
+pub fn restore_tool_checkpoint(
+    root: &Path,
+    current: &PreparedChat,
+) -> Result<(PreparedChat, Vec<Message>)> {
+    let dir = directory(root, current)?;
+    let mut paths = fs::read_dir(&dir)
+        .map_err(|_| error())?
+        .map(|entry| entry.map(|e| e.path()).map_err(|_| error()))
+        .collect::<Result<Vec<_>>>()?;
+    paths.retain(|p| p.extension().is_some_and(|e| e == "json"));
+    paths.sort();
+    let path = paths.last().ok_or_else(error)?;
+    let metadata = fs::symlink_metadata(path).map_err(|_| error())?;
+    if !metadata.is_file() || metadata.len() > MAX_BYTES {
+        return Err(error());
+    }
+    let mut bytes = vec![];
+    fs::File::open(path)
+        .map_err(|_| error())?
+        .take(MAX_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| error())?;
+    if bytes.len() as u64 > MAX_BYTES {
+        return Err(error());
+    }
+    let saved: Snapshot = serde_json::from_slice(&bytes).map_err(|_| error())?;
+    let mut restored = current.clone();
+    restored.messages = serde_json::from_value(saved.request_messages).map_err(|_| error())?;
+    let last = restored.messages.last().ok_or_else(error)?;
+    let original = current.messages.last().ok_or_else(error)?;
+    if last.role != "user" || original.role != "user" || last.content != original.content {
+        return Err(error());
+    }
+    let history = load_tool_checkpoint(root, &restored)?;
+    Ok((restored, history))
+}

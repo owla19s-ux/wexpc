@@ -179,7 +179,7 @@ pub struct DesktopSnapshot {
     pub unsaved_turn_ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApiMessage {
     pub role: String,
     pub content: String,

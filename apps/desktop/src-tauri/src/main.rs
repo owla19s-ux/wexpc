@@ -296,6 +296,81 @@ fn tool_results(
     read_tool_results(&root.join("tool-results"), &conversation_id, &turn_id)
 }
 
+fn restored_reply(
+    app: &tauri::AppHandle,
+    shared: &Shared,
+    conversation: &str,
+    turn: &str,
+) -> Result<(PreparedChat, Vec<wex_api::Message>)> {
+    let current = locked(shared)?.tool_reply_candidate(conversation, turn)?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ServiceError::new("TOOL_CHECKPOINT_ERROR", "无法定位检查点目录"))?;
+    restore_tool_checkpoint(&root.join("tool-checkpoints"), &current)
+}
+#[derive(serde::Serialize)]
+struct ReplyRecovery {
+    available: bool,
+    reason: String,
+}
+#[tauri::command]
+fn tool_reply_recovery(
+    app: tauri::AppHandle,
+    state: State<'_, Shared>,
+    conversation_id: String,
+    turn_id: String,
+) -> ReplyRecovery {
+    match restored_reply(&app, &state, &conversation_id, &turn_id) {
+        Ok(_) => ReplyRecovery {
+            available: true,
+            reason: "将原上下文和已保存工具回执发回原连接恢复回复，不重新执行工具".into(),
+        },
+        Err(error) => ReplyRecovery {
+            available: false,
+            reason: error.message,
+        },
+    }
+}
+#[tauri::command]
+async fn resume_tool_reply(
+    app: tauri::AppHandle,
+    state: State<'_, Shared>,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<()> {
+    let shared = state.inner().clone();
+    let (frozen, history) = restored_reply(&app, &shared, &conversation_id, &turn_id)?;
+    let request = locked(&shared)?.begin_tool_reply_resume(frozen)?;
+    let guard = shared.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        locked(&guard)?.check_tool_reply_binding(&request)?;
+        let key = vault::read(&request.credential_ref)?;
+        match execute_model_step(&request, &key, history, vec![])? {
+            ModelStep::Text(text) => Ok(text),
+            ModelStep::Proposal { .. } => Err(ServiceError::new(
+                "RECOVERY_NEEDS_NEW_TOOLS",
+                "模型请求了新工具；本次仅恢复回复，未派发工具。请查看已保存回执并在对话中继续处理",
+            )),
+        }
+    })
+    .await
+    .unwrap_or_else(|_| {
+        Err(ServiceError::new(
+            "REQUEST_INTERRUPTED",
+            "恢复请求中断，未重跑工具",
+        ))
+    });
+    let mut service = locked(&shared)?;
+    match outcome {
+        Ok(text) => service.finish_chat(&turn_id, text),
+        Err(error) => {
+            service.fail_chat(&turn_id, &error)?;
+            Err(error)
+        }
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -328,6 +403,8 @@ fn main() {
             send_message,
             tool_receipts,
             tool_results,
+            tool_reply_recovery,
+            resume_tool_reply,
             retry_chat_result,
             create_space,
             create_group,

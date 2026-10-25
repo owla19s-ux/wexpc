@@ -208,3 +208,81 @@ fn checkpointed_receipts_resume_model_reply_without_a_tool_callback() {
     assert_eq!(requests.len(), 3);
     assert_eq!(requests[1]["messages"], requests[2]["messages"]);
 }
+
+#[test]
+fn restarted_service_restores_frozen_request_and_settles_original_turn() {
+    use wex_desktop_service::{
+        drive_tool_rounds_checkpointed, execute_model_step, restore_tool_checkpoint,
+        save_tool_checkpoint, DesktopService, ModelStep, NewConnection, ServiceError, TurnStatus,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("desktop.sqlite");
+    let checkpoints = dir.path().join("checkpoints");
+    let (base_url, server) = mock_exchange_plan(true, true);
+    let mut app = DesktopService::open(&database).unwrap();
+    let connection = app
+        .add_connection(
+            NewConnection {
+                name: "Loopback".into(),
+                base_url,
+                models: vec!["mock-model".into()],
+            },
+            "current_vault".into(),
+        )
+        .unwrap();
+    let conversation = app
+        .create_conversation(None, "Recovery".into(), connection.id, "mock-model".into())
+        .unwrap();
+    let original = app
+        .prepare_chat(&conversation.id, "Inspect demo".into())
+        .unwrap();
+    let mut sequence = 0;
+    let mut dispatches = 0;
+    let failed = drive_tool_rounds_checkpointed(
+        &original,
+        "mock-key",
+        vec![],
+        |calls| {
+            dispatches += 1;
+            Ok(vec![(calls[0].id.clone(), "saved tool result".into())])
+        },
+        |history, pending| {
+            save_tool_checkpoint(&checkpoints, &original, sequence, history, pending)?;
+            sequence += 1;
+            Ok(())
+        },
+    );
+    app.fail_chat(&original.turn_id, &failed.unwrap_err())
+        .unwrap();
+    drop(app);
+    let mut restored = DesktopService::open(&database).unwrap();
+    let candidate = restored
+        .tool_reply_candidate(&conversation.id, &original.turn_id)
+        .unwrap();
+    let (frozen, history) = restore_tool_checkpoint(&checkpoints, &candidate).unwrap();
+    let running = restored.begin_tool_reply_resume(frozen).unwrap();
+    restored.check_tool_reply_binding(&running).unwrap();
+    let reply = execute_model_step(&running, "mock-key", history, vec![]).unwrap();
+    match reply {
+        ModelStep::Text(text) => restored.finish_chat(&running.turn_id, text).unwrap(),
+        _ => restored
+            .fail_chat(
+                &running.turn_id,
+                &ServiceError::new("TEST_ERROR", "unexpected proposal"),
+            )
+            .unwrap(),
+    }
+    drop(restored);
+    let final_state = DesktopService::open(&database).unwrap().snapshot().unwrap();
+    assert_eq!(final_state.turns.len(), 1);
+    assert_eq!(final_state.turns[0].id, original.turn_id);
+    assert_eq!(final_state.turns[0].status, TurnStatus::Succeeded);
+    assert_eq!(
+        final_state.turns[0].assistant.as_deref(),
+        Some("verified reply")
+    );
+    assert_eq!(dispatches, 1);
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1]["messages"], requests[2]["messages"]);
+}
