@@ -320,6 +320,29 @@ impl DesktopService {
             Ok(task)
         })
     }
+    /// Persist a task publication decision in the same transaction as its revision.
+    /// Publication does not start a tool or grant OS/connector access.
+    pub fn publish_task(&mut self, revision: u64, task_id: &str) -> Result<Task> {
+        self.mutate(|s| {
+            organization::check_revision(s, revision)?;
+            let task = s.tasks.iter().find(|task| task.id == task_id)
+                .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if task.status != TaskStatus::Draft {
+                return Err(ServiceError::new("INVALID_TRANSITION", "任务不是草案，无法重复发布"));
+            }
+            if task.agent_ids.is_empty() || task.scope.is_empty() || task.acceptance.trim().is_empty() {
+                return Err(ServiceError::new("INVALID_INPUT", "发布任务需要成员、工作范围与验收标准"));
+            }
+            if task.agent_ids.iter().any(|id| !task_member_assigned(s, id, &task.project_id)) {
+                return Err(ServiceError::new("INVALID_BINDING", "任务成员不再拥有项目职责"));
+            }
+            let task = s.tasks.iter_mut().find(|task| task.id == task_id)
+                .expect("task checked above");
+            task.status = TaskStatus::Published;
+            Ok(task.clone())
+        })
+    }
+
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
         let name = title(&input.title)?;
         text(&input.goal)?;
@@ -334,6 +357,9 @@ impl DesktopService {
                 .iter()
                 .find(|t| t.id == task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if task.status != TaskStatus::Draft {
+                return Err(ServiceError::new("INVALID_TRANSITION", "已发布任务不能按草案直接覆盖，请走任务修订流程"));
+            }
             if task.project_id != input.project_id
                 || input
                     .agent_ids
