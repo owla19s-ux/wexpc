@@ -330,8 +330,8 @@ impl DesktopService {
             if task.status != TaskStatus::Draft {
                 return Err(ServiceError::new("INVALID_TRANSITION", "任务不是草案，无法重复发布"));
             }
-            if task.agent_ids.is_empty() || task.scope.is_empty() || task.acceptance.trim().is_empty() {
-                return Err(ServiceError::new("INVALID_INPUT", "发布任务需要成员、工作范围与验收标准"));
+            if task.agent_ids.is_empty() || task.scope.is_empty() || task.goal.trim().is_empty() || task.acceptance.trim().is_empty() {
+                return Err(ServiceError::new("INVALID_INPUT", "发布任务需要目标、成员、工作范围与验收标准"));
             }
             if task.agent_ids.iter().any(|id| !task_member_assigned(s, id, &task.project_id)) {
                 return Err(ServiceError::new("INVALID_BINDING", "任务成员不再拥有项目职责"));
@@ -608,6 +608,30 @@ mod publication_tests {
             agent_ids: vec!["a_1".into()],
         }).unwrap_err().code, "INVALID_TRANSITION");
         assert_eq!(service.snapshot().unwrap().revision, state.revision);
+    }
+
+    #[test]
+    fn published_task_reaches_core_admission_only_with_current_revision_and_member() {
+        let mut service = draft_service();
+        let before = service.snapshot().unwrap().revision;
+        assert_eq!(
+            service.task_dispatch_candidate(before, "task_1", "a_1").unwrap_err().code,
+            "TASK_NOT_PUBLISHED"
+        );
+        service.publish_task(before, "task_1").unwrap();
+        let current = service.snapshot().unwrap().revision;
+        let ticket = service.task_dispatch_candidate(current, "task_1", "a_1").unwrap();
+        assert_eq!(ticket.task_id, "task_1");
+        assert_eq!(ticket.agent_id, "a_1");
+        assert_eq!(ticket.assignment_epoch, current);
+        assert_eq!(
+            service.task_dispatch_candidate(before, "task_1", "a_1").unwrap_err().code,
+            "REVISION_CONFLICT"
+        );
+        assert_eq!(
+            service.task_dispatch_candidate(current, "task_1", "a_2").unwrap_err().code,
+            "AGENT_NOT_ASSIGNED"
+        );
     }
 
     #[test]
