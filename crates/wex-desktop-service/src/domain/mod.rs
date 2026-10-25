@@ -7,6 +7,8 @@ mod member_brief;
 pub use member_brief::*;
 mod agent_assignment;
 pub use agent_assignment::*;
+mod execution_policy;
+pub use execution_policy::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceError {
@@ -172,6 +174,8 @@ pub struct DesktopSnapshot {
     #[serde(default)]
     pub task_records: Vec<TaskRecord>,
     pub conversations: Vec<Conversation>,
+    #[serde(default)]
+    pub tool_policies: Vec<ToolPolicySetting>,
     pub turns: Vec<ChatTurn>,
     /// Runtime-only pending settlements, populated in the returned projection.
     /// The durable snapshot always stores an empty list.
