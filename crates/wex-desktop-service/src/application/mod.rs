@@ -3,6 +3,7 @@ mod member_brief;
 mod organization;
 mod task_records;
 mod tool_reply;
+mod execution_policy;
 use crate::infrastructure::sqlite::DesktopStore;
 use std::{collections::BTreeMap, path::Path};
 use wex_core::connection_session::{
