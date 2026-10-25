@@ -540,6 +540,8 @@ fn main() {
             local_access::revoke_local_directory,
             local_access::local_read_policy,
             local_access::set_local_read_policy,
+            local_access::local_create_policy,
+            local_access::set_local_create_policy,
             github_tool_policies,
             set_github_tool_policy,
             add_agent,
