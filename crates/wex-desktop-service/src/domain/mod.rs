@@ -5,6 +5,8 @@ mod task_records;
 pub use task_records::*;
 mod member_brief;
 pub use member_brief::*;
+mod agent_assignment;
+pub use agent_assignment::*;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ServiceError {
@@ -163,6 +165,9 @@ pub struct DesktopSnapshot {
     pub connections: Vec<AiConnection>,
     pub projects: Vec<Project>,
     pub agents: Vec<Agent>,
+    /// Independent role bindings; older snapshots default to an empty set.
+    #[serde(default)]
+    pub agent_duties: Vec<AgentDutyAssignment>,
     pub tasks: Vec<Task>,
     #[serde(default)]
     pub task_records: Vec<TaskRecord>,
