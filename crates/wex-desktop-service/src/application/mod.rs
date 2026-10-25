@@ -106,6 +106,30 @@ fn task_member_assigned(s: &DesktopSnapshot, agent_id: &str, project_id: &str) -
                 .any(|a| a.id == agent_id && a.project_id == project_id))
 }
 
+/// Validate persisted dispatch facts before permitting a Host to observe them.
+fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
+    let mut identities = std::collections::BTreeSet::new();
+    let mut publications = std::collections::BTreeSet::new();
+    for attempt in &snapshot.dispatch_attempts {
+        let task = snapshot.tasks.iter().find(|task| task.id == attempt.task_id)
+            .ok_or_else(|| ServiceError::new("INVALID_SNAPSHOT", "派工引用的任务不存在"))?;
+        if attempt.id.is_empty()
+            || attempt.recorded_revision == 0
+            || attempt.recorded_revision > snapshot.revision
+            || attempt.publication_epoch == 0
+            || task.status != TaskStatus::Published
+            || task.project_id != attempt.project_id
+            || task.publication_epoch != attempt.publication_epoch
+            || !task.agent_ids.contains(&attempt.agent_id)
+            || !identities.insert(attempt.id.clone())
+            || !publications.insert((attempt.task_id.clone(), attempt.publication_epoch))
+        {
+            return Err(ServiceError::new("INVALID_SNAPSHOT", "派工记录不一致，拒绝恢复"));
+        }
+    }
+    Ok(())
+}
+
 impl DesktopService {
     pub fn open(path: &Path) -> Result<Self> {
         Self::init(DesktopStore::open(path)?)
@@ -120,6 +144,7 @@ impl DesktopService {
         };
         let snapshot = service.snapshot()?;
         catalog(&snapshot)?;
+        validate_dispatch_snapshot(&snapshot)?;
         // An interrupted Host may have performed an external write.
         // Never turn InFlight into Pending and never launch it automatically.
         if snapshot.dispatch_attempts.iter().any(|a| a.status == DispatchAttemptStatus::InFlight) {
