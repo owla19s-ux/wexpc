@@ -203,7 +203,7 @@ pub fn update_approved_github_file(
         .build()
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 GitHub 请求"))?;
     let response = client
-        .put(url)
+        .put(url.clone())
         .header("User-Agent", "WEXPC/0.1.1")
         .header("Accept", "application/vnd.github+json")
         .bearer_auth(token)
@@ -225,12 +225,7 @@ pub fn update_approved_github_file(
     let value: serde_json::Value = response
         .json()
         .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 更新响应无法核验"))?;
-    let sha = value
-        .pointer("/content/sha")
-        .and_then(|v| v.as_str())
-        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 未返回有效文件版本"))?;
-    Ok(sha.to_owned())
+    verify_written_content(&client, url, token, &value, content)
 }
 
 /// Create-only GitHub mutation. No expected SHA means the API must reject
@@ -292,7 +287,7 @@ pub fn create_approved_github_file(
         .build()
         .map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 GitHub 请求"))?;
     let response = client
-        .put(url)
+        .put(url.clone())
         .header("User-Agent", "WEXPC/0.1.1")
         .header("Accept", "application/vnd.github+json")
         .bearer_auth(token)
@@ -316,12 +311,107 @@ pub fn create_approved_github_file(
     let result: serde_json::Value = response
         .json()
         .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 创建响应无法核验"))?;
-    let sha = result
+    verify_written_content(&client, url, token, &result, content)
+}
+
+// A successful PUT confirms that GitHub accepted the mutation, not that its
+// target bytes were independently checked. Read the immutable commit returned
+// by that PUT: a moving default branch would make a later read ambiguous.
+// A failed readback is UNKNOWN, never a reason to replay the PUT.
+fn verify_written_content(
+    client: &Client,
+    mut url: Url,
+    token: &str,
+    write_response: &serde_json::Value,
+    expected_content: &[u8],
+) -> Result<String> {
+    let blob_sha = write_response
         .pointer("/content/sha")
         .and_then(|v| v.as_str())
-        .filter(|s| s.len() == 40 && s.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 未返回新文件的有效版本"))?;
-    Ok(sha.to_owned())
+        .filter(|s| valid_git_sha(s))
+        .ok_or_else(|| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少有效文件版本")
+        })?;
+    let commit_sha = write_response
+        .pointer("/commit/sha")
+        .and_then(|v| v.as_str())
+        .filter(|s| valid_git_sha(s))
+        .ok_or_else(|| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少可回读的提交版本")
+        })?;
+    url.query_pairs_mut().append_pair("ref", commit_sha);
+    let response = client
+        .get(url)
+        .header("User-Agent", "WEXPC/0.1.1")
+        .header("Accept", "application/vnd.github+json")
+        .bearer_auth(token)
+        .send()
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 已接受写入，但提交回读失败；禁止自动重试")
+        })?;
+    if !response.status().is_success() {
+        return Err(ServiceError::new(
+            "OUTCOME_UNKNOWN",
+            "GitHub 已接受写入，但提交版本不可回读；禁止自动重试",
+        ));
+    }
+    let mut bytes = Vec::new();
+    response
+        .take(512 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入后回读不完整；禁止自动重试")
+        })?;
+    if bytes.len() > 512 * 1024 {
+        return Err(ServiceError::new(
+            "OUTCOME_UNKNOWN",
+            "GitHub 写入后回读超过核验上限；禁止自动重试",
+        ));
+    }
+    verify_readback_body(&bytes, blob_sha, expected_content)?;
+    Ok(blob_sha.to_owned())
+}
+
+fn valid_git_sha(value: &str) -> bool {
+    value.len() == 40 && value.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+fn verify_readback_body(body: &[u8], expected_sha: &str, expected_content: &[u8]) -> Result<()> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    let value: serde_json::Value = serde_json::from_slice(body)
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读响应无法解析；禁止自动重试")
+        })?;
+    if value["type"].as_str() != Some("file")
+        || value["sha"].as_str() != Some(expected_sha)
+        || value["encoding"].as_str() != Some("base64")
+    {
+        return Err(ServiceError::new(
+            "OUTCOME_UNKNOWN",
+            "GitHub 回读目标类型或文件版本不一致；禁止自动重试",
+        ));
+    }
+    let encoded = value["content"]
+        .as_str()
+        .ok_or_else(|| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读缺少内容；禁止自动重试")
+        })?;
+    let compact: Vec<u8> = encoded
+        .bytes()
+        .filter(|byte| !byte.is_ascii_whitespace())
+        .collect();
+    let actual = STANDARD
+        .decode(compact)
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读内容编码无效；禁止自动重试")
+        })?;
+    if actual.as_slice() != expected_content {
+        return Err(ServiceError::new(
+            "OUTCOME_UNKNOWN",
+            "GitHub 回读内容与已批准写入字节不一致；禁止自动重试",
+        ));
+    }
+    Ok(())
 }
 
 fn safe_segment(part: &str) -> bool {
@@ -337,6 +427,57 @@ fn safe_segment(part: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pinned_readback_checks_blob_sha_and_exact_bytes() {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+        let original = b"line one\\nline two";
+        let body = serde_json::json!({
+            "type": "file",
+            "sha": "a".repeat(40),
+            "encoding": "base64",
+            "content": STANDARD.encode(original),
+        });
+        let raw = body.to_string();
+        assert!(verify_readback_body(raw.as_bytes(), &"a".repeat(40), original).is_ok());
+        assert_eq!(
+            verify_readback_body(raw.as_bytes(), &"b".repeat(40), original)
+                .unwrap_err()
+                .code,
+            "OUTCOME_UNKNOWN"
+        );
+        assert_eq!(
+            verify_readback_body(raw.as_bytes(), &"a".repeat(40), b"different")
+                .unwrap_err()
+                .code,
+            "OUTCOME_UNKNOWN"
+        );
+    }
+
+    #[test]
+    fn pinned_readback_rejects_invalid_or_missing_content() {
+        for value in [
+            serde_json::json!({"type":"dir","sha":"a".repeat(40),"encoding":"base64","content":"YQ=="}),
+            serde_json::json!({"type":"file","sha":"a".repeat(40),"encoding":"base64"}),
+            serde_json::json!({"type":"file","sha":"a".repeat(40),"encoding":"base64","content":"%%%"}),
+        ] {
+            assert_eq!(
+                verify_readback_body(value.to_string().as_bytes(), &"a".repeat(40), b"a")
+                    .unwrap_err()
+                    .code,
+                "OUTCOME_UNKNOWN"
+            );
+        }
+    }
+
+    #[test]
+    fn readback_ref_is_pinned_to_the_put_commit() {
+        let mut url = Url::parse("https://api.github.com/repos/a/b/contents/README.md").unwrap();
+        url.query_pairs_mut().append_pair("ref", &"b".repeat(40));
+        let selected_ref = url.query_pairs().find(|(key, _)| key == "ref").unwrap().1;
+        assert_eq!(selected_ref, "b".repeat(40));
+    }
+
     #[test]
     fn content_decoder_supplies_sha_for_followup_approved_write() {
         use base64::{engine::general_purpose::STANDARD, Engine as _};
