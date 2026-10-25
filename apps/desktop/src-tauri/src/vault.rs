@@ -50,9 +50,10 @@ pub fn remove(reference: &str) {
 pub fn remove_checked(reference: &str) -> Result<()> {
     #[cfg(windows)]
     {
-        entry(reference)?
-            .delete_credential()
-            .map_err(|_| unavailable())
+        match entry(reference)?.delete_credential() {
+            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Err(_) => Err(unavailable()),
+        }
     }
     #[cfg(not(windows))]
     {
