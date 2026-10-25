@@ -34,6 +34,17 @@ fn valid(value: &str) -> bool {
     !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
 }
 
+// Scope keys are lexical resource identifiers, not filesystem authorities.
+// Reject aliases that could bypass ancestor/descendant exclusion.
+// The Host must still canonicalize actual filesystem paths and identities.
+fn valid_scope(value: &str) -> bool {
+    valid(value)
+        && !value.contains('\\')
+        && !value.contains("//")
+        && !value.split('/').any(|segment| segment == "." || segment == "..")
+        && (value == "/" || !value.ends_with('/'))
+}
+
 /// Segment-boundary overlap: a parent scope covers descendants, not siblings.
 /// The Host must canonicalize paths before calling this process-local guard.
 fn scopes_overlap(a: &str, b: &str) -> bool {
@@ -48,7 +59,7 @@ impl ResourceLeases {
     /// Acquire all resource scopes atomically or none. Sorted, deduplicated
     /// scopes avoid order-dependent acquisition and self-conflicts.
     pub fn acquire(&self, owner: &str, scopes: &[String]) -> Result<ResourceLease, LeaseError> {
-        if !valid(owner) || scopes.is_empty() || scopes.iter().any(|s| !valid(s)) {
+        if !valid(owner) || scopes.is_empty() || scopes.iter().any(|s| !valid_scope(s)) {
             return Err(LeaseError::InvalidScope);
         }
         let mut unique = scopes.to_vec();
@@ -72,7 +83,7 @@ impl ResourceLeases {
     }
 
     pub fn is_busy(&self, scope: &str) -> Result<bool, LeaseError> {
-        if !valid(scope) { return Err(LeaseError::InvalidScope); }
+        if !valid_scope(scope) { return Err(LeaseError::InvalidScope); }
         Ok(self.state.lock().map_err(|_| LeaseError::Poisoned)?.held.keys().any(|held| scopes_overlap(scope, held)))
     }
 }
@@ -140,6 +151,16 @@ mod tests {
         let registry = ResourceLeases::default();
         assert_eq!(registry.is_busy(""), Err(LeaseError::InvalidScope));
         assert_eq!(registry.is_busy("bad\npath"), Err(LeaseError::InvalidScope));
+    }
+
+    #[test]
+    fn noncanonical_scope_aliases_cannot_bypass_overlap_guard() {
+        let registry = ResourceLeases::default();
+        for alias in ["src/../src/file", "./src", "src/./file", "src//file", "src/", "src\\file"] {
+            assert!(matches!(registry.acquire("agent", &scopes(&[alias])), Err(LeaseError::InvalidScope)));
+            assert_eq!(registry.is_busy(alias), Err(LeaseError::InvalidScope));
+        }
+        assert!(registry.acquire("agent", &scopes(&["src/file"])).is_ok());
     }
 
     #[test]
