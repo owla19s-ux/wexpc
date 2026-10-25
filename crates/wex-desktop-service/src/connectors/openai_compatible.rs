@@ -212,6 +212,14 @@ fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
     let message = choice["message"].as_object().ok_or_else(|| {
         ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少消息对象")
     })?;
+    // A text reply must come from the assistant. Do not persist a malformed
+    // provider response as if it were the assistant's completed turn.
+    if message.get("role").and_then(|value| value.as_str()) != Some("assistant") {
+        return Err(ServiceError::new(
+            "API_RESPONSE_ERROR",
+            "服务商回复消息角色无效",
+        ));
+    }
     let calls = super::tool_proposals::parse_tool_proposals(&value["choices"][0]["message"])?;
     if !calls.is_empty() {
         return Err(ServiceError::new(
@@ -237,7 +245,13 @@ fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
         Some("content_filter") => {
             return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商未完成文本回复"))
         }
-        Some("stop") | None => {}
+        Some("stop") => {}
+        None => {
+            return Err(ServiceError::new(
+                "API_RESPONSE_INCOMPLETE",
+                "服务商回复缺少结束状态，未保存为成功回复",
+            ))
+        }
         Some(_) => {
             return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商返回不支持的结束状态"))
         }
@@ -300,4 +314,50 @@ pub fn execute_chat(request: &PreparedChat, key: &str) -> Result<String> {
     let value: serde_json::Value = serde_json::from_slice(&bytes)
         .map_err(|_| ServiceError::new("API_RESPONSE_ERROR", "服务商未返回有效 JSON"))?;
     parse_text_completion(&value)
+}
+
+#[cfg(test)]
+mod text_completion_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn text_completion_accepts_only_assistant_role() {
+        let valid = json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"done"}}]});
+        assert_eq!(parse_text_completion(&valid).unwrap(), "done");
+        for role in ["user", "tool", "system"] {
+            let response = json!({"choices":[{"finish_reason":"stop","message":{"role":role,"content":"spoofed"}}]});
+            assert_eq!(
+                parse_text_completion(&response).unwrap_err().code,
+                "API_RESPONSE_ERROR"
+            );
+        }
+        for message in [
+            json!({"content":"missing role"}),
+            json!({"role":null,"content":"null role"}),
+            json!({"role":1,"content":"wrong role type"}),
+        ] {
+            let response = json!({"choices":[{"finish_reason":"stop","message":message}]});
+            assert_eq!(
+                parse_text_completion(&response).unwrap_err().code,
+                "API_RESPONSE_ERROR"
+            );
+        }
+    }
+
+    #[test]
+    fn text_completion_requires_terminal_stop() {
+        for finish_reason in [None, Some("length"), Some("content_filter")] {
+            let mut response = json!({"choices":[{"message":{"role":"assistant","content":"partial"}}]});
+            if let Some(reason) = finish_reason {
+                response["choices"][0]["finish_reason"] = json!(reason);
+            }
+            assert!(parse_text_completion(&response).is_err());
+        }
+        let tool = json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"not final"}}]});
+        assert_eq!(
+            parse_text_completion(&tool).unwrap_err().code,
+            "TOOLS_NOT_CONNECTED"
+        );
+    }
 }
