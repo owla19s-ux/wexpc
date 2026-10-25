@@ -34,6 +34,14 @@ fn valid(value: &str) -> bool {
     !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
 }
 
+/// Segment-boundary overlap: a parent scope covers descendants, not siblings.
+/// The Host must canonicalize paths before calling this process-local guard.
+fn scopes_overlap(a: &str, b: &str) -> bool {
+    a == b
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
+}
+
 impl ResourceLeases {
     /// Acquire all resource scopes atomically or none. Sorted, deduplicated
     /// scopes avoid order-dependent acquisition and self-conflicts.
@@ -45,7 +53,7 @@ impl ResourceLeases {
         unique.sort();
         unique.dedup();
         let mut state = self.state.lock().map_err(|_| LeaseError::Poisoned)?;
-        if unique.iter().any(|scope| state.held.contains_key(scope)) {
+        if unique.iter().any(|scope| state.held.keys().any(|held| scopes_overlap(scope, held))) {
             return Err(LeaseError::Busy);
         }
         state.next_generation = state.next_generation.checked_add(1).ok_or(LeaseError::Busy)?;
@@ -132,6 +140,18 @@ mod tests {
         assert!(registry.is_busy("b").unwrap());
         drop(lease);
         assert!(!registry.is_busy("a").unwrap());
+    }
+
+    #[test]
+    fn parent_and_child_scopes_conflict_but_similar_prefixes_do_not() {
+        let registry = ResourceLeases::default();
+        let parent = registry.acquire("agent_a", &scopes(&["src"])).unwrap();
+        assert!(matches!(registry.acquire("agent_b", &scopes(&["src/lib.rs"])), Err(LeaseError::Busy)));
+        assert!(registry.acquire("agent_b", &scopes(&["src-other/lib.rs"])).is_ok());
+        drop(parent);
+        let child = registry.acquire("agent_b", &scopes(&["src/lib.rs"])).unwrap();
+        assert!(matches!(registry.acquire("agent_a", &scopes(&["src"])), Err(LeaseError::Busy)));
+        drop(child);
     }
 
     #[test]
