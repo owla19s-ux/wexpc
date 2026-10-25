@@ -1,12 +1,11 @@
 //! Trusted Host process adapter. A request is inert until Core dispatch and
 //! exact argument binding are verified; never infer authority from a project.
+use super::process_capture::collect;
 use crate::{Result, ServiceError};
 use serde::{Deserialize, Serialize};
 use std::{
-    io::Read,
     path::Path,
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -70,6 +69,9 @@ pub struct ProcessReport {
     pub stderr: String,
     pub stdout_truncated: bool,
     pub stderr_truncated: bool,
+    /// True only after EOF without a read error; independent of retention limits.
+    pub stdout_complete: bool,
+    pub stderr_complete: bool,
     pub elapsed_ms: u64,
 }
 
@@ -122,43 +124,6 @@ pub fn execute_approved_process_report_with_control(
     run_process_with_control(root, request, control)
 }
 
-#[derive(Default)]
-struct Capture {
-    bytes: Vec<u8>,
-    truncated: bool,
-    finished: bool,
-    failed: bool,
-}
-fn collect(mut source: impl Read + Send + 'static) -> Arc<Mutex<Capture>> {
-    let capture = Arc::new(Mutex::new(Capture::default()));
-    let target = capture.clone();
-    thread::spawn(move || {
-        let mut chunk = [0u8; 8192];
-        loop {
-            let read = source.read(&mut chunk);
-            let Ok(mut state) = target.lock() else {
-                return;
-            };
-            match read {
-                Ok(0) => {
-                    state.finished = true;
-                    return;
-                }
-                Ok(size) => {
-                    let kept = size.min((64usize * 1024).saturating_sub(state.bytes.len()));
-                    state.bytes.extend_from_slice(&chunk[..kept]);
-                    state.truncated |= kept < size;
-                }
-                Err(_) => {
-                    state.failed = true;
-                    state.finished = true;
-                    return;
-                }
-            }
-        }
-    });
-    capture
-}
 pub(super) fn run_process_with_control(
     root: &Path,
     request: &ProcessRequest,
@@ -233,8 +198,23 @@ pub(super) fn run_process_with_control(
         id: child.id(),
         armed: true,
     };
-    let stdout = collect(child.stdout.take().expect("piped stdout"));
-    let stderr = collect(child.stderr.take().expect("piped stderr"));
+    use super::process_pipe::PipeReader;
+    let pipes = (|| -> std::io::Result<_> {
+        Ok((
+            PipeReader::new(child.stdout.take().expect("piped stdout"))?,
+            PipeReader::new(child.stderr.take().expect("piped stderr"))?,
+        ))
+    })();
+    let (out_pipe, err_pipe) = match pipes {
+        Ok(pipes) => pipes,
+        Err(_) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(unknown_error());
+        }
+    };
+    let mut stdout = collect(out_pipe);
+    let mut stderr = collect(err_pipe);
     let mut status = None;
     let termination = loop {
         if control.is_cancelled() {
@@ -249,8 +229,8 @@ pub(super) fn run_process_with_control(
                 Err(_) => break ProcessTermination::OutputInterrupted,
             }
         }
-        let out = stdout.lock().map_err(|_| unknown_error())?;
-        let err = stderr.lock().map_err(|_| unknown_error())?;
+        let out = stdout.state.lock().map_err(|_| unknown_error())?;
+        let err = stderr.state.lock().map_err(|_| unknown_error())?;
         if out.failed || err.failed {
             break ProcessTermination::OutputInterrupted;
         }
@@ -272,12 +252,12 @@ pub(super) fn run_process_with_control(
             let _ = child.kill();
             status = child.wait().ok();
         }
-        // Bounded grace period for final pipe bytes after termination. Windows
-        // descendants can retain pipes until Job-object support is implemented.
+        // Bounded grace period for final pipe bytes after termination.
+        // A surviving descendant may retain writers; reader ownership still ends.
         let cleanup = Instant::now();
         while cleanup.elapsed() < Duration::from_millis(200) {
-            if stdout.lock().map_err(|_| unknown_error())?.finished
-                && stderr.lock().map_err(|_| unknown_error())?.finished
+            if stdout.state.lock().map_err(|_| unknown_error())?.finished
+                && stderr.state.lock().map_err(|_| unknown_error())?.finished
             {
                 break;
             }
@@ -289,8 +269,10 @@ pub(super) fn run_process_with_control(
             group.armed = false;
         }
     }
-    let out = stdout.lock().map_err(|_| unknown_error())?;
-    let err = stderr.lock().map_err(|_| unknown_error())?;
+    stdout.stop();
+    stderr.stop();
+    let out = stdout.state.lock().map_err(|_| unknown_error())?;
+    let err = stderr.state.lock().map_err(|_| unknown_error())?;
     Ok(ProcessReport {
         termination,
         program: request.program.clone(),
@@ -302,6 +284,8 @@ pub(super) fn run_process_with_control(
         stderr: String::from_utf8_lossy(&err.bytes).into_owned(),
         stdout_truncated: out.truncated,
         stderr_truncated: err.truncated,
+        stdout_complete: out.finished && !out.failed,
+        stderr_complete: err.finished && !err.failed,
         elapsed_ms: start.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
     })
 }
@@ -310,51 +294,4 @@ fn unknown_error() -> ServiceError {
         "OUTCOME_UNKNOWN",
         "进程或输出管道中断，副作用需核查；未自动重试",
     )
-}
-
-#[cfg(test)]
-mod capture_tests {
-    use super::*;
-    fn finished(capture: &Arc<Mutex<Capture>>) {
-        let start = Instant::now();
-        while !capture.lock().unwrap().finished {
-            assert!(start.elapsed() < Duration::from_secs(2));
-            thread::sleep(Duration::from_millis(1));
-        }
-    }
-    #[test]
-    fn oversized_output_is_drained_without_unbounded_retention() {
-        use std::sync::atomic::{AtomicUsize, Ordering};
-        struct Counted {
-            cursor: std::io::Cursor<Vec<u8>>,
-            read: Arc<AtomicUsize>,
-        }
-        impl Read for Counted {
-            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
-                let n = self.cursor.read(buffer)?;
-                self.read.fetch_add(n, Ordering::SeqCst);
-                Ok(n)
-            }
-        }
-        let count = Arc::new(AtomicUsize::new(0));
-        let capture = collect(Counted {
-            cursor: std::io::Cursor::new(vec![b'x'; 128 * 1024]),
-            read: count.clone(),
-        });
-        finished(&capture);
-        let state = capture.lock().unwrap();
-        assert!(state.truncated);
-        assert_eq!(state.bytes.len(), 64 * 1024);
-        assert_eq!(count.load(Ordering::SeqCst), 128 * 1024);
-    }
-    #[test]
-    fn exact_limit_and_short_output_are_not_truncated() {
-        for size in [0, 4096, 64 * 1024] {
-            let capture = collect(std::io::Cursor::new(vec![b'y'; size]));
-            finished(&capture);
-            let state = capture.lock().unwrap();
-            assert!(!state.truncated);
-            assert_eq!(state.bytes.len(), size);
-        }
-    }
 }
