@@ -1,5 +1,5 @@
 type Report={program:string;working_directory:string;success:boolean;exit_code:number|null;elapsed_ms:number;timeout_ms?:number;
-  stdout:string;stderr:string;stdout_truncated:boolean;stderr_truncated:boolean;termination?:string};
+  stdout:string;stderr:string;stdout_truncated:boolean;stderr_truncated:boolean;termination?:string;stdout_complete?:boolean;stderr_complete?:boolean};
 function decode(body:string):Report|null {
   try {
     const p=JSON.parse(body)?.process;
@@ -34,8 +34,8 @@ export function ProcessOutput({body,argumentsJson}:{body:string;argumentsJson?:s
           <p>请求超时：{request.timeout_ms} ms</p></>
       : <p className="muted">请求参数缺失、无效或与进程结果不一致，无法核对完整命令。</p>}
     <p>退出码：{report.exit_code??'未取得数值退出码'}</p><p>耗时：{report.elapsed_ms} ms</p>
-    <p>标准输出{report.stdout_truncated?'已截断':''}</p><pre className="prewrap">{report.stdout||'（空）'}</pre>
-    <p>标准错误{report.stderr_truncated?'已截断':''}</p><pre className="prewrap">{report.stderr||'（空）'}</pre>
+    <p>标准输出{report.stdout_complete===false?'未完整收集':report.stdout_complete===true?'已收集至管道关闭':''}{report.stdout_truncated?'已截断':''}</p><pre className="prewrap">{report.stdout||'（空）'}</pre>
+    <p>标准错误{report.stderr_complete===false?'未完整收集':report.stderr_complete===true?'已收集至管道关闭':''}{report.stderr_truncated?'已截断':''}</p><pre className="prewrap">{report.stderr||'（空）'}</pre>
     <p className="muted">这是已保存的执行结果；截断不改变退出状态，也不代表独立验证通过。</p>
   </section>;
 }

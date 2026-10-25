@@ -120,6 +120,14 @@
 - **Windows 可用后**：真实 API、工具链、Tauri 桌面、安装程序、权限/撤权、GitHub 和 Windows 文件系统特殊路径专项验证，分清模拟测试、Linux 检查和 Windows 交付。
 - **正式 0.1.1 验收**：按 PC 基线 §5.1.3 的 **R-01～R-08** 与 §5.4 全流程，以对应交付 Commit 和真实证据判定；不可用旧版本通过报告代替。
 
+### 2026-10-26 输出管道回收增量（基于 #47 `d90532a`）
+
+W1 的 stdout/stderr 读取现在由执行器持有并在返回前停止、join、关闭读句柄，异常退出同样由 Drop 回收。Unix 对独占读端设置非阻塞；Windows 先查询匿名管道可读字节再有界读取，并在专属读取线程停止时重复取消同步 I/O，覆盖停止检查与进入读取之间的竞态；不取消其它工作线程的 I/O。取消/超时仍先保留最多 200 ms 的排空机会，然后结束读取，维持 UNKNOWN、不自动续跑/重试。新增 `stdout_complete` / `stderr_complete` 仅表示无读取错误地读到 EOF，与每路 64 KiB 的保存截断独立；Host 原有序列化→持久回执→模型/界面路径携带字段。保存结果可分别显示“未完整收集”和“已截断”，旧回执缺字段不推定完整。
+
+本地证据：Linux x86_64 / Rust 1.99.1，workspace **487/487**，Linux Host **15/15**（仍使用临时测试图标），React DOM **21/21**，workspace/Host 严格 Clippy、fmt、TypeScript/生产构建通过。真实逃离进程组的后代持有写端，旧源码在超时返回后仍持有 Host 读句柄；回归先失败后通过，验证返回后对应读句柄已关闭且结果为 UNKNOWN、输出不完整。另验证空闲读取不误判错误、collector Drop 不等子进程自然退出、正常 EOF 与超限截断可并存。
+
+Windows **仅**对生产 `process_capture.rs` / `process_pipe.rs` 及其测试源码执行 `x86_64-pc-windows-gnu` 元数据编译（`rustc --emit metadata -D warnings`），未链接、未运行，不是整个工作区/Host 的 Windows 构建证据。Windows Job 进程树管理、Windows I/O 取消实测、真实服务、窗口/安装仍 **NOT_RUN**；仍不能承诺逃离 Unix 组或 Windows 后代已停止。未触发 Actions。持续终端授权、环境选择、安全修改、Git Commit 和 W2 Task 关联继续按原目标施工。
+
 ## 七、下一步默认推进路径
 
 **W1 的通用终端契约和安全版本化修改**与 **W2 的操作/任务关联**可同时推进；当 W2 的稳定身份和回执关系明确后立即建设 W3 的最小派发/占用流程，接着用同一接口接 W4 双 Agent，再收口 W5，最后执行 W6 交付。优先提交有上下游调用者的纵向集成，不再长期只补单个文件原语。

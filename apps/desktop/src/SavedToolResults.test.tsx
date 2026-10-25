@@ -57,3 +57,14 @@ it('does not present mismatched proposal arguments as the approved command',asyn
   expect(screen.queryByText(JSON.stringify(['--unsafe']))).toBeNull();
   expect(ipc).toHaveBeenCalledTimes(1);
 });
+
+it('distinguishes incomplete capture from byte-limit truncation in a saved receipt',async()=>{
+  ipc.mockResolvedValue([{record_id:'partial',call_id:'call_partial',tool_name:'run_command',sequence:1,
+    result:JSON.stringify({process:{program:'tool',working_directory:'C:/project',success:false,exit_code:0,
+      elapsed_ms:150,stdout:'received bytes',stderr:'',stdout_truncated:false,stderr_truncated:false,
+      stdout_complete:false,stderr_complete:true,termination:'timed_out'}})}]);
+  render(<SavedToolResults conversationId="conv_A" turnId="turn_partial" busy={false}/>);
+  expect(await screen.findByText('标准输出未完整收集')).toBeTruthy();
+  expect(screen.getByText('标准错误已收集至管道关闭')).toBeTruthy();
+  expect(screen.queryByText('标准输出已截断')).toBeNull();
+});
