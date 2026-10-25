@@ -179,6 +179,24 @@ mod tests {
     }
 
     #[test]
+    fn reserve_blocks_nested_write_scope_without_blocking_siblings() {
+        let board = board();
+        let leases = ResourceLeases::default();
+        let parent = vec!["src".to_owned()];
+        let child = vec!["src/main.rs".to_owned()];
+        let sibling = vec!["docs/readme.md".to_owned()];
+        let first = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &parent).unwrap();
+        assert!(matches!(
+            reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &child),
+            Err(DispatchStartError::Lease(LeaseError::Busy))
+        ));
+        let independent = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &sibling).unwrap();
+        drop(first);
+        assert!(reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &child).is_ok());
+        drop(independent);
+    }
+
+    #[test]
     fn reserve_does_not_lock_scopes_for_rejected_assignment() {
         let board = board();
         let leases = ResourceLeases::default();
