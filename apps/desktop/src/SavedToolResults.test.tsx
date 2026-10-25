@@ -25,3 +25,26 @@ it('distinguishes durable output order from legacy records with unknown order',a
   expect(screen.getByText(/保存顺序 1/)).toBeTruthy();
   expect(ipc).toHaveBeenCalledTimes(1);
 });
+
+it('shows the approved request arguments and timeout alongside the saved process result',async()=>{
+  ipc.mockResolvedValue([{record_id:'process_args',call_id:'call_2',tool_name:'run_command',sequence:2,
+    arguments_json:JSON.stringify({program:'python',arguments:['-m','pytest','tests/my test.py'],timeout_ms:5000}),
+    result:JSON.stringify({process:{program:'python',working_directory:'C:/project',timeout_ms:5000,success:false,exit_code:17,
+      elapsed_ms:123,stdout:'',stderr:'test failed',stdout_truncated:false,stderr_truncated:false}})}]);
+  render(<SavedToolResults conversationId="conv_A" turnId="turn_2" busy={false}/>);
+  expect(await screen.findByText('请求超时：5000 ms')).toBeTruthy();
+  expect(screen.getByText(JSON.stringify(['-m','pytest','tests/my test.py']))).toBeTruthy();
+  expect(screen.getByText('退出码：17')).toBeTruthy();
+  expect(ipc).toHaveBeenCalledWith('tool_results',{conversationId:'conv_A',turnId:'turn_2'});
+  expect(ipc).toHaveBeenCalledTimes(1);
+});
+it('does not present mismatched proposal arguments as the approved command',async()=>{
+  ipc.mockResolvedValue([{record_id:'mismatch',call_id:'call_3',tool_name:'run_command',sequence:3,
+    arguments_json:JSON.stringify({program:'other',arguments:['--unsafe'],timeout_ms:5000}),
+    result:JSON.stringify({process:{program:'python',working_directory:'C:/project',timeout_ms:5000,success:true,exit_code:0,
+      elapsed_ms:20,stdout:'ok',stderr:'',stdout_truncated:false,stderr_truncated:false}})}]);
+  render(<SavedToolResults conversationId="conv_A" turnId="turn_3" busy={false}/>);
+  expect(await screen.findByText('请求参数缺失、无效或与进程结果不一致，无法核对完整命令。')).toBeTruthy();
+  expect(screen.queryByText(JSON.stringify(['--unsafe']))).toBeNull();
+  expect(ipc).toHaveBeenCalledTimes(1);
+});
