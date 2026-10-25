@@ -13,6 +13,6 @@
 | `docs/PC-PRODUCT-AND-TECH-BASELINE.md` | 当前产品与技术主基线 | 0.1.1 首版结果与建议施工批次、未验证选型分开记录 |
 | `docs/DEVELOPMENT-WORKFLOW.md`、`AGENTS.md` | 当前开发和 GitHub 操作 | 属工程 D 域，不定义产品内任务/施工卡机制 |
 
-当前没有 Tauri/React 桌面应用。在 0.1.1 的 Windows 技术验证落实时建立 `apps/desktop` 及相应 Host/前端目录，不创建空壳宣称选型已验证。新增模块按真实依赖与运行路径组织；迁入代码要标明复用、适配、替换或仅参考。
+本文件的原始目录快照基于早期 main，不能用“当前没有 Tauri/React 桌面应用”概括整个仓库的活动开发状态。后续 PR 已出现 `apps/desktop`、Tauri Host、React UI 及服务层的施工与组合；它们是否进入 main、是否已通过同一 HEAD 的构建/集成/Windows 实机验收，必须以各 PR 的最新提交与实际测试核对，不能将分支成果直接算作 main 交付。新增模块按真实依赖与运行路径组织；迁入代码要标明复用、适配、替换或仅参考。
 
 结构调整只把旧 Flutter 工程从 `apps/wex` 归入 `reference/flutter-android`，并同步 CI 工作目录。Rust crate 与 Bridge 未迁移，以保持 Cargo workspace 路径及现有测试契约；后续修改它们要先审接口、调用方和 Windows 运行路径。
