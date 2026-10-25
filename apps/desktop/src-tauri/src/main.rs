@@ -1,5 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod github_config;
+mod local_access;
 mod tool_approvals;
 mod vault;
 
@@ -265,9 +266,16 @@ async fn send_message(
                 );
             })
         } else {
-            tool_approvals::run_non_streaming(&app, &request, &key, || {
-                locked(&guard)?.check_tool_reply_binding(&request)
-            })
+            tool_approvals::run_non_streaming(
+                &app,
+                &request,
+                &key,
+                || locked(&guard)?.check_tool_reply_binding(&request),
+                &ConversationPolicies {
+                    shared: &guard,
+                    conversation: &request.conversation_id,
+                },
+            )
         }
     })
     .await
@@ -435,6 +443,10 @@ async fn resume_tool_reply(
                 history,
                 sequence,
                 || locked(&guard)?.check_tool_reply_binding(&request),
+                &ConversationPolicies {
+                    shared: &guard,
+                    conversation: &request.conversation_id,
+                },
             );
         }
         match execute_model_step(&request, &key, history, vec![])? {
@@ -453,6 +465,50 @@ async fn resume_tool_reply(
         ))
     });
     settle_chat_result(&shared, &backup_request, &reply_root, outcome)
+}
+
+struct ConversationPolicies<'a> {
+    shared: &'a Shared,
+    conversation: &'a str,
+}
+impl tool_approvals::ToolPolicyAuthority for ConversationPolicies<'_> {
+    fn policy(&self, capability: &str) -> Result<ToolPolicySetting> {
+        locked(self.shared)?.tool_policy(self.conversation, capability)
+    }
+    fn check(&self, setting: &ToolPolicySetting) -> Result<()> {
+        if setting.conversation_id != self.conversation {
+            return Err(ServiceError::new(
+                "POLICY_CHANGED",
+                "执行策略不属于当前对话",
+            ));
+        }
+        locked(self.shared)?.check_tool_policy(setting)
+    }
+}
+#[tauri::command]
+fn github_tool_policies(
+    state: State<'_, Shared>,
+    conversation_id: String,
+) -> Result<Vec<ToolPolicySetting>> {
+    let service = locked(&state)?;
+    [
+        "github_file_read",
+        "github_file_create",
+        "github_file_write",
+    ]
+    .iter()
+    .map(|cap| service.tool_policy(&conversation_id, cap))
+    .collect()
+}
+#[tauri::command]
+fn set_github_tool_policy(
+    state: State<'_, Shared>,
+    conversation_id: String,
+    capability_id: String,
+    expected_revision: u64,
+    policy: PolicyChoice,
+) -> Result<ToolPolicySetting> {
+    locked(&state)?.set_tool_policy(&conversation_id, &capability_id, expected_revision, policy)
 }
 
 fn main() {
@@ -478,6 +534,14 @@ fn main() {
             set_github_enabled,
             github_status,
             revoke_github,
+            local_access::local_directory_status,
+            local_access::authorize_local_directory,
+            local_access::edit_local_directory,
+            local_access::revoke_local_directory,
+            local_access::local_read_policy,
+            local_access::set_local_read_policy,
+            github_tool_policies,
+            set_github_tool_policy,
             add_agent,
             assign_agent_duty,
             member_brief,
