@@ -162,3 +162,42 @@ fn competing_agents_cannot_both_hold_the_same_scope() {
     }
     // This proves only process-local admission, not cross-process or crash safety.
 }
+
+#[test]
+fn scoped_execution_panic_releases_reservation_after_unwind() {
+    let gate = TaskGate::default();
+    let observer = gate.clone();
+    let unwind = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = gate.execute(
+            "panicking-task",
+            &["C:/repo/src".into()],
+            || -> Result<(), ()> {
+                assert_eq!(observer.is_running("panicking-task"), Ok(true));
+                panic!("simulated tool panic");
+            },
+        );
+    }));
+    assert!(unwind.is_err());
+    assert_eq!(gate.is_running("panicking-task"), Ok(false));
+    assert!(gate.start("replacement", &["C:/repo/src/main.rs".into()]).is_ok());
+}
+
+#[test]
+fn multi_scope_conflict_rejects_entire_task_without_partial_reservation() {
+    let gate = TaskGate::default();
+    let held = gate.start("held", &["C:/repo/tests".into()]).unwrap();
+    assert!(matches!(
+        gate.start(
+            "rejected",
+            &["C:/repo/src".into(), "C:/repo/tests/sub".into()],
+        ),
+        Err(TaskError::Scope(ReservationError::Conflict))
+    ));
+    assert_eq!(gate.is_running("rejected"), Ok(false));
+    let disjoint = gate.start("disjoint", &["C:/repo/src".into()]).unwrap();
+    assert_eq!(gate.is_running("held"), Ok(true));
+    drop(disjoint);
+    drop(held);
+    assert_eq!(gate.is_running("disjoint"), Ok(false));
+    assert_eq!(gate.is_running("held"), Ok(false));
+}
