@@ -355,7 +355,7 @@ mod tests {
                 intent_digest: digest_arguments(
                     "local_file_create",
                     &saved.id,
-                    &[b"new.txt", b"approved content"],
+                    &[b"new.txt".as_slice(), b"approved content".as_slice()],
                 ),
             },
             attempt_id: "attempt".into(),
