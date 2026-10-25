@@ -20,6 +20,16 @@ export function ProjectDetail({project,data,run,openChat}:{project:Project;data:
     <h2>AI 成员与分工</h2>{!agents.length&&<p>先添加主 AI，再按需添加施工、验证和审查 AI。每个成员拥有独立会话。</p>}
     {agents.map(a=><div key={a.id} className="item row"><div><strong>{a.name} · {roleNames[a.role]}</strong><p>{data.connections.find(c=>c.id===a.connection_id)?.name} / {a.model_id}</p></div><button onClick={()=>{const c=data.conversations.find(c=>c.id===a.conversation_id);if(c)openChat(c);}}>进入工作对话</button><button onClick={()=>setBriefAgent(a.id)}>查看工作资料</button></div>)}
     {agents.some(a=>a.id===briefAgent)&&<MemberBriefPanel key={briefAgent} agentId={briefAgent} revision={data.revision} close={()=>setBriefAgent('')}/>}
+    <details><summary>关联已有成员的其他职责（试验性）</summary>
+      <small>同一成员可兼任多个项目职责或用户级秘书；这只是职责登记，不授予项目数据、文件或工具访问权限，也不自动创建跨项目工作会话。</small>
+      {data.agent_duties.filter(d=>d.project_id===project.id).map(d=><p key={d.id}>{data.agents.find(a=>a.id===d.agent_id)?.name||'未知成员'} · {d.duty_id}</p>)}
+      <form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const f=new FormData(form);void run(async()=>{await command('assign_agent_duty',{agentId:String(f.get('agent')),projectId:f.get('scope')==='user'?null:project.id,dutyId:String(f.get('duty'))});form.reset();});}}>
+        <label>已有成员<select name="agent" required>{data.agents.map(a=><option key={a.id} value={a.id}>{a.name}（创建于 {data.projects.find(p=>p.id===a.project_id)?.name||'未知项目'}）</option>)}</select></label>
+        <label>职责<select name="duty"><option value="lead">项目主 AI</option><option value="worker">施工 AI</option><option value="reviewer">审查 AI</option><option value="verifier">验证 AI</option><option value="secretary">秘书</option></select></label>
+        <label>登记范围<select name="scope"><option value="project">本项目</option><option value="user">用户级（独立于项目）</option></select></label>
+        <button disabled={!data.agents.length}>登记职责</button>
+      </form>
+    </details>
     <details><summary>添加 AI 成员</summary><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const f=new FormData(form);void run(async()=>{await createAgent({project_id:project.id,name:String(f.get('name')),role:f.get('role') as AgentRole,connection_id:String(f.get('connection')),model_id:String(f.get('model'))});form.reset();});}}><div className="fields"><label>成员名称<input name="name" required maxLength={128}/></label><label>职责<select name="role">{Object.entries(roleNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label></div><Selection connections={data.connections}/><button className="primary" disabled={!canAdd}>添加成员</button>{!canAdd&&<p>请先在连接与服务中配置 API。</p>}</form></details><hr/>
     <h2>任务卡</h2><p className="muted">本批可记录目标、范围、成员与验收条件；任务保持草案，尚不启动施工。</p>
     {tasks.map(t=><button className="item" key={t.id} onClick={()=>setSelectedTask(t.id)}><strong>{t.title}</strong><span>草案 · {t.agent_ids.length} 位成员</span></button>)}
