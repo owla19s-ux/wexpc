@@ -243,3 +243,60 @@ fn restored_receipts_are_sent_to_model_but_only_new_proposals_are_dispatched() {
     assert_eq!(dispatched, vec!["new_call"]);
     assert_eq!(phases, vec![(3, true), (4, false)]);
 }
+
+#[test]
+fn resumed_model_must_not_reuse_any_historical_tool_call_id() {
+    let mut dispatched = 0;
+    let mut checkpointed = 0;
+    let error = drive_tool_rounds_from_history(
+        history(),
+        |_| Ok(ModelStep::Proposal {
+            assistant_text: None,
+            calls: vec![ToolProposal {
+                id: "old_call".into(),
+                name: "read_file".into(),
+                arguments_json: "{}".into(),
+            }],
+        }),
+        |_| {
+            dispatched += 1;
+            Ok(vec![("old_call".into(), "wrong replay".into())])
+        },
+        |_, _| {
+            checkpointed += 1;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "TOOL_CALL_ID_REUSED");
+    assert_eq!((dispatched, checkpointed), (0, 0));
+}
+
+#[test]
+fn duplicate_new_id_in_a_single_proposal_is_rejected_before_dispatch() {
+    let mut dispatched = 0;
+    let mut checkpointed = 0;
+    let new = ToolProposal {
+        id: "new_call".into(),
+        name: "read_file".into(),
+        arguments_json: "{}".into(),
+    };
+    let error = drive_tool_rounds_from_history(
+        history(),
+        |_| Ok(ModelStep::Proposal {
+            assistant_text: None,
+            calls: vec![new.clone(), new.clone()],
+        }),
+        |_| {
+            dispatched += 1;
+            Ok(Vec::new())
+        },
+        |_, _| {
+            checkpointed += 1;
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "TOOL_CALL_ID_REUSED");
+    assert_eq!((dispatched, checkpointed), (0, 0));
+}
