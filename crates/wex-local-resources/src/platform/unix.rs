@@ -117,8 +117,16 @@ pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
     if fd < 0 { return Err(unavailable()); }
     // SAFETY: openat returned a newly owned fd.
     let mut file = unsafe { File::from_raw_fd(fd) };
-    file.write_all(bytes).map_err(|_| unavailable())?;
-    file.sync_all().map_err(|_| unavailable())?;
+    file.write_all(bytes).map_err(|_| FileReadError::Changed)?;
+    file.sync_all().map_err(|_| FileReadError::Changed)?;
+    // A concurrent rename can detach the new inode. Re-check the exact
+    // pinned directory entry without following links before reporting success.
+    let pinned = pin_leaf(root, leaf)?;
+    if stamp(&file.metadata().map_err(|_| FileReadError::Changed)?)
+        != stamp(&pinned.metadata().map_err(|_| FileReadError::Changed)?)
+    {
+        return Err(FileReadError::Changed);
+    }
     Ok(())
 }
 
