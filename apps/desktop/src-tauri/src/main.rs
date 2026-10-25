@@ -178,6 +178,16 @@ fn add_agent(state: State<'_, Shared>, input: NewAgent) -> Result<Agent> {
 }
 
 #[tauri::command]
+fn assign_agent_duty(
+    state: State<'_, Shared>,
+    agent_id: String,
+    project_id: Option<String>,
+    duty_id: String,
+) -> Result<AgentDutyAssignment> {
+    locked(&state)?.assign_agent_duty(&agent_id, project_id, duty_id)
+}
+
+#[tauri::command]
 fn create_task(state: State<'_, Shared>, input: NewTask) -> Result<Task> {
     locked(&state)?.create_task(input)
 }
@@ -287,6 +297,7 @@ fn main() {
             set_github_enabled,
             github_status,
             add_agent,
+            assign_agent_duty,
             member_brief,
             create_task,
             update_task,
