@@ -31,9 +31,13 @@ pub fn approved_git_diff(
 
 /// Remove inherited Git-specific overrides, including arbitrary indexed
 /// GIT_CONFIG_KEY_N values. Git's own prompt restriction is set afterward.
+fn is_git_override(key: &std::ffi::OsStr) -> bool {
+    key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_")
+}
+
 fn sanitize_git_environment(command: &mut Command) {
     for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_") {
+        if is_git_override(&key) {
             command.env_remove(key);
         }
     }
@@ -140,6 +144,21 @@ fn collect_bounded_output(mut source: impl Read, limit: usize) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn all_git_override_names_are_fenced_including_numbered_keys() {
+        use std::ffi::OsStr;
+        for name in [
+            "GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+            "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_57", "GIT_CONFIG_VALUE_57",
+            "GIT_CONFIG_PARAMETERS", "GIT_SSH_COMMAND",
+        ] {
+            assert!(is_git_override(OsStr::new(name)), "{name}");
+        }
+        for name in ["GITHUB_TOKEN", "HOME", "PATH", "EDITOR"] {
+            assert!(!is_git_override(OsStr::new(name)), "{name}");
+        }
+    }
+
     #[test]
     fn sanitized_git_process_does_not_inherit_repository_redirection() {
         let trusted = tempfile::tempdir().unwrap();
