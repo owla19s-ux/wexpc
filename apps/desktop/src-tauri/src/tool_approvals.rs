@@ -1516,6 +1516,25 @@ mod proposal_preflight_tests {
     }
 
     #[test]
+    fn existing_file_edit_schema_is_validated_but_never_dispatched() {
+        let sha = "a".repeat(64);
+        let valid = call("update_authorized_file", &serde_json::json!({
+            "directory_id":"saved", "file_name":"main.rs",
+            "expected_sha256": sha, "content":"new content"
+        }).to_string());
+        assert!(preflight_local_edit_intent(&valid).is_ok());
+        assert_eq!(preflight_proposal(&valid, false).unwrap_err().code, "TOOL_UNSUPPORTED");
+        for payload in [
+            serde_json::json!({"directory_id":"saved","file_name":"../secret","expected_sha256":sha,"content":"x"}),
+            serde_json::json!({"directory_id":"saved","file_name":"main.rs","expected_sha256":"old","content":"x"}),
+            serde_json::json!({"directory_id":"saved","file_name":"main.rs","expected_sha256":sha,"content":"x","path":"/tmp"}),
+        ] {
+            assert_eq!(preflight_local_edit_intent(&call("update_authorized_file", &payload.to_string()))
+                .unwrap_err().code, "INVALID_INPUT");
+        }
+    }
+
+    #[test]
     fn local_create_requires_exact_scope_and_no_traversal_or_extra_arguments() {
         assert!(preflight_proposal(&call("create_authorized_file",
             r#"{"directory_id":"saved","file_name":"new.rs","content":"fn main() {}"}"#), false).is_ok());
