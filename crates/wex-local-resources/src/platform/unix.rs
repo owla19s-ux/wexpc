@@ -130,6 +130,21 @@ pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
     Ok(())
 }
 
+/// Compare-and-swap existing file contents through its pinned object.
+/// The existing file must be a single-linked ordinary leaf on the root mount.
+/// Never truncate before verifying the previously read content bytes.
+/// This is an in-place write and is deliberately NOT yet exposed to AI tools:
+/// callers needing atomic replacement must use a staging/rename transaction.
+pub(super) fn prepare_replace_leaf(root: &File, leaf: &str, expected: &[u8]) -> Result<(), FileReadError> {
+    if !valid_leaf(leaf) || expected.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    // Use the exact hardened read path to check the object and version.
+    let actual = read_leaf(root, leaf)?;
+    if actual != expected { return Err(FileReadError::Changed); }
+    Ok(())
+}
+
 fn unavailable() -> FileReadError {
     FileReadError::Resource(ResourceError::Unavailable)
 }
