@@ -1,6 +1,7 @@
 import { MemberBriefPanel } from './MemberBriefPanel';
 import { TaskJournal } from './TaskJournal';
 import { TaskEditor } from './TaskEditor';
+import { TaskDispatchControls } from './TaskDispatchControls';
 import { ObjectEditor } from './ObjectEditor';
 import { useState } from 'react';
 import { command } from './client';
@@ -11,7 +12,6 @@ import { roleNames, type AgentRole, type Project, type Snapshot } from './types'
 export function ProjectDetail({project,data,run,openChat}:{project:Project;data:Snapshot;run:Run;openChat:OpenChat}) {
   const [selectedTask,setSelectedTask]=useState('');
   const [briefAgent,setBriefAgent]=useState('');
-  const [admissionPreview,setAdmissionPreview]=useState('');
   const agents=data.agents.filter(a=>a.project_id===project.id);
   // Task eligibility follows the Service's explicit project duty rule.
   // Keep the member workspace/chat list limited to its original project:
@@ -48,17 +48,7 @@ export function ProjectDetail({project,data,run,openChat}:{project:Project;data:
     <details><summary>添加 AI 成员</summary><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const f=new FormData(form);void run(async()=>{await createAgent({project_id:project.id,name:String(f.get('name')),role:f.get('role') as AgentRole,connection_id:String(f.get('connection')),model_id:String(f.get('model'))});form.reset();});}}><div className="fields"><label>成员名称<input name="name" required maxLength={128}/></label><label>职责<select name="role">{Object.entries(roleNames).map(([id,name])=><option key={id} value={id}>{name}</option>)}</select></label></div><Selection connections={data.connections}/><button className="primary" disabled={!canAdd}>添加成员</button>{!canAdd&&<p>请先在连接与服务中配置 API。</p>}</form></details><hr/>
     <h2>任务卡</h2><p className="muted">可保存任务草案并发布已具备成员、范围和验收条件的任务；发布只登记待派工事项，不启动施工或授予权限。</p>
     {tasks.map(t=><button className="item" key={t.id} onClick={()=>setSelectedTask(t.id)}><strong>{t.title}</strong><span>{t.status==='draft'?'草案':'已发布（尚未派工）'} · {t.agent_ids.length} 位成员</span></button>)}
-    {task&&<article className="task-detail"><div className="row"><h3>{task.title}</h3><button onClick={()=>setSelectedTask('')}>收起</button></div>{task.status==='draft'?<><TaskEditor key={task.id} task={task} agents={editorAgents} dutyLabels={dutyLabels} revision={data.revision} run={run}/><button type="button" disabled={!task.agent_ids.length||!task.scope.length||!task.acceptance.trim()} onClick={()=>void run(async()=>{await command('publish_task',{revision:data.revision,taskId:task.id});})}>发布任务（不启动施工）</button></>:<div><p>任务已发布；编辑请通过后续任务修订流程，尚未实际派发或执行。</p><button type="button" onClick={()=>void run(async()=>{
-        setAdmissionPreview('');
-        const agentId=task.agent_ids[0];
-        if(!agentId)throw new Error('任务缺少分配成员');
-        const ticket=await command<{taskId:string;projectId:string;agentId:string;assignmentEpoch:number}>('preview_task_dispatch',{revision:data.revision,taskId:task.id,agentId});
-        setAdmissionPreview('仅通过准入预检：'+ticket.agentId+'（快照版本 '+ticket.assignmentEpoch+'），未占用资源或启动工具。');
-      })}>核对调度准入（不执行）</button>{admissionPreview&&<p role="status">{admissionPreview}</p>}<button type="button" disabled={(data.dispatch_attempts||[]).some(a=>a.task_id===task.id&&a.publication_epoch===task.publication_epoch)} onClick={()=>void run(async()=>{
-        const agentId=task.agent_ids[0];
-        if(!agentId)throw new Error('任务缺少分配成员');
-        await command('queue_dispatch_attempt',{revision:data.revision,taskId:task.id,agentId});
-      })}>登记待派工尝试（不启动工具）</button>{(data.dispatch_attempts||[]).filter(a=>a.task_id===task.id).map(a=><p key={a.id}>派工记录 {a.id} · {a.status} · 发布版本 {a.publication_epoch}</p>)}</div>}<h4>目标</h4><p className="prewrap">{task.goal||'未填写'}</p><h4>修改范围</h4><p className="prewrap">{task.scope.join('\n')||'未填写'}</p><h4>验收条件</h4><p className="prewrap">{task.acceptance||'未填写'}</p><h4>参与成员</h4><p>{task.agent_ids.map(id=>data.agents.find(a=>a.id===id)?.name||`未知成员（${id}）`).join('、')||'未分配'}</p><p>施工、实际验证、审查与修复流转尚未接通。</p><TaskJournal key={task.id} task={task} records={data.task_records.filter(r=>r.task_id===task.id)} revision={data.revision} run={run}/></article>}
+    {task&&<article className="task-detail"><div className="row"><h3>{task.title}</h3><button onClick={()=>setSelectedTask('')}>收起</button></div>{task.status==='draft'?<><TaskEditor key={task.id} task={task} agents={editorAgents} dutyLabels={dutyLabels} revision={data.revision} run={run}/><button type="button" disabled={!task.agent_ids.length||!task.scope.length||!task.acceptance.trim()} onClick={()=>void run(async()=>{await command('publish_task',{revision:data.revision,taskId:task.id});})}>发布任务（不启动施工）</button></>:<div><p>任务已发布；编辑请通过后续任务修订流程，尚未实际派发或执行。</p><TaskDispatchControls key={task.id} task={task} agents={data.agents} revision={data.revision} attempts={data.dispatch_attempts||[]} run={run}/></div>}<h4>目标</h4><p className="prewrap">{task.goal||'未填写'}</p><h4>修改范围</h4><p className="prewrap">{task.scope.join('\n')||'未填写'}</p><h4>验收条件</h4><p className="prewrap">{task.acceptance||'未填写'}</p><h4>参与成员</h4><p>{task.agent_ids.map(id=>data.agents.find(a=>a.id===id)?.name||`未知成员（${id}）`).join('、')||'未分配'}</p><p>施工、实际验证、审查与修复流转尚未接通。</p><TaskJournal key={task.id} task={task} records={data.task_records.filter(r=>r.task_id===task.id)} revision={data.revision} run={run}/></article>}
     <details><summary>新建任务草案</summary><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const f=new FormData(form);void run(async()=>{await command('create_task',{input:{project_id:project.id,title:f.get('title'),goal:f.get('goal'),scope:String(f.get('scope')||'').split('\n').filter(Boolean),acceptance:f.get('acceptance'),agent_ids:f.getAll('agents')}});form.reset();});}}><label>任务名称<input name="title" required maxLength={128}/></label><label>具体目标<textarea name="goal" rows={3}/></label><label>修改范围<textarea name="scope" rows={2} placeholder="每行一项，供后续并发范围控制使用"/></label><label>验收条件<textarea name="acceptance" rows={3}/></label><fieldset><legend>分配成员</legend>{taskAgents.map(a=><label className="check" key={a.id}><input type="checkbox" name="agents" value={a.id}/>{a.name} · {dutyLabels[a.id]}</label>)}{!taskAgents.length&&<small>可先保存草案，稍后添加成员。</small>}<small>跨项目职责只允许登记任务分配，不自动授予项目资料、会话或工具访问权限。</small></fieldset><button className="primary">保存草案</button></form></details>
   </section>;
 }
