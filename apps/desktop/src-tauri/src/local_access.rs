@@ -300,6 +300,25 @@ pub fn set_local_read_policy(
     )
 }
 
+#[tauri::command]
+pub fn local_create_policy(
+    state: tauri::State<'_, crate::Shared>,
+    conversation_id: String,
+) -> Result<wex_desktop_service::ToolPolicySetting> {
+    crate::locked(&state)?.tool_policy(&conversation_id, "local_file_create")
+}
+#[tauri::command]
+pub fn set_local_create_policy(
+    state: tauri::State<'_, crate::Shared>,
+    conversation_id: String,
+    expected_revision: u64,
+    policy: wex_desktop_service::PolicyChoice,
+) -> Result<wex_desktop_service::ToolPolicySetting> {
+    crate::locked(&state)?.set_tool_policy(
+        &conversation_id, "local_file_create", expected_revision, policy,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
