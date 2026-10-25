@@ -12,7 +12,7 @@ pub enum EditRejection {
     MissingVersion,
     InvalidVersion,
     ContentTooLarge,
-    Unchanged,
+    VersionConflict,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +54,7 @@ impl EditIntent<'_> {
     pub fn matches_version(&self, actual_sha256: &str) -> Result<(), EditRejection> {
         self.validate()?;
         if !self.expected_sha256.eq_ignore_ascii_case(actual_sha256) {
-            return Err(EditRejection::Unchanged);
+            return Err(EditRejection::VersionConflict);
         }
         Ok(())
     }
@@ -80,7 +80,7 @@ mod tests {
         let edit = request(&sha, "updated");
         assert_eq!(edit.validate(), Ok(()));
         assert_eq!(edit.matches_version(&sha), Ok(()));
-        assert_eq!(edit.matches_version(&"b".repeat(64)), Err(EditRejection::Unchanged));
+        assert_eq!(edit.matches_version(&"b".repeat(64)), Err(EditRejection::VersionConflict));
         assert_eq!(request("", "x").validate(), Err(EditRejection::MissingVersion));
         assert_eq!(request("not-hash", "x").validate(), Err(EditRejection::InvalidVersion));
     }
