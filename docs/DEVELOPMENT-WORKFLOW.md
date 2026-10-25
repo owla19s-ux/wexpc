@@ -28,7 +28,7 @@
 | 真实DeepSeek/API请求 | 当前未发现可用DeepSeek凭证或调用入口，不能宣称已测 | 仅在手机具备可用凭证、网络且实际请求后报告 | 与模拟服务分开；凭证留在各自环境，不贴到仓库、日志或聊天 |
 | TypeScript检查、React生产构建 | 可运行，已验证前端构建；当前Node24与既有CI Node22有版本差异 | 有可用Node/依赖时可补测，当前未核验 | 主要由Work承担；类型/构建通过不代表界面交互已验收 |
 | Windows Host编译、凭证库、文件/ACL语义、窗口与安装包 | 当前是Linux，无Windows运行环境；不能运行Windows行为测试 | Android同样不能替代Windows运行验证 | 编码可继续，新增改动按Commit列待验证；11月1日后评估Windows CI，买电脑后补本机体验 |
-| Linux原生Tauri窗口 | 当前未发现pkg-config，完整GTK/WebKit开发依赖未就绪 | 不作为Windows桌面验证环境 | 不因能构建React就声称Tauri窗口可运行；没有环境先记NOT_RUN |
+| Linux原生Tauri Host | 已在执行工作区部署独立pkg-config/GTK 3.24.41/WebKitGTK 2.52.3依赖，正式Host check、严格Clippy及6项Host预检/派发边界测试通过；窗口交互未验收 | 不作为Windows桌面验证环境 | 使用工作区内的依赖前缀和PKG_CONFIG/PKG_CONFIG_SYSROOT_DIR，不要求写系统安装目录；Linux编译不替代Windows运行 |
 | Android SDK/模拟器/adb/Flutter | 当前PATH未发现adb、emulator、sdkmanager、flutter、dart | 手机可承担APK真机体验；SDK/构建/自动化工具是否具备需另报 | 手机真机、模拟器、构建与安装四类证据分开；不预设手机能编译整个工程 |
 
 Work环境是可变化的临时执行环境；上述版本和可用工具只代表本次检查。手机端网站可访问、磁盘充足或apt配置已修，均不能代替Rust及依赖实际编译运行。Android专属路径、应用前缀和本地C/TLS依赖由手机端先确认，不能默认标准Linux安装包适用。
@@ -46,7 +46,7 @@ Work环境是可变化的临时执行环境；上述版本和可用工具只代�
 
 API实现的目标目录为 `crates/wex-api/**`，由大肥鱼在正式接手后独占（含模块自身Cargo.toml和测试）；现有 `crates/wex-desktop-service/src/connectors/**` 由Work负责桌面薄适配。Core准备业务请求并裁决权限/派发工具，API只负责协议请求、事件和调用意图，不自行授权或运行工具。API所需密钥由Host安全读取后在调用边界提供，不把Windows Vault搬入手机可测模块。
 
-**当前实施状态**：`wex-api`目录、可编码接口与可运行模块起点尚未落地；`feat/api-protocol`分支尚未创建，未宣称已经派发。大肥鱼现在可先配置手机环境。Work先完成接口和工作区/依赖准备、验证最小契约测试可运行，再登记实际交接Commit；交接之后Work不同时修改该模块。抽取独立crate是为隔离桌面/平台依赖，不为增加空模块或替代成熟基础组件。
+**当前实施状态**：`wex-api`已作为主工作区独立协议crate落地，PR #13/#14已进入桌面集成链，PR #24继续工具回执与恢复接线。早期“crate/起点尚未建立、不得开始”的状态已失效，不能继续作为阻塞。具体API协议契约采用、双方原始证据与目录所有权仍以契约正文、共同日志及当前[协作状态](../COLLAB/STATE.md)核对，不代签他方验收。
 
 ### 分支、起点和集成顺序
 
@@ -81,10 +81,14 @@ cargo clippy -p wex-api --all-targets --locked -- -D warnings
 
 当前crate不存在时不要求运行这些命令，也不能把缺少crate当作手机工具链失败。新增依赖由双方先核对手机目标兼容性；确需试验时可在隔离副本验证，把依赖清单交Work统一更新共享配置/锁文件，避免两边争改根锁文件。
 
-Work当前已确认工具在 `/root/.cargo/bin`，但默认PATH未包含它；可使用绝对路径，或在当前Work shell先执行下列设置。手机必须使用其实际安装位置，不照抄Work路径；“PATH找不到”不能直接认定工具未安装。
+Work工具位置会随临时环境重置而变化；先核对PATH和实际工具目录，缺失时在执行工作区部署工具链与缓存，并加载该部署的环境脚本。不要假定固定`/root/.cargo/bin`路径；手机也使用其实际安装位置。“PATH找不到”不能直接认定工具不可安装或当前任务必须停工。
+
+本批Linux Host依赖通过可信软件源索引下载，并核对包清单校验值后解包到工作区前缀；pkg-config使用相应`PKG_CONFIG_SYSROOT_DIR`，链接/运行测试时补齐该前缀的库搜索路径。已有系统运行库可在该前缀关联使用，不修改系统目录，也不将会话绝对路径写进产品源码。
 
 ```sh
-export PATH="/root/.cargo/bin:$PATH"
+cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu --locked
+cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu --all-targets --locked -- -D warnings
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu --bin wexpc-desktop --locked
 ```
 
 Work按实际改动先跑相关包/测试，批次集成时再运行必要的整体检查：
@@ -241,3 +245,4 @@ GPT Work观点及理由：
 | 测试通过或 AI 自述代替真实验收 | 按用户行为验收正常、失败、撤权、状态保存和恢复；证据绑定版本，缺项如实报告。 |
 
 旧指南来源：原 WEX 的 `docs/GITHUB-WORKFLOW-AND-ANDROID-DELIVERY.md`、`docs/DEVELOPMENT-RULES.md`、`docs/architecture/VALIDATION.md` 和 `AGENTS.md`。其中 Android APK、签名、0.1.1 权限简化及“Windows 后续”的条款**不适用于 WEXPC 当前施工**。
+

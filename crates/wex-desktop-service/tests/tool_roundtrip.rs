@@ -9,20 +9,14 @@ use std::{
 use wex_api::ToolDefinition;
 use wex_desktop_service::{drive_tool_rounds, ApiMessage, PreparedChat};
 
-fn mock_exchange_plan(
-    fail_continuation: bool,
-    resume: bool,
+fn exchange_responses(
+    replies: Vec<(u16, String)>,
 ) -> (String, thread::JoinHandle<Vec<serde_json::Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let worker = thread::spawn(move || {
         let mut captured = Vec::new();
-        let replies = [
-            r#"{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"file_name\":\"demo.txt\"}"}}]}}]}"#,
-            r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"verified reply"}}]}"#,
-        ];
-        for index in 0..if resume { 3 } else { 2 } {
-            let response = if index == 0 { replies[0] } else { replies[1] };
+        for (index, (status, response)) in replies.iter().enumerate() {
             let (mut socket, _) = listener.accept().unwrap();
             socket
                 .set_read_timeout(Some(Duration::from_secs(5)))
@@ -50,11 +44,7 @@ fn mock_exchange_plan(
                 }
             }
             let body = response.as_bytes();
-            let status = if fail_continuation && index == 1 {
-                "500 Internal Server Error"
-            } else {
-                "200 OK"
-            };
+            let status = format!("{status} Test Response");
             let wire = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -66,6 +56,22 @@ fn mock_exchange_plan(
         captured
     });
     (url, worker)
+}
+
+fn mock_exchange_plan(
+    fail_continuation: bool,
+    resume: bool,
+) -> (String, thread::JoinHandle<Vec<serde_json::Value>>) {
+    let proposal = r#"{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"file_name\":\"demo.txt\"}"}}]}}]}"#;
+    let text = r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"verified reply"}}]}"#;
+    let mut replies = vec![
+        (200, proposal.into()),
+        (if fail_continuation { 500 } else { 200 }, text.into()),
+    ];
+    if resume {
+        replies.push((200, text.into()));
+    }
+    exchange_responses(replies)
 }
 
 fn mock_exchange(fail_continuation: bool) -> (String, thread::JoinHandle<Vec<serde_json::Value>>) {
@@ -285,4 +291,130 @@ fn restarted_service_restores_frozen_request_and_settles_original_turn() {
     let requests = server.join().unwrap();
     assert_eq!(requests.len(), 3);
     assert_eq!(requests[1]["messages"], requests[2]["messages"]);
+}
+
+#[test]
+fn restart_continues_new_tools_and_appends_checkpoints_without_replaying_old_tools() {
+    use wex_desktop_service::*;
+    fn proposal(id: &str, file: &str) -> String {
+        serde_json::json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":id,"type":"function","function":{"name":"read_file","arguments":serde_json::json!({"file_name":file}).to_string()}}]}}]}).to_string()
+    }
+    let (base_url,server)=exchange_responses(vec![
+        (200,proposal("old_call","old.txt")),(500,"{}".into()),
+        (200,proposal("new_call","new.txt")),
+        (200,r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"continued work complete"}}]}"#.into()),
+    ]);
+    let dir = tempfile::tempdir().unwrap();
+    let database = dir.path().join("desktop.sqlite");
+    let checkpoints = dir.path().join("checkpoints");
+    let outputs = dir.path().join("outputs");
+    let mut app = DesktopService::open(&database).unwrap();
+    let c = app
+        .add_connection(
+            NewConnection {
+                name: "Mock".into(),
+                base_url,
+                models: vec!["mock-model".into()],
+            },
+            "vault".into(),
+        )
+        .unwrap();
+    let conv = app
+        .create_conversation(None, "A".into(), c.id, "mock-model".into())
+        .unwrap();
+    let request = app
+        .prepare_chat(&conv.id, "inspect both files".into())
+        .unwrap();
+    let mut old_dispatches = 0;
+    let mut cursor = 0;
+    let failed = drive_tool_rounds_checkpointed(
+        &request,
+        "mock-key",
+        vec![],
+        |calls| {
+            assert_eq!(calls[0].id, "old_call");
+            old_dispatches += 1;
+            save_tool_result(
+                &outputs,
+                &request.conversation_id,
+                &request.turn_id,
+                &calls[0],
+                "old receipt",
+            )?;
+            Ok(vec![(calls[0].id.clone(), "old receipt".into())])
+        },
+        |history, pending| {
+            save_tool_checkpoint(&checkpoints, &request, cursor, history, pending)?;
+            cursor += 1;
+            Ok(())
+        },
+    );
+    app.fail_chat(&request.turn_id, &failed.unwrap_err())
+        .unwrap();
+    drop(app);
+    let mut app = DesktopService::open(&database).unwrap();
+    let candidate = app
+        .tool_reply_candidate(&conv.id, &request.turn_id)
+        .unwrap();
+    let (frozen, history, mut cursor) =
+        restore_tool_checkpoint_with_cursor(&checkpoints, &candidate).unwrap();
+    assert_eq!(cursor, 2);
+    let resumed = app.begin_tool_reply_resume(frozen).unwrap();
+    let tools = vec![ToolDefinition {
+        name: "read_file".into(),
+        description: "Mock tool".into(),
+        parameters_json: "{}".into(),
+    }];
+    let mut new_dispatches = 0;
+    let answer = drive_tool_rounds_from_history(
+        history,
+        |history| {
+            app.check_tool_reply_binding(&resumed)?;
+            execute_model_step(&resumed, "mock-key", history, tools.clone())
+        },
+        |calls| {
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].id, "new_call");
+            new_dispatches += 1;
+            save_tool_result(
+                &outputs,
+                &resumed.conversation_id,
+                &resumed.turn_id,
+                &calls[0],
+                "new receipt",
+            )?;
+            Ok(vec![(calls[0].id.clone(), "new receipt".into())])
+        },
+        |history, pending| {
+            save_tool_checkpoint(&checkpoints, &resumed, cursor, history, pending)?;
+            cursor += 1;
+            Ok(())
+        },
+    )
+    .unwrap();
+    app.finish_chat_with_backup(&dir.path().join("replies"), &resumed, answer)
+        .unwrap();
+    drop(app);
+    let final_state = DesktopService::open(&database).unwrap().snapshot().unwrap();
+    assert_eq!(final_state.turns.len(), 1);
+    assert_eq!(
+        final_state.turns[0].assistant.as_deref(),
+        Some("continued work complete")
+    );
+    assert_eq!((old_dispatches, new_dispatches), (1, 1));
+    let (_, history, cursor) = restore_tool_checkpoint_with_cursor(&checkpoints, &resumed).unwrap();
+    assert_eq!(cursor, 4);
+    assert_eq!(history.len(), 4);
+    assert_eq!(
+        read_tool_results(&outputs, &request.conversation_id, &request.turn_id)
+            .unwrap()
+            .len(),
+        2
+    );
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 4);
+    assert_eq!(requests[1]["messages"], requests[2]["messages"]);
+    let messages = requests[3]["messages"].as_array().unwrap();
+    assert_eq!(messages[2]["content"], "old receipt");
+    assert_eq!(messages[4]["content"], "new receipt");
 }

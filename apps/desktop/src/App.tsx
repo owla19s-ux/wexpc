@@ -74,13 +74,13 @@ export function App() {
     catch(e){setError(errorMessage(e));}
     finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});await refresh().then(admitted).catch(e=>setError(errorMessage(e)));}
   }
-  async function resumeReply(turnId:string,mode:"local"|"model") {
+  async function resumeReply(turnId:string,mode:"local"|"model",continueTools=false) {
     if(!conversation)return;
     const id=conversation.id;
     setError('');setPending(prev=>new Set(prev).add(id));
     setRecovering(prev=>new Set(prev).add(turnId));
     const timer=window.setTimeout(()=>void refresh().catch(()=>{}),200);
-    try {await command(mode==='local'?'restore_saved_chat_reply':'resume_tool_reply',{conversationId:id,turnId});}
+    try {const args={conversationId:id,turnId};await command(mode==='local'?'restore_saved_chat_reply':'resume_tool_reply',mode==='local'?args:{...args,continueTools});}
     catch(error){setError(errorMessage(error));}
     finally {window.clearTimeout(timer);setPending(prev=>{const next=new Set(prev);next.delete(id);return next;});setRecovering(prev=>{const next=new Set(prev);next.delete(turnId);return next;});await refresh().catch(error=>setError(errorMessage(error)));}
   }

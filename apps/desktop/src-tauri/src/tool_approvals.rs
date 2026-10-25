@@ -10,12 +10,37 @@ use wex_core::{
     operation::{Action, ExecutionChecks, OperationIntent, OperationLedger, Outcome},
 };
 use wex_desktop_service::{
-    digest_arguments, drive_tool_rounds_checkpointed, read_approved_file, PreparedChat, Result,
-    ServiceError, ToolProposal,
+    digest_arguments, drive_tool_rounds_from_history, execute_model_step, read_approved_file,
+    PreparedChat, Result, ServiceError, ToolProposal,
 };
 use wex_local_resources::{DirectoryRegistry, Protection};
 
-pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Result<String> {
+pub fn run_non_streaming(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    key: &str,
+    before_step: impl Fn() -> Result<()>,
+) -> Result<String> {
+    run_with_history(app, chat, key, Vec::new(), 0, before_step)
+}
+pub fn resume_non_streaming(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    key: &str,
+    history: Vec<wex_api::Message>,
+    sequence: u32,
+    before_step: impl Fn() -> Result<()>,
+) -> Result<String> {
+    run_with_history(app, chat, key, history, sequence, before_step)
+}
+fn run_with_history(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    key: &str,
+    history: Vec<wex_api::Message>,
+    mut checkpoint_sequence: u32,
+    before_step: impl Fn() -> Result<()>,
+) -> Result<String> {
     let tool = ToolDefinition {
         name: "read_file".into(),
         description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
@@ -47,7 +72,7 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
                 .into(),
         });
     }
-    if crate::github_config::status(app)?.enabled {
+    if crate::github_config::status(app).is_ok_and(|status| status.enabled) {
         tools.push(ToolDefinition {
             name: "github_read_file".into(),
             description: "Read an existing GitHub UTF-8 file and its current blob SHA after explicit user confirmation; use that SHA for a separately approved update.".into(),
@@ -64,17 +89,19 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"sha":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","sha","content"],"additionalProperties":false}"#.into(),
         });
     }
-    let mut checkpoint_sequence = 0u32;
-    drive_tool_rounds_checkpointed(
-        chat,
-        key,
-        tools,
+    drive_tool_rounds_from_history(
+        history,
+        |history| {
+            before_step()?;
+            execute_model_step(chat, key, history, tools.clone())
+        },
         |calls| {
+            before_step()?;
             // Reject unsupported or malformed proposals before dispatching any
             // member of the batch. Validation does not itself authorize execution.
-            for call in calls {
-                preflight_proposal(call, crate::github_config::status(app)?.enabled)?;
-            }
+            preflight_batch(calls, || {
+                crate::github_config::status(app).map(|status| status.enabled)
+            })?;
             let mut completed = 0usize;
             let result = calls
                 .iter()
@@ -84,13 +111,19 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
                             call.name.as_str(),
                             "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check"
                         ) {
-                            return Ok((call.id.clone(), review_local_command(app, chat, call)?));
+                            return Ok((
+                                call.id.clone(),
+                                review_local_command(app, chat, call, &before_step)?,
+                            ));
                         }
                         if matches!(
                             call.name.as_str(),
                             "github_read_file" | "github_write_file" | "github_create_file"
                         ) {
-                            return Ok((call.id.clone(), review_github(app, chat, call)?));
+                            return Ok((
+                                call.id.clone(),
+                                review_github(app, chat, call, &before_step)?,
+                            ));
                         }
                         if call.name != "read_file" {
                             return Err(ServiceError::new(
@@ -118,7 +151,8 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
                                 "工具只能请求单个文件名",
                             ));
                         }
-                        let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
+                        let (content, evidence_ref) =
+                            review_and_read(app, chat, leaf, &before_step)?;
                         let result =
                             serde_json::json!({"content":content,"evidence_ref":evidence_ref});
                         Ok((call.id.clone(), result.to_string()))
@@ -170,6 +204,24 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             Ok(())
         },
     )
+}
+
+fn preflight_batch(
+    calls: &[ToolProposal],
+    mut github_enabled: impl FnMut() -> Result<bool>,
+) -> Result<()> {
+    for call in calls {
+        let enabled = if matches!(
+            call.name.as_str(),
+            "github_read_file" | "github_write_file" | "github_create_file"
+        ) {
+            github_enabled()?
+        } else {
+            false
+        };
+        preflight_proposal(call, enabled)?;
+    }
+    Ok(())
 }
 
 fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
@@ -236,7 +288,12 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     Ok(())
 }
 
-fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<(String, String)> {
+fn review_and_read(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    leaf: &str,
+    authority: &impl Fn() -> Result<()>,
+) -> Result<(String, String)> {
     let selected = app
         .dialog()
         .file()
@@ -285,19 +342,19 @@ fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<(
     ledger
         .approve(&operation_id, &intent, 1)
         .map_err(|_| core_failure())?;
-    let dispatch = ledger
-        .begin(
-            &operation_id,
-            &attempt_id,
-            ExecutionChecks {
-                authority_revision: 1,
-                connection_enabled: true,
-                authenticated: true,
-                platform_available: wex_local_resources::platform_supported(),
-                resource_allowed: true,
-            },
-        )
-        .map_err(|_| core_failure())?;
+    let dispatch = begin_approved_dispatch(
+        &mut ledger,
+        &operation_id,
+        &attempt_id,
+        ExecutionChecks {
+            authority_revision: 1,
+            connection_enabled: true,
+            authenticated: true,
+            platform_available: wex_local_resources::platform_supported(),
+            resource_allowed: true,
+        },
+        authority,
+    )?;
     // A durable "in flight" marker must exist BEFORE touching the file.
     journal(app, chat, &attempt_id, &operation_id, "in_flight", None)?;
     let grants = [DirectoryGrant {
@@ -343,6 +400,7 @@ fn review_local_command(
     app: &AppHandle,
     chat: &PreparedChat,
     call: &ToolProposal,
+    authority: &impl Fn() -> Result<()>,
 ) -> Result<String> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "命令参数无效"))?;
@@ -434,19 +492,19 @@ fn review_local_command(
     ledger
         .approve(&operation_id, &intent, 1)
         .map_err(|_| core_failure())?;
-    let dispatch = ledger
-        .begin(
-            &operation_id,
-            &attempt_id,
-            ExecutionChecks {
-                authority_revision: 1,
-                connection_enabled: true,
-                authenticated: true,
-                platform_available: true,
-                resource_allowed: true,
-            },
-        )
-        .map_err(|_| core_failure())?;
+    let dispatch = begin_approved_dispatch(
+        &mut ledger,
+        &operation_id,
+        &attempt_id,
+        ExecutionChecks {
+            authority_revision: 1,
+            connection_enabled: true,
+            authenticated: true,
+            platform_available: true,
+            resource_allowed: true,
+        },
+        authority,
+    )?;
     journal(
         app,
         chat,
@@ -510,7 +568,12 @@ fn review_local_command(
 
 /// Approval always displays the exact repo/path and, for writes, every byte
 /// of the bounded text update. The model never sees the GitHub PAT.
-fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> Result<String> {
+fn review_github(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    call: &ToolProposal,
+    authority: &impl Fn() -> Result<()>,
+) -> Result<String> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "GitHub 工具参数无效"))?;
     fn field<'a>(value: &'a serde_json::Value, name: &str) -> Result<&'a str> {
@@ -622,19 +685,19 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     ledger
         .approve(&operation_id, &intent, 1)
         .map_err(|_| core_failure())?;
-    let dispatch = ledger
-        .begin(
-            &operation_id,
-            &attempt_id,
-            ExecutionChecks {
-                authority_revision: 1,
-                connection_enabled: true,
-                authenticated: true,
-                platform_available: true,
-                resource_allowed: true,
-            },
-        )
-        .map_err(|_| core_failure())?;
+    let dispatch = begin_approved_dispatch(
+        &mut ledger,
+        &operation_id,
+        &attempt_id,
+        ExecutionChecks {
+            authority_revision: 1,
+            connection_enabled: true,
+            authenticated: true,
+            platform_available: true,
+            resource_allowed: true,
+        },
+        authority,
+    )?;
     journal(
         app,
         chat,
@@ -707,6 +770,19 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     Ok(serde_json::json!({"evidence_ref": evidence_id, "result":body}).to_string())
 }
 
+fn begin_approved_dispatch(
+    ledger: &mut OperationLedger,
+    operation: &str,
+    attempt: &str,
+    checks: ExecutionChecks,
+    authority: &impl Fn() -> Result<()>,
+) -> Result<wex_core::operation::Dispatch> {
+    authority()?;
+    ledger
+        .begin(operation, attempt, checks)
+        .map_err(|_| core_failure())
+}
+
 fn core_failure() -> ServiceError {
     ServiceError::new("OPERATION_STATE_ERROR", "Core 审批或派发状态无效")
 }
@@ -750,6 +826,76 @@ mod proposal_preflight_tests {
         }
     }
 
+    #[test]
+    fn local_tools_do_not_depend_on_github_configuration_health() {
+        let mut github_checks = 0;
+        let calls = vec![
+            call("git_status", "{}"),
+            call("cargo_test", "{}"),
+            call("read_file", r#"{"file_name":"demo.txt"}"#),
+        ];
+        preflight_batch(&calls, || {
+            github_checks += 1;
+            Err(ServiceError::new(
+                "GITHUB_CONFIG_ERROR",
+                "damaged github configuration",
+            ))
+        })
+        .unwrap();
+        assert_eq!(github_checks, 0);
+        let github = call(
+            "github_read_file",
+            r#"{"owner":"a","repo":"b","path":"README.md"}"#,
+        );
+        let error = preflight_batch(&[github], || {
+            Err(ServiceError::new(
+                "GITHUB_CONFIG_ERROR",
+                "damaged github configuration",
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(error.code, "GITHUB_CONFIG_ERROR");
+    }
+    #[test]
+    fn revoked_live_authority_prevents_consuming_a_core_approval() {
+        let intent = OperationIntent {
+            id: "op_1".into(),
+            actor_id: "assistant".into(),
+            conversation_id: "conv_1".into(),
+            context_id: None,
+            connection_id: "local".into(),
+            capability_id: "local_file_read".into(),
+            resource_id: "directory_1".into(),
+            action: Action::Read,
+            expected_version: None,
+            intent_digest: "a".repeat(64),
+        };
+        let mut ledger = OperationLedger::default();
+        ledger.propose(intent.clone()).unwrap();
+        ledger.approve("op_1", &intent, 1).unwrap();
+        let checks = ExecutionChecks {
+            authority_revision: 1,
+            connection_enabled: true,
+            authenticated: true,
+            platform_available: true,
+            resource_allowed: true,
+        };
+        let before = ledger.view();
+        let result = begin_approved_dispatch(&mut ledger, "op_1", "attempt_1", checks, &|| {
+            Err(ServiceError::new(
+                "CONNECTION_UNAVAILABLE",
+                "revoked after dialog",
+            ))
+        });
+        assert_eq!(result.unwrap_err().code, "CONNECTION_UNAVAILABLE");
+        assert_eq!(ledger.view(), before);
+        let dispatch =
+            begin_approved_dispatch(&mut ledger, "op_1", "attempt_1", checks, &|| Ok(())).unwrap();
+        assert_eq!(dispatch.attempt_id, "attempt_1");
+        assert!(
+            begin_approved_dispatch(&mut ledger, "op_1", "attempt_2", checks, &|| Ok(())).is_err()
+        );
+    }
     #[test]
     fn invalid_batch_arguments_are_rejected_before_execution() {
         assert!(preflight_proposal(&call("git_status", "{}"), false).is_ok());
