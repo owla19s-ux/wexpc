@@ -526,6 +526,34 @@ impl Store {
         })
     }
 
+    /// Exclusive creation under current per-conversation write authority.
+    /// Authorization, directory identity and file I/O share the store lock.
+    /// A failed create can leave a partial file; consumers must not auto-retry.
+    pub fn create_authorized_at(
+        &self,
+        expected_revision: Option<u64>,
+        directory_id: &str,
+        leaf: &str,
+        bytes: &[u8],
+        system_access: bool,
+    ) -> Result<(), RegisteredReadError> {
+        self.with_snapshot(|state, grants| {
+            if expected_revision.is_some_and(|r| r != state.revision) {
+                return Err(wex_local_resources::FileReadError::Changed);
+            }
+            let saved = state.directories.iter().find(|d| d.id == directory_id)
+                .ok_or(wex_local_resources::FileReadError::Resource(
+                    wex_local_resources::ResourceError::UnknownDirectory))?;
+            let roots: Vec<_> = self.internal_roots.iter().map(PathBuf::as_path).collect();
+            let mut registry = wex_local_resources::DirectoryRegistry::new();
+            registry.restore_binding(saved, &roots)
+                .map_err(wex_local_resources::FileReadError::Resource)?;
+            registry.create_file_with_exclusions(
+                directory_id, leaf, bytes, system_access, grants, &roots,
+            )
+        })
+    }
+
     /// Hold the live grant transaction until the read returns.
     pub fn read_registered(
         &self,
