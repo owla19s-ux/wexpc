@@ -440,6 +440,38 @@ impl DesktopService {
         })
     }
 
+    /// Claim a persisted dispatch intent exactly once. This records a safety
+    /// boundary before any external I/O; it DOES NOT execute the task.
+    /// Recovery converts this state into OutcomeUnknown, never Pending.
+    pub fn claim_dispatch_attempt(
+        &mut self,
+        revision: u64,
+        attempt_id: &str,
+    ) -> Result<DispatchAttempt> {
+        self.mutate(|s| {
+            organization::check_revision(s, revision)?;
+            let prior = s.dispatch_attempts.iter().find(|a| a.id == attempt_id)
+                .ok_or_else(|| ServiceError::new("ATTEMPT_NOT_FOUND", "派工记录不存在"))?;
+            if prior.status != DispatchAttemptStatus::Pending {
+                return Err(ServiceError::new("ATTEMPT_NOT_PENDING", "派工记录已领取或需要人工核对"));
+            }
+            let task = s.tasks.iter().find(|t| t.id == prior.task_id)
+                .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "原任务不存在"))?;
+            if task.status != TaskStatus::Published
+                || task.project_id != prior.project_id
+                || task.publication_epoch != prior.publication_epoch
+                || !task.agent_ids.contains(&prior.agent_id)
+                || !task_member_assigned(s, &prior.agent_id, &task.project_id)
+            {
+                return Err(ServiceError::new("DISPATCH_REFUSED", "任务版本或成员授权关系已变化"));
+            }
+            let attempt = s.dispatch_attempts.iter_mut().find(|a| a.id == attempt_id)
+                .expect("attempt checked above");
+            attempt.status = DispatchAttemptStatus::InFlight;
+            Ok(attempt.clone())
+        })
+    }
+
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
         let name = title(&input.title)?;
         text(&input.goal)?;
