@@ -48,3 +48,11 @@
 ## 审查范围与状态
 
 本次直接核对核心域 `domain/mod.rs`、`domain/organization.rs`，`application/mod.rs`、`application/member_brief.rs`，`wex-core/src/lib.rs`、`wex-core/src/task.rs`，前端 `types.ts`、`Projects.tsx`，Tauri `main.rs`、`tool_approvals.rs`，`terminal_dispatch.rs`。**不是对仓库所有源码、历史分支和 SQL 迁移文件的穷尽扫描**。未运行编译、测试或 Windows 实机验收；本报告只登记已由源码佐证的语义耦合及迁移风险，不声称已经修复。
+
+## 2026-10-25 首批整改记录（部分完成）
+
+- **新增职责绑定对象**：`domain/agent_assignment.rs` 的 `AgentDutyAssignment {id, agent_id, project_id?, duty_id}` 是**明确不授予工具权限的工作分配元数据**。同一已有成员现在可新增多个不同项目职责及用户级 `secretary` 职责；允许扩展 duty ID。旧 `Agent.project_id/role/connection/model/conversation` 暂时保留，未声称完成彻底解耦。
+- **服务与 UI 接线**：新增 `DesktopService::assign_agent_duty`、Tauri `assign_agent_duty` 命令以及项目页试验性“关联已有成员职责”入口。服务验证实际成员及项目存在，拒绝重复职责记录与非法 ID。**该关联不创建新的项目工作会话、不赋予该项目资料可见权、不允许额外工具调用或跨项目施工**；真正的职责 ACL、Task 投影和 Dispatcher 仍待接通。
+- **数据兼容性**：`DesktopSnapshot.agent_duties` 以 `#[serde(default)]` 读取旧数据；新建 Agent 时登记原项目职责；SQLite `user_version` 从 4 升至 5，防止旧二进制静默丢失新字段。新旧持久数据读回、重复职责和非法值已增加源代码测试，但**本轮未执行 Cargo、CI 或 Windows 测试**。
+- **语义提示修正**：更新 `prepare_chat()` 的旧提示词，明确普通对话部分工具已接通而自动派工尚未接通；明确职责提示本身不是授权。
+- **尚未修复**：S01～S06 只是为身份/职责关系建立兼容桥，旧项目单属字段、固定 Role 和单一会话仍存在；S05 的 Lead 可见性投影、S07 Task 状态分裂、S08 序列聊天、S09～S12 工具/环境与记忆均未完成。不要把这些标为“已解决”。
