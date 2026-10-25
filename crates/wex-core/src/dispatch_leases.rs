@@ -124,4 +124,24 @@ mod tests {
         assert!(matches!(registry.acquire("agent", &[]), Err(LeaseError::InvalidScope)));
         assert!(matches!(registry.acquire("agent", &scopes(&["bad\npath"])), Err(LeaseError::InvalidScope)));
     }
+    #[test]
+    fn duplicate_scope_names_do_not_self_conflict() {
+        let registry = ResourceLeases::default();
+        let lease = registry.acquire("agent", &scopes(&["a", "a", "b"])).unwrap();
+        assert!(registry.is_busy("a").unwrap());
+        assert!(registry.is_busy("b").unwrap());
+        drop(lease);
+        assert!(!registry.is_busy("a").unwrap());
+    }
+
+    #[test]
+    fn cloned_registries_share_the_same_lock_state() {
+        let registry = ResourceLeases::default();
+        let other = registry.clone();
+        let lease = registry.acquire("agent_a", &scopes(&["shared"])).unwrap();
+        assert!(matches!(other.acquire("agent_b", &scopes(&["shared"])), Err(LeaseError::Busy)));
+        drop(lease);
+        assert!(other.acquire("agent_b", &scopes(&["shared"])).is_ok());
+    }
+
 }
