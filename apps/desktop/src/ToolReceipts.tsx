@@ -4,7 +4,7 @@ import { command, errorMessage } from './client';
 type Receipt = { operation_id:string; attempt_id:string; state:string; turn_id:string|null; content_digest:string|null;policy?:{capability_id:string;policy:string;revision:number}|null };
 const labels:Record<string,string>={in_flight:'待核查：已记录派发准备，尚无终态',succeeded:'执行成功（未独立核验）',failed:'执行失败',unknown:'结果未知，须先核查'};
 const policyLabels:Record<string,string>={automatic:'自动执行',ask:'询问后执行',block:'拦截'};
-const capabilityLabels:Record<string,string>={local_file_read:'本地文件读取',github_file_read:'GitHub 读取',github_file_create:'GitHub 新建',github_file_write:'GitHub 更新'};
+const capabilityLabels:Record<string,string>={local_file_read:'本地文件读取',local_file_create:'本地文件新建',github_file_read:'GitHub 读取',github_file_create:'GitHub 新建',github_file_write:'GitHub 更新'};
 export function ToolReceipts({conversationId,busy}:{conversationId:string;busy:boolean}) {
   const [selectedTurn,setSelectedTurn]=useState<string|null>(null);
   const [items,setItems]=useState<Receipt[]>([]);
