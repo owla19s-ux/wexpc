@@ -73,6 +73,24 @@ mod tests {
     use super::*;
     use wex_core::operation::OperationIntent;
     #[test]
+    fn git_diff_requires_distinct_approved_capability() {
+        let dispatch = Dispatch {
+            intent: OperationIntent {
+                id: "op".into(), actor_id: "agent".into(),
+                conversation_id: "conversation".into(), context_id: None,
+                connection_id: "local".into(), capability_id: "git_status".into(),
+                resource_id: "repo".into(), action: Action::Read,
+                expected_version: None, intent_digest: "a".repeat(64),
+            },
+            attempt_id: "attempt".into(),
+        };
+        assert_eq!(
+            approved_git_diff(&dispatch, "repo", Path::new("/unavailable"))
+                .unwrap_err().code, "DISPATCH_REJECTED"
+        );
+    }
+
+    #[test]
     fn refuses_unmatched_operation_before_spawning_git() {
         let dispatch = Dispatch {
             intent: OperationIntent {
