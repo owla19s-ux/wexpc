@@ -240,10 +240,15 @@ async fn send_message(
     stream: bool,
 ) -> Result<()> {
     let shared = state.inner().clone();
+    let reply_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法定位最终回复目录"))?
+        .join("chat-replies");
     let request = locked(&shared)?.prepare_chat(&conversation_id, prompt)?;
+    let backup_request = request.clone();
     // The SQLite mutex is released before network I/O. Each conversation can
     // progress independently; only one request at a time is admitted per session.
-    let turn_id = request.turn_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         let key = vault::read(&request.credential_ref)?;
         if stream {
@@ -268,14 +273,7 @@ async fn send_message(
             "请求线程中断，未自动重试",
         ))
     });
-    let mut app = locked(&shared)?;
-    match outcome {
-        Ok(response) => app.finish_chat(&turn_id, response),
-        Err(error) => {
-            app.fail_chat(&turn_id, &error)?;
-            Err(error)
-        }
-    }
+    settle_chat_result(&shared, &backup_request, &reply_root, outcome)
 }
 
 #[tauri::command]
@@ -300,12 +298,60 @@ fn tool_results(
     read_tool_results(&root.join("tool-results"), &conversation_id, &turn_id)
 }
 
+fn settle_chat_result(
+    shared: &Shared,
+    request: &PreparedChat,
+    root: &std::path::Path,
+    outcome: Result<String>,
+) -> Result<()> {
+    match outcome {
+        Ok(text) => locked(shared)?.finish_chat_with_backup(root, request, text),
+        Err(error) => {
+            locked(shared)?.fail_chat(&request.turn_id, &error)?;
+            Err(error)
+        }
+    }
+}
+fn saved_reply(
+    app: &tauri::AppHandle,
+    shared: &Shared,
+    conversation: &str,
+    turn: &str,
+) -> Result<Option<(String, String)>> {
+    let user = locked(shared)?.saved_reply_candidate(conversation, turn)?;
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ServiceError::new("SAVED_REPLY_ERROR", "无法定位最终回复目录"))?;
+    Ok(
+        read_chat_reply(&root.join("chat-replies"), conversation, turn, &user)?
+            .map(|text| (user, text)),
+    )
+}
+#[tauri::command]
+fn restore_saved_chat_reply(
+    app: tauri::AppHandle,
+    state: State<'_, Shared>,
+    conversation_id: String,
+    turn_id: String,
+) -> Result<()> {
+    let (user, text) = saved_reply(&app, &state, &conversation_id, &turn_id)?
+        .ok_or_else(|| ServiceError::new("NO_SAVED_REPLY", "没有已保存的最终回复"))?;
+    locked(&state)?.restore_saved_reply(&conversation_id, &turn_id, &user, text)
+}
+
 fn restored_reply(
     app: &tauri::AppHandle,
     shared: &Shared,
     conversation: &str,
     turn: &str,
 ) -> Result<(PreparedChat, Vec<wex_api::Message>)> {
+    if saved_reply(app, shared, conversation, turn)?.is_some() {
+        return Err(ServiceError::new(
+            "SAVED_REPLY_AVAILABLE",
+            "已有完整回复，请先本地恢复，不需要再次请求模型",
+        ));
+    }
     let current = locked(shared)?.tool_reply_candidate(conversation, turn)?;
     let root = app
         .path()
@@ -316,6 +362,7 @@ fn restored_reply(
 #[derive(serde::Serialize)]
 struct ReplyRecovery {
     available: bool,
+    mode: String,
     reason: String,
 }
 #[tauri::command]
@@ -325,13 +372,32 @@ fn tool_reply_recovery(
     conversation_id: String,
     turn_id: String,
 ) -> ReplyRecovery {
+    match saved_reply(&app, &state, &conversation_id, &turn_id) {
+        Ok(Some(_)) => {
+            return ReplyRecovery {
+                available: true,
+                mode: "local".into(),
+                reason: "已有完整回复，只恢复本地记录，不请求API，不依赖连接启用".into(),
+            }
+        }
+        Err(error) => {
+            return ReplyRecovery {
+                available: false,
+                mode: "none".into(),
+                reason: error.message,
+            }
+        }
+        Ok(None) => {}
+    }
     match restored_reply(&app, &state, &conversation_id, &turn_id) {
         Ok(_) => ReplyRecovery {
             available: true,
+            mode: "model".into(),
             reason: "将原上下文和已保存工具回执发回原连接恢复回复，不重新执行工具".into(),
         },
         Err(error) => ReplyRecovery {
             available: false,
+            mode: "none".into(),
             reason: error.message,
         },
     }
@@ -345,7 +411,13 @@ async fn resume_tool_reply(
 ) -> Result<()> {
     let shared = state.inner().clone();
     let (frozen, history) = restored_reply(&app, &shared, &conversation_id, &turn_id)?;
+    let reply_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ServiceError::new("SAVED_REPLY_ERROR", "无法定位最终回复目录"))?
+        .join("chat-replies");
     let request = locked(&shared)?.begin_tool_reply_resume(frozen)?;
+    let backup_request = request.clone();
     let guard = shared.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         locked(&guard)?.check_tool_reply_binding(&request)?;
@@ -365,14 +437,7 @@ async fn resume_tool_reply(
             "恢复请求中断，未重跑工具",
         ))
     });
-    let mut service = locked(&shared)?;
-    match outcome {
-        Ok(text) => service.finish_chat(&turn_id, text),
-        Err(error) => {
-            service.fail_chat(&turn_id, &error)?;
-            Err(error)
-        }
-    }
+    settle_chat_result(&shared, &backup_request, &reply_root, outcome)
 }
 
 fn main() {
@@ -410,6 +475,7 @@ fn main() {
             tool_results,
             tool_reply_recovery,
             resume_tool_reply,
+            restore_saved_chat_reply,
             retry_chat_result,
             create_space,
             create_group,
