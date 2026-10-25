@@ -39,6 +39,11 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"}},"required":["owner","repo","path"],"additionalProperties":false}"#.into(),
         });
         tools.push(ToolDefinition {
+            name: "github_create_file".into(),
+            description: "Create a new GitHub UTF-8 text file only if no file exists at that path, with separately approved exact bytes.".into(),
+            parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","content"],"additionalProperties":false}"#.into(),
+        });
+        tools.push(ToolDefinition {
             name: "github_write_file".into(),
             description: "Update an existing GitHub text file with its exact current blob SHA; user must review and approve all bytes.".into(),
             parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"sha":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","sha","content"],"additionalProperties":false}"#.into(),
@@ -55,7 +60,7 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             if matches!(call.name.as_str(), "git_status" | "cargo_test" | "cargo_fmt_check") {
                 return Ok((call.id.clone(), review_local_command(app, chat, call)?));
             }
-            if call.name == "github_read_file" || call.name == "github_write_file" {
+            if matches!(call.name.as_str(), "github_read_file" | "github_write_file" | "github_create_file") {
                 return Ok((call.id.clone(), review_github(app, chat, call)?));
             }
             if call.name != "read_file" {
@@ -101,6 +106,7 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
         "git_status" | "cargo_test" | "cargo_fmt_check" => &[],
         "github_read_file" if github_enabled => &["owner", "repo", "path"],
         "github_write_file" if github_enabled => &["owner", "repo", "path", "sha", "content"],
+        "github_create_file" if github_enabled => &["owner", "repo", "path", "content"],
         _ => return Err(ServiceError::new("TOOL_UNSUPPORTED", "工具当前不可用")),
     };
     if obj.len() != fields.len()
@@ -116,6 +122,9 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
             || (*field != "content" && value.chars().any(char::is_control)) {
             return Err(ServiceError::new("INVALID_INPUT", "工具参数包含空值或控制字符"));
         }
+    }
+    if call.name == "github_create_file" && obj.get("content").and_then(|v| v.as_str()).is_some_and(|v| v.len() > 4096) {
+        return Err(ServiceError::new("INVALID_INPUT", "GitHub 新文件内容超过上限"));
     }
     if call.name == "github_write_file" {
         let sha = obj.get("sha").and_then(|v| v.as_str()).unwrap_or_default();
