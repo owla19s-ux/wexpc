@@ -471,6 +471,21 @@ mod proposal_preflight_tests {
     }
 
     #[test]
+    fn github_create_is_distinct_from_versioned_update() {
+        let create = call(
+            "github_create_file",
+            r#"{"owner":"owner","repo":"repo","path":"new.txt","content":"new"}"#
+        );
+        assert_eq!(preflight_proposal(&create, false).unwrap_err().code, "TOOL_UNSUPPORTED");
+        assert!(preflight_proposal(&create, true).is_ok());
+        let wrong = call(
+            "github_create_file",
+            r#"{"owner":"owner","repo":"repo","path":"new.txt","sha":"abc","content":"new"}"#
+        );
+        assert_eq!(preflight_proposal(&wrong, true).unwrap_err().code, "INVALID_INPUT");
+    }
+
+    #[test]
     fn github_calls_require_enabled_connection_and_exact_schema() {
         let read = call("github_read_file", r#"{"owner":"a","repo":"b","path":"README.md"}"#);
         assert_eq!(preflight_proposal(&read, false).unwrap_err().code, "TOOL_UNSUPPORTED");
