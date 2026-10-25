@@ -1,4 +1,4 @@
-import type { DispatchAttempt, Snapshot, Task } from './types';
+import type { DispatchAttempt, Snapshot } from './types';
 
 // This is a read-only view of persisted task/dispatch facts, not a dispatcher.
 // In particular, "claimed" is not evidence that a tool ran or a task passed review.
