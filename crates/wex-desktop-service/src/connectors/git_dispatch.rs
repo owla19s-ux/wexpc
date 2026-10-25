@@ -36,10 +36,20 @@ fn is_git_override(key: &std::ffi::OsStr) -> bool {
 }
 
 fn sanitize_git_environment(command: &mut Command) {
-    for (key, _) in std::env::vars_os() {
-        if is_git_override(&key) {
-            command.env_remove(key);
-        }
+    // Remove overrides inherited from the parent and overrides explicitly
+    // configured on this Command (which take precedence over inheritance).
+    let mut names: Vec<_> = std::env::vars_os()
+        .map(|(key, _)| key)
+        .filter(|key| is_git_override(key))
+        .collect();
+    names.extend(
+        command
+            .get_envs()
+            .filter(|(key, _)| is_git_override(key))
+            .map(|(key, _)| key.to_os_string()),
+    );
+    for key in names {
+        command.env_remove(key);
     }
 }
 
@@ -157,6 +167,23 @@ mod tests {
         for name in ["GITHUB_TOKEN", "HOME", "PATH", "EDITOR"] {
             assert!(!is_git_override(OsStr::new(name)), "{name}");
         }
+    }
+
+    #[test]
+    fn sanitizer_removes_explicit_git_overrides_from_command() {
+        let mut cmd = Command::new("git");
+        cmd.env("GIT_DIR", "/other/repository")
+            .env("GIT_CONFIG_KEY_57", "core.fsmonitor")
+            .env("GIT_CONFIG_VALUE_57", "evil-program")
+            .env("UNRELATED_SETTING", "preserve");
+        sanitize_git_environment(&mut cmd);
+        let configured: Vec<_> = cmd.get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.is_some()))
+            .collect();
+        assert!(configured.iter().any(|(key, active)| key == "UNRELATED_SETTING" && *active));
+        assert!(configured.iter().all(|(key, active)| {
+            !is_git_override(std::ffi::OsStr::new(key)) || !active
+        }));
     }
 
     #[test]
