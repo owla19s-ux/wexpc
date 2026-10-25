@@ -81,6 +81,31 @@ fn run_with_history(
                 }
             }
         }
+        if policies.policy("local_file_create").is_ok_and(|setting|
+            setting.policy != wex_desktop_service::PolicyChoice::Block)
+        {
+            if let Ok(status) = crate::local_access::open(app, &chat.conversation_id)
+                .and_then(|store| crate::local_access::status(&store))
+            {
+                let directories: Vec<_> = status.directories.into_iter()
+                    .filter(|d| d.available && matches!(d.access,
+                        crate::local_access::Scope::Write | crate::local_access::Scope::ReadWrite))
+                    .collect();
+                if !directories.is_empty() {
+                    let ids: Vec<_> = directories.iter().map(|d| d.id.clone()).collect();
+                    tools.push(ToolDefinition {
+                        name: "create_authorized_file".into(),
+                        description: format!("Create a NEW direct UTF-8 text file in an explicitly write-authorized directory. Does not overwrite. Authorized directories: {}", serde_json::to_string(&directories).unwrap_or_default()),
+                        parameters_json: serde_json::json!({"type":"object","properties":{
+                            "directory_id":{"type":"string","enum":ids},
+                            "file_name":{"type":"string"},
+                            "content":{"type":"string"}},
+                            "required":["directory_id","file_name","content"],
+                            "additionalProperties":false}).to_string(),
+                    });
+                }
+            }
+        }
         for (name, description) in [
             (
                 "git_status",
@@ -155,6 +180,10 @@ fn run_with_history(
                 .iter()
                 .map(|call| {
                     let output: (String, String) = (|| -> Result<(String, String)> {
+                        if call.name == "create_authorized_file" {
+                            return Ok((call.id.clone(),
+                                review_saved_create(app, chat, call, &before_step, policies)?));
+                        }
                         if call.name == "read_authorized_file" {
                             return Ok((
                                 call.id.clone(),
@@ -287,6 +316,7 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     let fields: &[&str] = match call.name.as_str() {
         "read_file" => &["file_name"],
         "read_authorized_file" => &["directory_id", "file_name"],
+        "create_authorized_file" => &["directory_id", "file_name", "content"],
         "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check" => &[],
         "github_read_file" if github_enabled => &["owner", "repo", "path"],
         "github_write_file" if github_enabled => &["owner", "repo", "path", "sha", "content"],
@@ -316,7 +346,7 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
             ));
         }
     }
-    if matches!(call.name.as_str(), "read_file" | "read_authorized_file") {
+    if matches!(call.name.as_str(), "read_file" | "read_authorized_file" | "create_authorized_file") {
         let leaf = obj["file_name"].as_str().unwrap_or_default();
         if leaf.len() > 255
             || leaf == "."
@@ -329,6 +359,9 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
                 "当前读取工具仅支持目录内直接文件名",
             ));
         }
+    }
+    if call.name == "create_authorized_file" && obj["content"].as_str().is_some_and(|s| s.len() > 65536) {
+        return Err(ServiceError::new("INVALID_INPUT", "本地新建内容超出当前64KiB安全上限"));
     }
     if call.name == "github_create_file"
         && obj
