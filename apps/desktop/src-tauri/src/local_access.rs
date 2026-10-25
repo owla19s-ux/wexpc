@@ -328,6 +328,54 @@ mod tests {
     };
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     #[test]
+    fn core_bound_create_refuses_tampering_and_does_not_overwrite() {
+        let root = std::env::temp_dir().join(format!(
+            "wex-host-create-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&root).unwrap();
+        let private = root.join("private");
+        let docs = root.join("docs");
+        fs::create_dir(&private).unwrap();
+        fs::create_dir(&docs).unwrap();
+        let store = open_at(&private, "conv_A").unwrap();
+        let saved = store.authorize_directory(0, &docs, Access::Write).unwrap();
+        let dispatch = Dispatch {
+            intent: wex_core::operation::OperationIntent {
+                id: "op".into(),
+                actor_id: "assistant".into(),
+                conversation_id: "conv_A".into(),
+                context_id: None,
+                connection_id: "local".into(),
+                capability_id: "local_file_create".into(),
+                resource_id: saved.id.clone(),
+                action: Action::Write,
+                expected_version: None,
+                intent_digest: digest_arguments(
+                    "local_file_create",
+                    &saved.id,
+                    &[b"new.txt", b"approved content"],
+                ),
+            },
+            attempt_id: "attempt".into(),
+        };
+        assert_eq!(
+            create(&dispatch, &store, 1, "new.txt", "altered").unwrap_err().code,
+            "DISPATCH_REJECTED"
+        );
+        assert!(!docs.join("new.txt").exists());
+        assert!(create(&dispatch, &store, 1, "new.txt", "approved content").is_ok());
+        assert_eq!(fs::read(docs.join("new.txt")).unwrap(), b"approved content");
+        assert!(create(&dispatch, &store, 1, "new.txt", "approved content").is_err());
+        assert_eq!(fs::read(docs.join("new.txt")).unwrap(), b"approved content");
+        store.revoke(1, &saved.id).unwrap();
+        assert!(create(&dispatch, &store, 1, "new.txt", "approved content").is_err());
+        drop(store);
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
     fn conversation_stores_are_private_independent_and_live_revoke_blocks_saved_dispatch() {
         let root = std::env::temp_dir().join(format!(
             "wex-host-local-{}-{}",
