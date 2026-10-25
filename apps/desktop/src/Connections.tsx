@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { command } from './client';
+import { command, errorMessage } from './client';
 import type { AiConnection } from './types';
 import type { Run } from './App';
 
@@ -25,8 +25,8 @@ type GithubStatus = {configured:boolean;enabled:boolean};
 export function GithubConnection({run}:{run:Run}) {
   const [status,setStatus]=useState<GithubStatus|null>(null);
   const [failure,setFailure]=useState('');
-  const refresh=()=>command<GithubStatus>('github_status').then(setStatus).catch(e=>setFailure(String(e)));
-  useEffect(()=>{void refresh();},[]);
+  const refresh=()=>command<GithubStatus>('github_status').then(next=>{setStatus(next);setFailure('');}).catch(e=>{setStatus(null);setFailure(errorMessage(e));throw e;});
+  useEffect(()=>{void refresh().catch(()=>{});},[]);
   const save=(form:HTMLFormElement)=>{
     const token=String(new FormData(form).get('token')||'');
     const input=form.elements.namedItem('token') as HTMLInputElement;
@@ -45,6 +45,10 @@ export function GithubConnection({run}:{run:Run}) {
       await command('set_github_enabled',{enabled:!status.enabled});
       await refresh();
     })}>{status.enabled?'关闭 GitHub 全局访问':'启用 GitHub 全局访问'}</button>}
+    {status?.configured&&<button type="button" onClick={()=>{
+      if(!window.confirm('删除本机 GitHub 凭证并关闭 WEXPC 后续访问？已派发操作不会自动撤销；此操作不会使 GitHub 服务端的 Token 失效。'))return;
+      void run(async()=>{await command('revoke_github');await refresh();});
+    }}>删除本机 GitHub 凭证并关闭访问</button>}
     <p className="muted">开发测试阶段，总开关允许在 PAT 已授权的所有仓库范围内读写。各对话分别选择自动执行、询问后执行或拦截；总开关不扩展 PAT 权限。</p>
   </div>;
 }
