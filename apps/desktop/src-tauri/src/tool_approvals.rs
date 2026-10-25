@@ -1489,6 +1489,21 @@ mod proposal_preflight_tests {
     }
 
     #[test]
+    fn local_create_requires_exact_scope_and_no_traversal_or_extra_arguments() {
+        assert!(preflight_proposal(&call("create_authorized_file",
+            r#"{"directory_id":"saved","file_name":"new.rs","content":"fn main() {}"}"#), false).is_ok());
+        for bad in [
+            r#"{"directory_id":"saved","file_name":"../escape","content":"x"}"#,
+            r#"{"directory_id":"saved","file_name":"nested/file","content":"x"}"#,
+            r#"{"directory_id":"saved","file_name":"new.rs","content":"x","path":"/tmp/other"}"#,
+            r#"{"directory_id":"saved","file_name":"new.rs"}"#,
+        ] {
+            assert_eq!(preflight_proposal(&call("create_authorized_file", bad), false)
+                .unwrap_err().code, "INVALID_INPUT");
+        }
+    }
+
+    #[test]
     fn github_calls_require_enabled_connection_and_exact_schema() {
         let read = call(
             "github_read_file",
