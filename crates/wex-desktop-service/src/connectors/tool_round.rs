@@ -233,6 +233,21 @@ pub fn drive_tool_rounds_from_history(
                 assistant_text,
                 calls,
             } => {
+                // A resumed model may accidentally reuse an already-settled tool ID.
+                // Reject it before writing a pending checkpoint or dispatching any
+                // new operation, so restored and new receipts remain unambiguous.
+                let mut seen = std::collections::HashSet::new();
+                for message in &transcript {
+                    for old in &message.tool_calls {
+                        seen.insert(old.id.as_str());
+                    }
+                }
+                if calls.iter().any(|call| !seen.insert(call.id.as_str())) {
+                    return Err(ServiceError::new(
+                        "TOOL_CALL_ID_REUSED",
+                        "新工具调用标识与历史回执冲突；本轮未派发新操作",
+                    ));
+                }
                 // A tool dispatch must leave a model request to consume its receipt.
                 // Never execute the final step's proposal and then report a bare limit error.
                 ensure_followup_budget(model_step_index)?;
