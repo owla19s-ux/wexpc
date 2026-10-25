@@ -77,6 +77,37 @@ pub fn validate_ticket(board: &TaskBoard, ticket: &DispatchTicket) -> Result<(),
     Ok(())
 }
 
+
+#[derive(Debug)]
+pub struct DispatchGuard {
+    pub ticket: DispatchTicket,
+    pub lease: ResourceLease,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DispatchStartError {
+    Refused(DispatchRefusal),
+    Lease(LeaseError),
+}
+
+/// Reserve scopes atomically and recheck assignment under the resource lease.
+/// The Host must still persist Running and recheck tool authority before I/O.
+pub fn reserve(
+    board: &TaskBoard,
+    leases: &ResourceLeases,
+    task_id: &str,
+    project_id: &str,
+    agent_id: &str,
+    epoch: u64,
+    scopes: &[String],
+) -> Result<DispatchGuard, DispatchStartError> {
+    let ticket = admit(board, task_id, project_id, agent_id, epoch, true)
+        .map_err(DispatchStartError::Refused)?;
+    let lease = leases.acquire(agent_id, scopes).map_err(DispatchStartError::Lease)?;
+    validate_ticket(board, &ticket).map_err(DispatchStartError::Refused)?;
+    Ok(DispatchGuard { ticket, lease })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
