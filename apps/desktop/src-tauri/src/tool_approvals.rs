@@ -1,7 +1,7 @@
 //! Trusted desktop-only approval bridge for the initial local read tool.
 /// Selecting the exact file in a native picker is the per-call user approval.
 /// No Space/project association can grant access. Nothing is auto-retried.
-use std::{fs, io::Write};
+use std::fs;
 use tauri::{AppHandle, Manager};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use wex_api::ToolDefinition;
@@ -10,8 +10,8 @@ use wex_core::{
     operation::{Action, ExecutionChecks, OperationIntent, OperationLedger, Outcome},
 };
 use wex_desktop_service::{
-    digest_arguments, drive_tool_rounds, read_approved_file, PreparedChat,
-    Result, ServiceError, ToolProposal,
+    digest_arguments, drive_tool_rounds, read_approved_file, PreparedChat, Result, ServiceError,
+    ToolProposal,
 };
 use wex_local_resources::{DirectoryRegistry, Protection};
 
@@ -23,14 +23,28 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
     };
     let mut tools = vec![tool];
     for (name, description) in [
-        ("git_status", "Read Git status of a repository selected by the user."),
-        ("git_diff", "Read the current unstaged Git diff without executing external diff helpers."),
-        ("cargo_test", "Run cargo test --workspace --locked only after explicit per-run approval."),
-        ("cargo_fmt_check", "Run cargo fmt --all -- --check after explicit per-run approval."),
+        (
+            "git_status",
+            "Read Git status of a repository selected by the user.",
+        ),
+        (
+            "git_diff",
+            "Read the current unstaged Git diff without executing external diff helpers.",
+        ),
+        (
+            "cargo_test",
+            "Run cargo test --workspace --locked only after explicit per-run approval.",
+        ),
+        (
+            "cargo_fmt_check",
+            "Run cargo fmt --all -- --check after explicit per-run approval.",
+        ),
     ] {
         tools.push(ToolDefinition {
-            name: name.into(), description: description.into(),
-            parameters_json: r#"{"type":"object","properties":{},"additionalProperties":false}"#.into(),
+            name: name.into(),
+            description: description.into(),
+            parameters_json: r#"{"type":"object","properties":{},"additionalProperties":false}"#
+                .into(),
         });
     }
     if crate::github_config::status(app)?.enabled {
@@ -57,33 +71,52 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             preflight_proposal(call, crate::github_config::status(app)?.enabled)?;
         }
         let mut completed = 0usize;
-        let result = calls.iter().map(|call| {
-            if matches!(call.name.as_str(), "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check") {
-                return Ok((call.id.clone(), review_local_command(app, chat, call)?));
-            }
-            if matches!(call.name.as_str(), "github_read_file" | "github_write_file" | "github_create_file") {
-                return Ok((call.id.clone(), review_github(app, chat, call)?));
-            }
-            if call.name != "read_file" {
-                return Err(ServiceError::new("TOOL_UNSUPPORTED", "模型请求了未提供的工具"));
-            }
-            let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
-                .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数无法解析"))?;
-            let leaf = value.get("file_name").and_then(|v| v.as_str())
-                .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
-            if value.as_object().is_none_or(|v| v.len() != 1)
-                || leaf.is_empty() || leaf.len() > 255
-                || leaf.contains('/') || leaf.contains('\\')
-                || leaf.chars().any(char::is_control)
-            {
-                return Err(ServiceError::new("INVALID_INPUT", "工具只能请求单个文件名"));
-            }
-            let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
-            let result = serde_json::json!({"content":content,"evidence_ref":evidence_ref});
-            Ok((call.id.clone(), result.to_string()))
-        }).inspect(|item| {
-            if item.is_ok() { completed += 1; }
-        }).collect::<Result<Vec<_>>>();
+        let result = calls
+            .iter()
+            .map(|call| {
+                if matches!(
+                    call.name.as_str(),
+                    "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check"
+                ) {
+                    return Ok((call.id.clone(), review_local_command(app, chat, call)?));
+                }
+                if matches!(
+                    call.name.as_str(),
+                    "github_read_file" | "github_write_file" | "github_create_file"
+                ) {
+                    return Ok((call.id.clone(), review_github(app, chat, call)?));
+                }
+                if call.name != "read_file" {
+                    return Err(ServiceError::new(
+                        "TOOL_UNSUPPORTED",
+                        "模型请求了未提供的工具",
+                    ));
+                }
+                let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
+                    .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数无法解析"))?;
+                let leaf = value
+                    .get("file_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
+                if value.as_object().is_none_or(|v| v.len() != 1)
+                    || leaf.is_empty()
+                    || leaf.len() > 255
+                    || leaf.contains('/')
+                    || leaf.contains('\\')
+                    || leaf.chars().any(char::is_control)
+                {
+                    return Err(ServiceError::new("INVALID_INPUT", "工具只能请求单个文件名"));
+                }
+                let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
+                let result = serde_json::json!({"content":content,"evidence_ref":evidence_ref});
+                Ok((call.id.clone(), result.to_string()))
+            })
+            .inspect(|item| {
+                if item.is_ok() {
+                    completed += 1;
+                }
+            })
+            .collect::<Result<Vec<_>>>();
         result.map_err(|error| {
             if completed == 0 {
                 error
@@ -100,7 +133,8 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
 fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数不是有效 JSON"))?;
-    let obj = args.as_object()
+    let obj = args
+        .as_object()
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "工具参数必须是对象"))?;
     let fields: &[&str] = match call.name.as_str() {
         "read_file" => &["file_name"],
@@ -112,126 +146,224 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     };
     if obj.len() != fields.len()
         || fields.iter().any(|field| {
-            !obj.get(*field).is_some_and(|value| value.as_str().is_some())
+            !obj.get(*field)
+                .is_some_and(|value| value.as_str().is_some())
         })
     {
-        return Err(ServiceError::new("INVALID_INPUT", "工具参数字段与声明不一致"));
+        return Err(ServiceError::new(
+            "INVALID_INPUT",
+            "工具参数字段与声明不一致",
+        ));
     }
     for field in fields {
         let value = obj.get(*field).and_then(|v| v.as_str()).unwrap_or_default();
-        if (*field != "content" && value.is_empty()) || value.contains('\0')
-            || (*field != "content" && value.chars().any(char::is_control)) {
-            return Err(ServiceError::new("INVALID_INPUT", "工具参数包含空值或控制字符"));
+        if (*field != "content" && value.is_empty())
+            || value.contains('\0')
+            || (*field != "content" && value.chars().any(char::is_control))
+        {
+            return Err(ServiceError::new(
+                "INVALID_INPUT",
+                "工具参数包含空值或控制字符",
+            ));
         }
     }
-    if call.name == "github_create_file" && obj.get("content").and_then(|v| v.as_str()).is_some_and(|v| v.len() > 4096) {
-        return Err(ServiceError::new("INVALID_INPUT", "GitHub 新文件内容超过上限"));
+    if call.name == "github_create_file"
+        && obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .is_some_and(|v| v.len() > 4096)
+    {
+        return Err(ServiceError::new(
+            "INVALID_INPUT",
+            "GitHub 新文件内容超过上限",
+        ));
     }
     if call.name == "github_write_file" {
         let sha = obj.get("sha").and_then(|v| v.as_str()).unwrap_or_default();
-        let content = obj.get("content").and_then(|v| v.as_str()).unwrap_or_default();
+        let content = obj
+            .get("content")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default();
         if sha.len() != 40 || !sha.bytes().all(|c| c.is_ascii_hexdigit()) || content.len() > 4096 {
-            return Err(ServiceError::new("INVALID_INPUT", "GitHub 写入版本或大小不合法"));
+            return Err(ServiceError::new(
+                "INVALID_INPUT",
+                "GitHub 写入版本或大小不合法",
+            ));
         }
     }
     Ok(())
 }
 
 fn review_and_read(app: &AppHandle, chat: &PreparedChat, leaf: &str) -> Result<(String, String)> {
-    let selected = app.dialog().file()
-        .set_title(format!("WEXPC 请求读取文件「{leaf}」：请选择同名文件以批准本次读取"))
+    let selected = app
+        .dialog()
+        .file()
+        .set_title(format!(
+            "WEXPC 请求读取文件「{leaf}」：请选择同名文件以批准本次读取"
+        ))
         .blocking_pick_file()
         .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "用户未批准读取文件"))?;
-    let path = selected.into_path()
+    let path = selected
+        .into_path()
         .map_err(|_| ServiceError::new("INVALID_INPUT", "选择的文件位置不可用"))?;
     if path.file_name().and_then(|v| v.to_str()) != Some(leaf) {
-        return Err(ServiceError::new("PERMISSION_DENIED", "选择文件与模型提议不一致"));
+        return Err(ServiceError::new(
+            "PERMISSION_DENIED",
+            "选择文件与模型提议不一致",
+        ));
     }
-    let parent = path.parent().ok_or_else(|| ServiceError::new("INVALID_INPUT", "文件目录无效"))?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "文件目录无效"))?;
     let mut registry = DirectoryRegistry::new();
-    let internal = app.path().app_data_dir()
+    let internal = app
+        .path()
+        .app_data_dir()
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法确定应用数据目录"))?;
-    let directory_id = registry.register_with_exclusions(
-        parent, Protection::Protected, &[internal.as_path()],
-    )
+    let directory_id = registry
+        .register_with_exclusions(parent, Protection::Protected, &[internal.as_path()])
         .map_err(|_| ServiceError::new("RESOURCE_UNAVAILABLE", "无法安全注册所选目录"))?;
     let operation_id = format!("op_{}", uuid::Uuid::new_v4().simple());
     let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
     let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
     let intent = OperationIntent {
-        id: operation_id.clone(), actor_id: "assistant".into(),
-        conversation_id: chat.conversation_id.clone(), context_id: None,
-        connection_id: "local".into(), capability_id: "local_file_read".into(),
-        resource_id: directory_id.clone(), action: Action::Read,
+        id: operation_id.clone(),
+        actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(),
+        context_id: None,
+        connection_id: "local".into(),
+        capability_id: "local_file_read".into(),
+        resource_id: directory_id.clone(),
+        action: Action::Read,
         expected_version: None,
         intent_digest: digest_arguments("local_file_read", &directory_id, &[leaf.as_bytes()]),
     };
     let mut ledger = OperationLedger::default();
     ledger.propose(intent.clone()).map_err(|_| core_failure())?;
-    ledger.approve(&operation_id, &intent, 1).map_err(|_| core_failure())?;
-    let dispatch = ledger.begin(&operation_id, &attempt_id, ExecutionChecks {
-        authority_revision: 1,
-        connection_enabled: true, authenticated: true,
-        platform_available: wex_local_resources::platform_supported(),
-        resource_allowed: true,
-    }).map_err(|_| core_failure())?;
+    ledger
+        .approve(&operation_id, &intent, 1)
+        .map_err(|_| core_failure())?;
+    let dispatch = ledger
+        .begin(
+            &operation_id,
+            &attempt_id,
+            ExecutionChecks {
+                authority_revision: 1,
+                connection_enabled: true,
+                authenticated: true,
+                platform_available: wex_local_resources::platform_supported(),
+                resource_allowed: true,
+            },
+        )
+        .map_err(|_| core_failure())?;
     // A durable "in flight" marker must exist BEFORE touching the file.
-    journal(app, &attempt_id, &operation_id, "in_flight", None)?;
+    journal(app, chat, &attempt_id, &operation_id, "in_flight", None)?;
     let grants = [DirectoryGrant {
-        directory_id: &directory_id, access: Access::Read, explicit_personal: true,
+        directory_id: &directory_id,
+        access: Access::Read,
+        explicit_personal: true,
     }];
     let content = read_approved_file(&dispatch, &registry, leaf, true, &grants);
-    let receipt_digest = content.as_ref().ok()
+    let receipt_digest = content
+        .as_ref()
+        .ok()
         .map(|body| digest_arguments("tool_receipt", &evidence_id, &[body.as_bytes()]));
-    journal(app, &attempt_id, &operation_id,
-        if content.is_ok() { "succeeded" } else { "failed" },
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        if content.is_ok() {
+            "succeeded"
+        } else {
+            "failed"
+        },
         receipt_digest.as_deref(),
     )?;
     let outcome = if content.is_ok() {
-        Outcome::Succeeded { evidence_ref: evidence_id.clone() }
+        Outcome::Succeeded {
+            evidence_ref: evidence_id.clone(),
+        }
     } else {
-        Outcome::Failed { evidence_ref: evidence_id.clone() }
+        Outcome::Failed {
+            evidence_ref: evidence_id.clone(),
+        }
     };
-    ledger.finish(&operation_id, &attempt_id, outcome).map_err(|_| core_failure())?;
+    ledger
+        .finish(&operation_id, &attempt_id, outcome)
+        .map_err(|_| core_failure())?;
     content.map(|body| (body, evidence_id))
 }
 
-
 /// The user chooses the target repository each time. No AI-supplied cwd,
 /// shell expression or arbitrary argument enters the subprocess.
-fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> Result<String> {
+fn review_local_command(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    call: &ToolProposal,
+) -> Result<String> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "命令参数无效"))?;
     if !args.as_object().is_some_and(|o| o.is_empty()) {
-        return Err(ServiceError::new("INVALID_INPUT", "当前命令不接受模型提供的参数"));
+        return Err(ServiceError::new(
+            "INVALID_INPUT",
+            "当前命令不接受模型提供的参数",
+        ));
     }
     let (capability, action, command) = match call.name.as_str() {
-        "git_status" => ("git_status", Action::Read, "git --no-optional-locks status --porcelain=v1 -uno"),
-        "git_diff" => ("git_diff", Action::Read, "git diff --no-ext-diff --no-textconv --"),
-        "cargo_test" => ("terminal_cargo_test", Action::Write, "cargo test --workspace --locked"),
-        "cargo_fmt_check" => ("terminal_cargo_fmt_check", Action::Write, "cargo fmt --all -- --check"),
+        "git_status" => (
+            "git_status",
+            Action::Read,
+            "git --no-optional-locks status --porcelain=v1 -uno",
+        ),
+        "git_diff" => (
+            "git_diff",
+            Action::Read,
+            "git diff --no-ext-diff --no-textconv --",
+        ),
+        "cargo_test" => (
+            "terminal_cargo_test",
+            Action::Write,
+            "cargo test --workspace --locked",
+        ),
+        "cargo_fmt_check" => (
+            "terminal_cargo_fmt_check",
+            Action::Write,
+            "cargo fmt --all -- --check",
+        ),
         _ => return Err(ServiceError::new("TOOL_UNSUPPORTED", "不支持的命令")),
     };
-    let selected = app.dialog().file()
+    let selected = app
+        .dialog()
+        .file()
         .set_title(format!("WEXPC 请求执行 {command}：请选择仓库目录"))
         .blocking_pick_folder()
         .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "未选择授权仓库目录"))?;
-    let root = selected.into_path()
+    let root = selected
+        .into_path()
         .map_err(|_| ServiceError::new("INVALID_INPUT", "仓库位置不可用"))?;
     let root = fs::canonicalize(root)
         .map_err(|_| ServiceError::new("RESOURCE_UNAVAILABLE", "无法验证仓库目录"))?;
-    let internal = app.path().app_data_dir()
+    let internal = app
+        .path()
+        .app_data_dir()
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "应用数据目录不可用"))?;
     if root.starts_with(&internal) {
-        return Err(ServiceError::new("PERMISSION_DENIED", "禁止执行于 WEXPC 内部数据目录"));
+        return Err(ServiceError::new(
+            "PERMISSION_DENIED",
+            "禁止执行于 WEXPC 内部数据目录",
+        ));
     }
-    let cwd = root.to_str().ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码不支持"))?;
+    let cwd = root
+        .to_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码不支持"))?;
     let extra = if action == Action::Write {
         "注意：Cargo 构建可能执行仓库自身的构建脚本，仅在信任此代码时批准。"
     } else {
         "仅查询 Git 状态，不执行提交或推送。"
     };
-    let approved = app.dialog()
+    let approved = app
+        .dialog()
         .message(format!("请求执行：{command}\n工作目录：{cwd}\n{extra}"))
         .title("WEXPC 终端操作逐次审批")
         .buttons(MessageDialogButtons::OkCancel)
@@ -244,21 +376,46 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
     let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
     let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
     let intent = OperationIntent {
-        id: operation_id.clone(), actor_id: "assistant".into(),
-        conversation_id: chat.conversation_id.clone(), context_id: None,
-        connection_id: "terminal".into(), capability_id: capability.into(),
-        resource_id: resource_id.clone(), action, expected_version: None,
+        id: operation_id.clone(),
+        actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(),
+        context_id: None,
+        connection_id: "terminal".into(),
+        capability_id: capability.into(),
+        resource_id: resource_id.clone(),
+        action,
+        expected_version: None,
         intent_digest: digest_arguments(capability, &resource_id, &[cwd.as_bytes()]),
     };
     let mut ledger = OperationLedger::default();
     ledger.propose(intent.clone()).map_err(|_| core_failure())?;
-    ledger.approve(&operation_id, &intent, 1).map_err(|_| core_failure())?;
-    let dispatch = ledger.begin(&operation_id, &attempt_id, ExecutionChecks {
-        authority_revision: 1, connection_enabled: true, authenticated: true,
-        platform_available: true, resource_allowed: true,
-    }).map_err(|_| core_failure())?;
-    journal(app, &attempt_id, &operation_id, "in_flight", Some(&intent.intent_digest))?;
-    let outcome: Result<(bool, Option<i32>, String)> = if call.name == "git_status" || call.name == "git_diff" {
+    ledger
+        .approve(&operation_id, &intent, 1)
+        .map_err(|_| core_failure())?;
+    let dispatch = ledger
+        .begin(
+            &operation_id,
+            &attempt_id,
+            ExecutionChecks {
+                authority_revision: 1,
+                connection_enabled: true,
+                authenticated: true,
+                platform_available: true,
+                resource_allowed: true,
+            },
+        )
+        .map_err(|_| core_failure())?;
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        "in_flight",
+        Some(&intent.intent_digest),
+    )?;
+    let outcome: Result<(bool, Option<i32>, String)> = if call.name == "git_status"
+        || call.name == "git_diff"
+    {
         if call.name == "git_diff" {
             wex_desktop_service::approved_git_diff(&dispatch, &resource_id, &root)
                 .map(|text| (true, None, text))
@@ -272,9 +429,8 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
         } else {
             wex_desktop_service::TerminalTask::CargoFmtCheck
         };
-        wex_desktop_service::execute_approved_terminal_report(
-            &dispatch, &resource_id, &root, task
-        ).map(|report| (report.success, report.exit_code, report.output))
+        wex_desktop_service::execute_approved_terminal_report(&dispatch, &resource_id, &root, task)
+            .map(|report| (report.success, report.exit_code, report.output))
     };
     let status = match &outcome {
         Ok((true, _, _)) => "succeeded",
@@ -282,16 +438,30 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
         Err(e) if e.code == "OUTCOME_UNKNOWN" || e.code == "TOOL_TIMEOUT" => "unknown",
         Err(_) => "failed",
     };
-    let evidence_hash = outcome.as_ref().ok().map(|(_, _, value)|
-        digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()])
-    );
-    journal(app, &attempt_id, &operation_id, status, evidence_hash.as_deref())?;
+    let evidence_hash = outcome
+        .as_ref()
+        .ok()
+        .map(|(_, _, value)| digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()]));
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        status,
+        evidence_hash.as_deref(),
+    )?;
     let core_outcome = match status {
-        "succeeded" => Outcome::Succeeded { evidence_ref: evidence_id.clone() },
+        "succeeded" => Outcome::Succeeded {
+            evidence_ref: evidence_id.clone(),
+        },
         "unknown" => Outcome::Unknown,
-        _ => Outcome::Failed { evidence_ref: evidence_id.clone() },
+        _ => Outcome::Failed {
+            evidence_ref: evidence_id.clone(),
+        },
     };
-    ledger.finish(&operation_id, &attempt_id, core_outcome).map_err(|_| core_failure())?;
+    ledger
+        .finish(&operation_id, &attempt_id, core_outcome)
+        .map_err(|_| core_failure())?;
     let (success, exit_code, result) = outcome?;
     Ok(serde_json::json!({"evidence_ref":evidence_id,"success":success,"exit_code":exit_code,"output":result}).to_string())
 }
@@ -302,7 +472,9 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "GitHub 工具参数无效"))?;
     fn field<'a>(value: &'a serde_json::Value, name: &str) -> Result<&'a str> {
-        value.get(name).and_then(|v| v.as_str())
+        value
+            .get(name)
+            .and_then(|v| v.as_str())
             .ok_or_else(|| ServiceError::new("INVALID_INPUT", "GitHub 缺少必要参数"))
     }
     let owner = field(&args, "owner")?;
@@ -311,16 +483,27 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     let write = call.name == "github_write_file";
     let create = call.name == "github_create_file";
     let sha = if write { field(&args, "sha")? } else { "" };
-    let content = if write || create { field(&args, "content")? } else { "" };
-    if owner.is_empty() || repo.is_empty() || path.is_empty()
-        || owner.len() > 255 || repo.len() > 255 || path.len() > 4096
+    let content = if write || create {
+        field(&args, "content")?
+    } else {
+        ""
+    };
+    if owner.is_empty()
+        || repo.is_empty()
+        || path.is_empty()
+        || owner.len() > 255
+        || repo.len() > 255
+        || path.len() > 4096
         || owner.chars().any(char::is_control)
         || repo.chars().any(char::is_control)
         || path.chars().any(char::is_control)
         || (write && (sha.len() != 40 || content.len() > 4096))
         || (create && content.len() > 4096)
     {
-        return Err(ServiceError::new("INVALID_INPUT", "GitHub 审批参数或文件内容超过限制"));
+        return Err(ServiceError::new(
+            "INVALID_INPUT",
+            "GitHub 审批参数或文件内容超过限制",
+        ));
     }
     let summary = if write {
         format!("WEXPC 请求修改 GitHub 文件\n仓库：{owner}/{repo}（默认分支）\n文件：{path}\n原 SHA：{sha}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
@@ -329,21 +512,51 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     } else {
         format!("WEXPC 请求读取 GitHub 文件\n仓库：{owner}/{repo}（默认分支）\n文件：{path}")
     };
-    let approved = app.dialog().message(summary)
+    let approved = app
+        .dialog()
+        .message(summary)
         .title("逐次 GitHub 工具授权")
         .buttons(MessageDialogButtons::OkCancel)
         .blocking_show();
     if !approved {
-        return Err(ServiceError::new("PERMISSION_DENIED", "用户拒绝 GitHub 操作"));
+        return Err(ServiceError::new(
+            "PERMISSION_DENIED",
+            "用户拒绝 GitHub 操作",
+        ));
     }
     let token = crate::github_config::credential(app)?;
-    let resource_id = digest_arguments("github_repo", "global", &[owner.as_bytes(), repo.as_bytes()]);
-    let capability = if write { "github_file_write" } else if create { "github_file_create" } else { "github_file_read" };
-    let action = if write || create { Action::Write } else { Action::Read };
-    let parameters: Vec<&[u8]> = if write {
-        vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes(), sha.as_bytes(), content.as_bytes()]
+    let resource_id = digest_arguments(
+        "github_repo",
+        "global",
+        &[owner.as_bytes(), repo.as_bytes()],
+    );
+    let capability = if write {
+        "github_file_write"
     } else if create {
-        vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes(), content.as_bytes()]
+        "github_file_create"
+    } else {
+        "github_file_read"
+    };
+    let action = if write || create {
+        Action::Write
+    } else {
+        Action::Read
+    };
+    let parameters: Vec<&[u8]> = if write {
+        vec![
+            owner.as_bytes(),
+            repo.as_bytes(),
+            path.as_bytes(),
+            sha.as_bytes(),
+            content.as_bytes(),
+        ]
+    } else if create {
+        vec![
+            owner.as_bytes(),
+            repo.as_bytes(),
+            path.as_bytes(),
+            content.as_bytes(),
+        ]
     } else {
         vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes()]
     };
@@ -351,32 +564,72 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
     let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
     let intent = OperationIntent {
-        id: operation_id.clone(), actor_id: "assistant".into(),
-        conversation_id: chat.conversation_id.clone(), context_id: None,
-        connection_id: "github".into(), capability_id: capability.into(),
-        resource_id: resource_id.clone(), action,
+        id: operation_id.clone(),
+        actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(),
+        context_id: None,
+        connection_id: "github".into(),
+        capability_id: capability.into(),
+        resource_id: resource_id.clone(),
+        action,
         expected_version: if write { Some(sha.into()) } else { None },
         intent_digest: digest_arguments(capability, &resource_id, &parameters),
     };
     let mut ledger = OperationLedger::default();
     ledger.propose(intent.clone()).map_err(|_| core_failure())?;
-    ledger.approve(&operation_id, &intent, 1).map_err(|_| core_failure())?;
-    let dispatch = ledger.begin(&operation_id, &attempt_id, ExecutionChecks {
-        authority_revision: 1, connection_enabled: true,
-        authenticated: true, platform_available: true, resource_allowed: true,
-    }).map_err(|_| core_failure())?;
-    journal(app, &attempt_id, &operation_id, "in_flight", Some(&intent.intent_digest))?;
+    ledger
+        .approve(&operation_id, &intent, 1)
+        .map_err(|_| core_failure())?;
+    let dispatch = ledger
+        .begin(
+            &operation_id,
+            &attempt_id,
+            ExecutionChecks {
+                authority_revision: 1,
+                connection_enabled: true,
+                authenticated: true,
+                platform_available: true,
+                resource_allowed: true,
+            },
+        )
+        .map_err(|_| core_failure())?;
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        "in_flight",
+        Some(&intent.intent_digest),
+    )?;
     let outcome = if write {
         wex_desktop_service::update_approved_github_file(
-            &dispatch, &resource_id, owner, repo, path, sha, content.as_bytes(), &token,
+            &dispatch,
+            &resource_id,
+            owner,
+            repo,
+            path,
+            sha,
+            content.as_bytes(),
+            &token,
         )
     } else if create {
         wex_desktop_service::create_approved_github_file(
-            &dispatch, &resource_id, owner, repo, path, content.as_bytes(), &token,
+            &dispatch,
+            &resource_id,
+            owner,
+            repo,
+            path,
+            content.as_bytes(),
+            &token,
         )
     } else {
         wex_desktop_service::read_approved_github_file(
-            &dispatch, &resource_id, owner, repo, path, &token,
+            &dispatch,
+            &resource_id,
+            owner,
+            repo,
+            path,
+            &token,
         )
     };
     let status = match &outcome {
@@ -384,16 +637,30 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
         Err(error) if error.code == "OUTCOME_UNKNOWN" => "unknown",
         Err(_) => "failed",
     };
-    let evidence_hash = outcome.as_ref().ok().map(|value|
-        digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()])
-    );
-    journal(app, &attempt_id, &operation_id, status, evidence_hash.as_deref())?;
+    let evidence_hash = outcome
+        .as_ref()
+        .ok()
+        .map(|value| digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()]));
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        status,
+        evidence_hash.as_deref(),
+    )?;
     let core_outcome = match status {
-        "succeeded" => Outcome::Succeeded { evidence_ref: evidence_id.clone() },
+        "succeeded" => Outcome::Succeeded {
+            evidence_ref: evidence_id.clone(),
+        },
         "unknown" => Outcome::Unknown,
-        _ => Outcome::Failed { evidence_ref: evidence_id.clone() },
+        _ => Outcome::Failed {
+            evidence_ref: evidence_id.clone(),
+        },
     };
-    ledger.finish(&operation_id, &attempt_id, core_outcome).map_err(|_| core_failure())?;
+    ledger
+        .finish(&operation_id, &attempt_id, core_outcome)
+        .map_err(|_| core_failure())?;
     let body = outcome?;
     Ok(serde_json::json!({"evidence_ref": evidence_id, "result":body}).to_string())
 }
@@ -402,28 +669,31 @@ fn core_failure() -> ServiceError {
     ServiceError::new("OPERATION_STATE_ERROR", "Core 审批或派发状态无效")
 }
 
-/// Crash-safe per-attempt marker; records metadata/digest only, no file bytes.
-fn journal(app: &AppHandle, attempt: &str, operation: &str, status: &str, digest: Option<&str>) -> Result<()> {
-    let root = app.path().app_data_dir()
+/// Persist bound execution metadata before dispatch and before returning a result.
+fn journal(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    attempt: &str,
+    operation: &str,
+    status: &str,
+    digest: Option<&str>,
+) -> Result<()> {
+    let root = app
+        .path()
+        .app_data_dir()
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法定位工具回执目录"))?
         .join("tool-receipts");
-    fs::create_dir_all(&root)
-        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法创建工具回执目录"))?;
-    let temp = root.join(format!("{attempt}_{}.tmp", uuid::Uuid::new_v4().simple()));
-    // Append-only state markers avoid replacing a receipt file on Windows.
-    let destination = root.join(format!("{attempt}_{status}.json"));
-    let value = serde_json::json!({
-        "operation_id":operation, "attempt_id":attempt, "state":status,
-        "content_digest":digest,
-    });
-    let mut file = fs::OpenOptions::new().write(true).create_new(true)
-        .open(&temp).map_err(|_| ServiceError::new("STORAGE_ERROR", "无法开始记录回执"))?;
-    file.write_all(value.to_string().as_bytes())
-        .and_then(|_| file.sync_all())
-        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法持久化工具回执"))?;
-    fs::rename(&temp, &destination)
-        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法提交工具回执"))?;
-    Ok(())
+    wex_desktop_service::append_tool_marker(
+        &root,
+        &wex_desktop_service::ToolReceiptMarker {
+            operation_id: operation.into(),
+            attempt_id: attempt.into(),
+            state: status.into(),
+            content_digest: digest.map(str::to_owned),
+            conversation_id: Some(chat.conversation_id.clone()),
+            turn_id: Some(chat.turn_id.clone()),
+        },
+    )
 }
 
 #[cfg(test)]
@@ -443,17 +713,20 @@ mod proposal_preflight_tests {
         assert!(preflight_proposal(&call("git_status", "{}"), false).is_ok());
         assert_eq!(
             preflight_proposal(&call("cargo_test", r#"{"command":"shell"}"#), false)
-                .unwrap_err().code,
+                .unwrap_err()
+                .code,
             "INVALID_INPUT"
         );
         assert_eq!(
             preflight_proposal(&call("read_file", "{}"), false)
-                .unwrap_err().code,
+                .unwrap_err()
+                .code,
             "INVALID_INPUT"
         );
         assert_eq!(
             preflight_proposal(&call("unknown", "{}"), false)
-                .unwrap_err().code,
+                .unwrap_err()
+                .code,
             "TOOL_UNSUPPORTED"
         );
     }
@@ -472,7 +745,8 @@ mod proposal_preflight_tests {
         });
         assert_eq!(
             preflight_proposal(&call("github_write_file", &bad.to_string()), true)
-                .unwrap_err().code,
+                .unwrap_err()
+                .code,
             "INVALID_INPUT"
         );
     }
@@ -481,23 +755,41 @@ mod proposal_preflight_tests {
     fn github_create_is_distinct_from_versioned_update() {
         let create = call(
             "github_create_file",
-            r#"{"owner":"owner","repo":"repo","path":"new.txt","content":"new"}"#
+            r#"{"owner":"owner","repo":"repo","path":"new.txt","content":"new"}"#,
         );
-        assert_eq!(preflight_proposal(&create, false).unwrap_err().code, "TOOL_UNSUPPORTED");
+        assert_eq!(
+            preflight_proposal(&create, false).unwrap_err().code,
+            "TOOL_UNSUPPORTED"
+        );
         assert!(preflight_proposal(&create, true).is_ok());
         let wrong = call(
             "github_create_file",
-            r#"{"owner":"owner","repo":"repo","path":"new.txt","sha":"abc","content":"new"}"#
+            r#"{"owner":"owner","repo":"repo","path":"new.txt","sha":"abc","content":"new"}"#,
         );
-        assert_eq!(preflight_proposal(&wrong, true).unwrap_err().code, "INVALID_INPUT");
+        assert_eq!(
+            preflight_proposal(&wrong, true).unwrap_err().code,
+            "INVALID_INPUT"
+        );
     }
 
     #[test]
     fn github_calls_require_enabled_connection_and_exact_schema() {
-        let read = call("github_read_file", r#"{"owner":"a","repo":"b","path":"README.md"}"#);
-        assert_eq!(preflight_proposal(&read, false).unwrap_err().code, "TOOL_UNSUPPORTED");
+        let read = call(
+            "github_read_file",
+            r#"{"owner":"a","repo":"b","path":"README.md"}"#,
+        );
+        assert_eq!(
+            preflight_proposal(&read, false).unwrap_err().code,
+            "TOOL_UNSUPPORTED"
+        );
         assert!(preflight_proposal(&read, true).is_ok());
-        let unexpected = call("github_write_file", r#"{"owner":"a","repo":"b","path":"x","sha":"a","content":"x","extra":1}"#);
-        assert_eq!(preflight_proposal(&unexpected, true).unwrap_err().code, "INVALID_INPUT");
+        let unexpected = call(
+            "github_write_file",
+            r#"{"owner":"a","repo":"b","path":"x","sha":"a","content":"x","extra":1}"#,
+        );
+        assert_eq!(
+            preflight_proposal(&unexpected, true).unwrap_err().code,
+            "INVALID_INPUT"
+        );
     }
 }

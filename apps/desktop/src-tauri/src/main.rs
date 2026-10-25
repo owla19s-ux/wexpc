@@ -1,7 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-mod vault;
-mod tool_approvals;
 mod github_config;
+mod tool_approvals;
+mod vault;
 
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager, State};
@@ -274,6 +274,15 @@ async fn send_message(
     }
 }
 
+#[tauri::command]
+fn tool_receipts(app: tauri::AppHandle, conversation_id: String) -> Result<Vec<ToolReceiptMarker>> {
+    let root = app
+        .path()
+        .app_data_dir()
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法定位工具回执目录"))?;
+    read_tool_markers(&root.join("tool-receipts"), &conversation_id)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -304,6 +313,7 @@ fn main() {
             append_task_record,
             create_conversation,
             send_message,
+            tool_receipts,
             retry_chat_result,
             create_space,
             create_group,
