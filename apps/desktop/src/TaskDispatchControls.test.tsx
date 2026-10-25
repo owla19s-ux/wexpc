@@ -70,3 +70,30 @@ it('invalidates a preview when snapshot revision or task changes',async()=>{
   view.rerender(<TaskDispatchControls task={{...task,id:'task-2'}} agents={agents} revision={12} attempts={[]} run={run}/>);
   await waitFor(()=>expect((screen.getByLabelText('选择派工成员') as HTMLSelectElement).value).toBe(''));
 });
+
+it('shows the persisted assignee and fences repeated dispatch when the outcome is unknown',()=>{
+  render(<TaskDispatchControls task={task} agents={agents} revision={11} run={run} attempts={[{
+    id:'attempt-b',task_id:'task-1',project_id:'project',agent_id:'agent-b',
+    publication_epoch:2,status:'outcome_unknown',recorded_revision:10,
+  }]}/>);
+  expect(screen.getByText(/成员 乙（agent-b）/)).toBeTruthy();
+  expect(screen.getByText(/结果未知（须核查，禁止自动重试）/)).toBeTruthy();
+  expect(screen.getByText(/当前发布版本已登记派工尝试，不能重复登记/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  const queue=screen.getByRole('button',{name:'登记待派工尝试（不启动工具）'}) as HTMLButtonElement;
+  expect(queue.disabled).toBe(true);
+  fireEvent.click(queue);
+  expect(ipc).not.toHaveBeenCalled();
+});
+
+it('shows historical dispatch evidence without blocking a new publication epoch',()=>{
+  render(<TaskDispatchControls task={{...task,publication_epoch:3}} agents={agents} revision={12} run={run} attempts={[{
+    id:'attempt-old',task_id:'task-1',project_id:'project',agent_id:'agent-a',
+    publication_epoch:2,status:'pending',recorded_revision:10,
+  }]}/>);
+  expect(screen.getByText(/成员 甲（agent-a）/)).toBeTruthy();
+  expect(screen.getByText(/待领取（尚未执行）/)).toBeTruthy();
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-b'}});
+  const queue=screen.getByRole('button',{name:'登记待派工尝试（不启动工具）'}) as HTMLButtonElement;
+  expect(queue.disabled).toBe(false);
+});
