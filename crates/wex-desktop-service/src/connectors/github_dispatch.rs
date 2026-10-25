@@ -153,6 +153,64 @@ pub fn update_approved_github_file(
     Ok(sha.to_owned())
 }
 
+/// Create-only GitHub mutation. No expected SHA means the API must reject
+/// an already-existing path; it cannot silently overwrite an existing file.
+pub fn create_approved_github_file(
+    dispatch: &Dispatch,
+    authorized_resource_id: &str,
+    owner: &str,
+    repo: &str,
+    path: &str,
+    content: &[u8],
+    token: &str,
+) -> Result<String> {
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
+    if dispatch.intent.action != Action::Write
+        || dispatch.intent.capability_id != "github_file_create"
+        || dispatch.intent.resource_id != authorized_resource_id
+        || dispatch.intent.expected_version.is_some()
+    {
+        return Err(ServiceError::new("DISPATCH_REJECTED", "GitHub 文件创建未经匹配授权"));
+    }
+    if token.is_empty() || !safe_segment(owner) || !safe_segment(repo)
+        || path.len() > 4096 || path.is_empty()
+        || path.split('/').any(|segment| !safe_segment(segment))
+        || content.len() > 4096
+    {
+        return Err(ServiceError::new("INVALID_INPUT", "GitHub 创建路径或内容无效"));
+    }
+    super::intent_binding::verify_arguments(
+        dispatch, &[owner.as_bytes(), repo.as_bytes(), path.as_bytes(), content]
+    )?;
+    let mut url = Url::parse("https://api.github.com/")
+        .map_err(|_| ServiceError::new("NETWORK_ERROR", "GitHub API 地址错误"))?;
+    url.path_segments_mut().map_err(|_| ServiceError::new("INVALID_INPUT", "路径无效"))?
+        .extend(["repos", owner, repo, "contents"].into_iter().chain(path.split('/')));
+    let body = serde_json::json!({
+        "message": "WEXPC approved new file",
+        "content": STANDARD.encode(content),
+    });
+    let client = Client::builder().connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(60)).redirect(Policy::none())
+        .build().map_err(|_| ServiceError::new("NETWORK_ERROR", "无法创建 GitHub 请求"))?;
+    let response = client.put(url).header("User-Agent", "WEXPC/0.1.1")
+        .header("Accept", "application/vnd.github+json")
+        .bearer_auth(token).json(&body).send()
+        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 文件创建结果不确定，禁止自动重试"))?;
+    if response.status().is_server_error() {
+        return Err(ServiceError::new("OUTCOME_UNKNOWN", "GitHub 服务异常，文件创建结果未知"));
+    }
+    if response.status() != reqwest::StatusCode::CREATED {
+        return Err(ServiceError::new("GITHUB_WRITE_REJECTED", "GitHub 未确认创建成功，目标可能已存在"));
+    }
+    let result: serde_json::Value = response.json()
+        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 创建响应无法核验"))?;
+    let sha = result.pointer("/content/sha").and_then(|v| v.as_str())
+        .filter(|s| s.len() == 40 && s.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 未返回新文件的有效版本"))?;
+    Ok(sha.to_owned())
+}
+
 fn safe_segment(part: &str) -> bool {
     !part.is_empty() && part.len() <= 255
         && part != "." && part != ".."
