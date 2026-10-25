@@ -225,11 +225,6 @@ pub fn update_approved_github_file(
     let value: serde_json::Value = response
         .json()
         .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 更新响应无法核验"))?;
-    let sha = value
-        .pointer("/content/sha")
-        .and_then(|v| v.as_str())
-        .filter(|s| s.len() == 40 && s.bytes().all(|b| b.is_ascii_hexdigit()))
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 未返回有效文件版本"))?;
     verify_written_content(&client, url, token, &value, content)
 }
 
@@ -316,11 +311,6 @@ pub fn create_approved_github_file(
     let result: serde_json::Value = response
         .json()
         .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 创建响应无法核验"))?;
-    let sha = result
-        .pointer("/content/sha")
-        .and_then(|v| v.as_str())
-        .filter(|s| s.len() == 40 && s.bytes().all(|byte| byte.is_ascii_hexdigit()))
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 未返回新文件的有效版本"))?;
     verify_written_content(&client, url, token, &result, content)
 }
 
