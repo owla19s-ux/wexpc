@@ -1,6 +1,7 @@
 //! Pure dispatch admission rules. This module never invokes tools or grants authority.
 //! The Host must separately validate current permissions, credentials and resource locks.
 use crate::task::{TaskBoard, TaskStatus};
+use crate::dispatch_leases::{ResourceLease, ResourceLeases, LeaseError};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DispatchRefusal {
