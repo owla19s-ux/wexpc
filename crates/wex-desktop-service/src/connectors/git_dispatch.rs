@@ -4,8 +4,17 @@ use std::{io::Read, path::Path, process::{Command, Stdio}, thread, time::{Durati
 use wex_core::operation::{Action, Dispatch};
 
 pub fn approved_git_status(dispatch: &Dispatch, repo_id: &str, trusted_root: &Path) -> Result<String> {
+    approved_git_read(dispatch, repo_id, trusted_root, "git_status")
+}
+
+/// Read a bounded patch without textconv, external diff, or shell execution.
+pub fn approved_git_diff(dispatch: &Dispatch, repo_id: &str, trusted_root: &Path) -> Result<String> {
+    approved_git_read(dispatch, repo_id, trusted_root, "git_diff")
+}
+
+fn approved_git_read(dispatch: &Dispatch, repo_id: &str, trusted_root: &Path, capability: &str) -> Result<String> {
     if dispatch.intent.action != Action::Read
-        || dispatch.intent.capability_id != "git_status"
+        || dispatch.intent.capability_id != capability
         || dispatch.intent.resource_id != repo_id
     {
         return Err(ServiceError::new("DISPATCH_REJECTED", "Git 操作不符合已批准范围"));
@@ -18,8 +27,13 @@ pub fn approved_git_status(dispatch: &Dispatch, repo_id: &str, trusted_root: &Pa
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("git")
         .arg("--no-optional-locks")
-        .args(["-C"]).arg(trusted_root)
-        .args(["status", "--porcelain=v1", "-uno"])
+        .args(["-C"]).arg(trusted_root);
+    if capability == "git_diff" {
+        child.args(["diff", "--no-ext-diff", "--no-textconv", "--"]);
+    } else {
+        child.args(["status", "--porcelain=v1", "-uno"]);
+    }
+    let mut child = child
         .env("GIT_TERMINAL_PROMPT", "0")
         .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null())
         .spawn()
