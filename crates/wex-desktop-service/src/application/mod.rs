@@ -643,6 +643,23 @@ mod publication_tests {
     }
 
     #[test]
+    fn unrelated_snapshot_revision_does_not_change_published_assignment_epoch() {
+        let mut service = draft_service();
+        let initial = service.snapshot().unwrap().revision;
+        let published = service.publish_task(initial, "task_1").unwrap();
+        assert_eq!(published.publication_epoch, initial + 1);
+        service.mutate(|snapshot| {
+            snapshot.projects[0].goal = "Unrelated update".into();
+            Ok(())
+        }).unwrap();
+        let after = service.snapshot().unwrap();
+        assert!(after.revision > published.publication_epoch);
+        assert_eq!(after.tasks[0].publication_epoch, published.publication_epoch);
+        let ticket = service.task_dispatch_candidate(after.revision, "task_1", "a_1").unwrap();
+        assert_eq!(ticket.assignment_epoch, published.publication_epoch);
+    }
+
+    #[test]
     fn publication_rejects_stale_revision_and_missing_scope_without_mutating_snapshot() {
         let mut service = draft_service();
         let revision = service.snapshot().unwrap().revision;
