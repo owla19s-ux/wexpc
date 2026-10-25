@@ -120,6 +120,18 @@ impl DesktopService {
         };
         let snapshot = service.snapshot()?;
         catalog(&snapshot)?;
+        // An interrupted Host may have performed an external write.
+        // Never turn InFlight into Pending and never launch it automatically.
+        if snapshot.dispatch_attempts.iter().any(|a| a.status == DispatchAttemptStatus::InFlight) {
+            service.mutate(|s| {
+                for attempt in &mut s.dispatch_attempts {
+                    if attempt.status == DispatchAttemptStatus::InFlight {
+                        attempt.status = DispatchAttemptStatus::OutcomeUnknown;
+                    }
+                }
+                Ok(())
+            })?;
+        }
         if snapshot
             .turns
             .iter()
@@ -383,6 +395,49 @@ impl DesktopService {
         }).map_err(|_| ServiceError::new("INVALID_TASK", "任务无法映射到调度核心"))?;
         wex_core::dispatch::admit(&board, task_id, &task.project_id, agent_id, task.publication_epoch, true)
             .map_err(|_| ServiceError::new("DISPATCH_REFUSED", "任务未通过调度准入核查"))
+    }
+
+    /// Atomically record one intent for a published task and a selected agent.
+    /// This is a queue record, NOT a tool launch or authorization grant.
+    pub fn queue_dispatch_attempt(
+        &mut self,
+        revision: u64,
+        task_id: &str,
+        agent_id: &str,
+    ) -> Result<DispatchAttempt> {
+        // Read-only Core admission and duty checks before the store transaction.
+        let ticket = self.task_dispatch_candidate(revision, task_id, agent_id)?;
+        self.mutate(|s| {
+            organization::check_revision(s, revision)?;
+            let task = s.tasks.iter().find(|t| t.id == ticket.task_id)
+                .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
+            if task.status != TaskStatus::Published
+                || task.publication_epoch != ticket.assignment_epoch
+                || !task.agent_ids.contains(&ticket.agent_id)
+                || !task_member_assigned(s, &ticket.agent_id, &task.project_id)
+            {
+                return Err(ServiceError::new("DISPATCH_REFUSED", "任务或成员分配在领取前发生变化"));
+            }
+            if s.dispatch_attempts.iter().any(|a| {
+                a.task_id == ticket.task_id
+                    && a.publication_epoch == ticket.assignment_epoch
+            }) {
+                return Err(ServiceError::new("DUPLICATE_DISPATCH", "该发布版本已有派工尝试，不能重复登记"));
+            }
+            let attempt = DispatchAttempt {
+                id: id("attempt"),
+                task_id: ticket.task_id,
+                project_id: ticket.project_id,
+                agent_id: ticket.agent_id,
+                publication_epoch: ticket.assignment_epoch,
+                status: DispatchAttemptStatus::Pending,
+                recorded_revision: s.revision.checked_add(1).ok_or_else(|| {
+                    ServiceError::new("STORAGE_ERROR", "派工版本无法保存")
+                })?,
+            };
+            s.dispatch_attempts.push(attempt.clone());
+            Ok(attempt)
+        })
     }
 
     pub fn update_task(&mut self, revision: u64, task_id: &str, input: NewTask) -> Result<()> {
