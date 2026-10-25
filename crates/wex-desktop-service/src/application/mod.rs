@@ -1101,6 +1101,24 @@ mod publication_tests {
     }
 
     #[test]
+    fn publish_rejects_objective_exceeding_core_limit_without_durable_changes() {
+        let mut service = draft_service();
+        service.mutate(|snapshot| {
+            snapshot.tasks[0].goal = "x".repeat(8193);
+            Ok(())
+        }).unwrap();
+        let before = service.snapshot().unwrap();
+        assert_eq!(
+            service.publish_task(before.revision, "task_1").unwrap_err().code,
+            "INVALID_TASK"
+        );
+        let after = service.snapshot().unwrap();
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.tasks[0].status, TaskStatus::Draft);
+        assert_eq!(after.tasks[0].publication_epoch, 0);
+    }
+
+    #[test]
     fn publication_rejects_stale_revision_and_missing_scope_without_mutating_snapshot() {
         let mut service = draft_service();
         let revision = service.snapshot().unwrap().revision;
