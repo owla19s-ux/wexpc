@@ -1,0 +1,45 @@
+# Temporary pause: no automatic Actions through 2026-10-31 (Asia/Shanghai).
+# Do not dispatch manually before 2026-11-01. Restore triggers only after review.
+name: desktop (Windows check)
+
+on:
+#   pull_request:
+#     paths:
+#       - 'apps/desktop/**'
+#       - 'crates/wex-desktop-service/**'
+#       - '.github/workflows/desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            . -> target
+            apps/desktop/src-tauri -> target
+      - run: npm ci
+        working-directory: apps/desktop
+      - run: npm run build
+        working-directory: apps/desktop
+      - run: cargo test -p wex-desktop-service
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check
+      - run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml

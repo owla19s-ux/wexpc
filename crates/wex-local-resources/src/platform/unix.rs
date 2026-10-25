@@ -101,6 +101,121 @@ pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadErro
     Ok(bytes)
 }
 
+/// Kernel-enforced no-follow, exclusive creation relative to the pinned root.
+/// A failed write may leave a partial file; callers must treat it as unknown.
+pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), FileReadError> {
+    use std::io::Write;
+    if !valid_leaf(leaf) || bytes.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let name =
+        CString::new(leaf).map_err(|_| FileReadError::Resource(ResourceError::InvalidPath))?;
+    // SAFETY: live directory fd; only a single, NUL-terminated component.
+    let fd = unsafe {
+        libc::openat(
+            root.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+            0o600,
+        )
+    };
+    if fd < 0 {
+        return Err(unavailable());
+    }
+    // SAFETY: openat returned a newly owned fd.
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(bytes).map_err(|_| FileReadError::Changed)?;
+    file.sync_all().map_err(|_| FileReadError::Changed)?;
+    // A concurrent rename can detach the new inode. Re-check the exact
+    // pinned directory entry without following links before reporting success.
+    let pinned = pin_leaf(root, leaf)?;
+    if stamp(&file.metadata().map_err(|_| FileReadError::Changed)?)
+        != stamp(&pinned.metadata().map_err(|_| FileReadError::Changed)?)
+    {
+        return Err(FileReadError::Changed);
+    }
+    Ok(())
+}
+
+/// Compare-and-swap existing file contents through its pinned object.
+/// The existing file must be a single-linked ordinary leaf on the root mount.
+/// Never truncate before verifying the previously read content bytes.
+/// This is an in-place write and is deliberately NOT yet exposed to AI tools:
+/// callers needing atomic replacement must use a staging/rename transaction.
+pub(super) fn prepare_replace_leaf(
+    root: &File,
+    leaf: &str,
+    expected: &[u8],
+) -> Result<(), FileReadError> {
+    if !valid_leaf(leaf) || expected.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    // Use the exact hardened read path to check the object and version.
+    let actual = read_leaf(root, leaf)?;
+    if actual != expected {
+        return Err(FileReadError::Changed);
+    }
+    Ok(())
+}
+
+/// Strict existing-file replacement, using an exclusive advisory OS lock and
+/// one pinned inode. The lock coordinates cooperating WEX writers only; this
+/// primitive is not exposed to model tools until cross-process CAS is solved.
+#[expect(
+    dead_code,
+    reason = "non-atomic prototype deliberately excluded from tool execution"
+)]
+pub(super) fn replace_leaf_locked(
+    root: &File,
+    leaf: &str,
+    expected: &[u8],
+    replacement: &[u8],
+) -> Result<(), FileReadError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    if !valid_leaf(leaf) || expected.len() > 65536 || replacement.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let pinned = pin_leaf(root, leaf)?;
+    let meta = pinned.metadata().map_err(|_| unavailable())?;
+    regular(&meta)?;
+    if meta.len() > 65536 {
+        return Err(FileReadError::TooLarge);
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(format!("/proc/self/fd/{}", pinned.as_raw_fd()))
+        .map_err(|_| unavailable())?;
+    let opened = file.metadata().map_err(|_| unavailable())?;
+    if stamp(&meta) != stamp(&opened) {
+        return Err(FileReadError::Changed);
+    }
+    // Advisory flock is not a security boundary against uncooperative writers.
+    // WEX's storage layer must additionally serialize its own edits.
+    let locked = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if locked != 0 {
+        return Err(FileReadError::Changed);
+    }
+    let mut actual = Vec::new();
+    (&file)
+        .take(65537)
+        .read_to_end(&mut actual)
+        .map_err(|_| unavailable())?;
+    if actual != expected || actual.len() as u64 != opened.len() {
+        return Err(FileReadError::Changed);
+    }
+    if stamp(&opened) != stamp(&file.metadata().map_err(|_| unavailable())?) {
+        return Err(FileReadError::Changed);
+    }
+    file.seek(SeekFrom::Start(0)).map_err(|_| unavailable())?;
+    file.write_all(replacement)
+        .map_err(|_| FileReadError::Changed)?;
+    file.set_len(replacement.len() as u64)
+        .map_err(|_| FileReadError::Changed)?;
+    file.sync_all().map_err(|_| FileReadError::Changed)?;
+    Ok(())
+}
+
 fn unavailable() -> FileReadError {
     FileReadError::Resource(ResourceError::Unavailable)
 }

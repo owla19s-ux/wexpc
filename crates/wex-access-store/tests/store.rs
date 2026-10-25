@@ -169,7 +169,7 @@ fn corrupt_or_unknown_snapshots_never_reset_to_empty_success() {
     let store = root.store();
     for text in [
         "{",
-        r#"{"schema_version":2,"revision":0,"grants":[]}"#,
+        r#"{"schema_version":3,"revision":0,"grants":[]}"#,
         r#"{"schema_version":1,"revision":0,"revision":1,"grants":[]}"#,
         r#"{"schema_version":1,"revision":0,"grants":[],"extra":true}"#,
         r#"{"schema_version":1,"revision":0,"grants":[{"directory_id":"x","access":"read","explicit_personal":false},{"directory_id":"x","access":"write","explicit_personal":false}]}"#,

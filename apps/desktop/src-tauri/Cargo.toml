@@ -1,0 +1,25 @@
+[package]
+name = "wexpc-desktop"
+version = "0.1.1"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+uuid = { version = "1", features = ["v4"] }
+serde = { version = "1", features = ["derive"] }
+wex-desktop-service = { path = "../../../crates/wex-desktop-service" }
+wex-api = { path = "../../../crates/wex-api" }
+wex-access-store = { path = "../../../crates/wex-access-store" }
+wex-core = { path = "../../../crates/wex-core" }
+wex-local-resources = { path = "../../../crates/wex-local-resources" }
+serde_json = "=1.0.145"
+
+[target.'cfg(windows)'.dependencies]
+keyring = { version = "3.6.3", features = ["windows-native"] }

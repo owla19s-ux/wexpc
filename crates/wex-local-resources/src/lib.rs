@@ -1,5 +1,5 @@
-//! Trusted Linux/Android directory bindings and metadata-only preflight checks.
-//! Includes bounded direct-file reads; no durable registry, FFI or write API.
+//! Trusted platform directory bindings and metadata-only preflight checks.
+//! Includes bounded direct-file reads and trusted binding checkpoints; no write API.
 //! A successful check is NOT a token for a later ordinary path-based open.
 mod exclusion;
 mod platform;
@@ -73,8 +73,35 @@ impl Binding {
     }
 }
 
-/// In-memory trusted host state. Recreating it deliberately creates fresh IDs;
-/// persisted grants alone cannot restore a binding or reclassify a directory.
+/// Trusted checkpoint, stored only inside the private authorization store.
+/// This is not a grant and must never be accepted from model tool arguments.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SavedDirectory {
+    pub id: String,
+    pub path: PathBuf,
+    pub protection: Protection,
+    pub platform: String,
+    pub stamp: [u64; 4],
+}
+
+fn durable_stamp(file: &File) -> Result<[u64; 4], ResourceError> {
+    let identity = platform::identity_of_file(file)?;
+    let birth = file
+        .metadata()
+        .and_then(|m| m.created())
+        .map_err(|_| ResourceError::Unsupported)?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| ResourceError::Unsupported)?;
+    Ok([
+        identity.device,
+        identity.inode,
+        birth.as_secs(),
+        u64::from(birth.subsec_nanos()),
+    ])
+}
+
+/// In-memory trusted host state. New registration creates fresh IDs.
+/// Only an identity-verified trusted checkpoint may restore an existing ID.
 /// Do not expose register/classification as an AI tool or a Space association.
 #[derive(Default)]
 pub struct DirectoryRegistry {
@@ -84,6 +111,62 @@ pub struct DirectoryRegistry {
 impl DirectoryRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn export_binding(&self, id: &str) -> Result<SavedDirectory, ResourceError> {
+        let b = self
+            .bindings
+            .iter()
+            .find(|b| b.id == id)
+            .ok_or(ResourceError::UnknownDirectory)?;
+        b.verify()?;
+        Ok(SavedDirectory {
+            id: b.id.clone(),
+            path: b.path.clone(),
+            protection: b.protection,
+            platform: std::env::consts::OS.into(),
+            stamp: durable_stamp(&b._pin)?,
+        })
+    }
+
+    /// Reopen the same native object; a matching path alone is insufficient.
+    /// Trusted private snapshots only. Restoring does not grant any access.
+    pub fn restore_binding(
+        &mut self,
+        saved: &SavedDirectory,
+        internal_roots: &[&Path],
+    ) -> Result<(), ResourceError> {
+        if saved.platform != std::env::consts::OS
+            || saved.id.len() != 64
+            || !saved.id.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return Err(ResourceError::InvalidPath);
+        }
+        let canonical = fs::canonicalize(&saved.path).map_err(|_| ResourceError::Unavailable)?;
+        if canonical != saved.path {
+            return Err(ResourceError::Unavailable);
+        }
+        // Register into a temporary registry so failure never leaves a live binding.
+        let mut candidate = Self::new();
+        let id =
+            candidate.register_with_exclusions(&saved.path, saved.protection, internal_roots)?;
+        if candidate.export_binding(&id)?.stamp != saved.stamp {
+            return Err(ResourceError::Unavailable);
+        }
+        if self.bindings.len() >= 128 {
+            return Err(ResourceError::LimitExceeded);
+        }
+        let mut binding = candidate.bindings.remove(0);
+        if self
+            .bindings
+            .iter()
+            .any(|b| b.id == saved.id || b.path == binding.path || b.identity == binding.identity)
+        {
+            return Err(ResourceError::AlreadyRegistered);
+        }
+        binding.id = saved.id.clone();
+        self.bindings.push(binding);
+        Ok(())
     }
 
     pub fn register(
@@ -171,6 +254,90 @@ impl DirectoryRegistry {
     /// Trusted Host deny roots only; never accept them from an AI/Space request.
     /// Authorization denial precedes even exclusion metadata. A matching root
     /// cannot be enabled by a grant or explicit personal consent.
+    /// Non-mutating precondition check for an eventual versioned edit.
+    /// Never treat this as authorization for a later unprotected write.
+    pub fn prepare_file_replace_with_exclusions(
+        &self,
+        directory_id: &str,
+        leaf: &str,
+        expected: &[u8],
+        system_access: bool,
+        grants: &[DirectoryGrant<'_>],
+        internal_roots: &[&Path],
+    ) -> Result<(), FileReadError> {
+        if !platform::valid_leaf(leaf) || expected.len() > 65536 {
+            return Err(FileReadError::Resource(ResourceError::InvalidPath));
+        }
+        match self.check_with_exclusions(
+            directory_id,
+            leaf,
+            system_access,
+            Access::Write,
+            grants,
+            internal_roots,
+        ) {
+            Ok(Decision::Allowed) => {}
+            Ok(Decision::Denied(reason)) => return Err(FileReadError::Denied(reason)),
+            Err(error) => return Err(FileReadError::Resource(error)),
+        }
+        let binding = self
+            .bindings
+            .iter()
+            .find(|b| b.id == directory_id)
+            .ok_or(FileReadError::Resource(ResourceError::UnknownDirectory))?;
+        platform::prepare_replace_leaf(&binding._pin, leaf, expected)?;
+        for registered in &self.bindings {
+            registered.verify().map_err(FileReadError::Resource)?;
+        }
+        Ok(())
+    }
+
+    /// Create a new direct regular file only within an explicitly authorized
+    /// directory. The caller must hold the live authority-store lock throughout.
+    /// On I/O error after exclusive creation the file may exist: never retry.
+    pub fn create_file_with_exclusions(
+        &self,
+        directory_id: &str,
+        leaf: &str,
+        bytes: &[u8],
+        system_access: bool,
+        grants: &[DirectoryGrant<'_>],
+        internal_roots: &[&Path],
+    ) -> Result<(), FileReadError> {
+        if !platform::valid_leaf(leaf) {
+            return Err(FileReadError::Resource(ResourceError::InvalidPath));
+        }
+        if bytes.len() > 65536 {
+            return Err(FileReadError::TooLarge);
+        }
+        // An empty target checks the bound directory itself; a nonexistent
+        // child cannot pass the read-oriented existing-file metadata path.
+        match self.check_with_exclusions(
+            directory_id,
+            "",
+            system_access,
+            Access::Write,
+            grants,
+            internal_roots,
+        ) {
+            Ok(Decision::Allowed) => {}
+            Ok(Decision::Denied(reason)) => return Err(FileReadError::Denied(reason)),
+            Err(error) => return Err(FileReadError::Resource(error)),
+        }
+        let binding = self
+            .bindings
+            .iter()
+            .find(|b| b.id == directory_id)
+            .ok_or(FileReadError::Resource(ResourceError::UnknownDirectory))?;
+        // Kernel-exclusive relative creation does not follow an existing link,
+        // replace an existing object, or resolve an AI-selected parent path.
+        platform::create_leaf(&binding._pin, leaf, bytes)?;
+        for registered in &self.bindings {
+            registered.verify().map_err(FileReadError::Resource)?;
+        }
+        Ok(())
+    }
+
     pub fn check_with_exclusions(
         &self,
         directory_id: &str,

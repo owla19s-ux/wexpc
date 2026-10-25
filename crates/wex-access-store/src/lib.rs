@@ -38,6 +38,7 @@ pub struct Grant {
 pub struct Snapshot {
     pub revision: u64,
     pub grants: Vec<Grant>,
+    pub directories: Vec<wex_local_resources::SavedDirectory>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -73,10 +74,22 @@ struct WireGrant {
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct WireDirectory {
+    id: String,
+    path: PathBuf,
+    protected: bool,
+    platform: String,
+    stamp: [u64; 4],
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WireSnapshot {
     schema_version: u32,
     revision: u64,
     grants: Vec<WireGrant>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    directories: Option<Vec<WireDirectory>>,
 }
 
 /// A private root supplied by the platform, never a Space or AI-selected path.
@@ -200,6 +213,7 @@ impl Store {
                 return Ok(Snapshot {
                     revision: 0,
                     grants: Vec::new(),
+                    directories: Vec::new(),
                 });
             }
             Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
@@ -215,7 +229,11 @@ impl Store {
         }
         let wire: WireSnapshot =
             serde_json::from_slice(&bytes).map_err(|_| StoreError::InvalidSnapshot)?;
-        if wire.schema_version != 1 || wire.grants.len() > MAX_GRANTS {
+        if !matches!(wire.schema_version, 1 | 2)
+            || wire.grants.len() > MAX_GRANTS
+            || (wire.schema_version == 2 && wire.directories.is_none())
+            || (wire.schema_version == 1 && wire.directories.is_some())
+        {
             return Err(StoreError::InvalidSnapshot);
         }
         let mut grants: Vec<Grant> = Vec::new();
@@ -235,15 +253,57 @@ impl Store {
                 explicit_personal: entry.explicit_personal,
             });
         }
+        let mut directories: Vec<wex_local_resources::SavedDirectory> = Vec::new();
+        for d in wire.directories.unwrap_or_default() {
+            if directories.len() >= MAX_GRANTS
+                || d.id.len() != 64
+                || !valid_id(&d.id)
+                || !d.path.is_absolute()
+                || d.path
+                    .to_str()
+                    .is_none_or(|p| p.len() > 4096 || p.contains('\0'))
+                || d.platform.len() > 32
+                || d.stamp[3] >= 1_000_000_000
+                || !grants.iter().any(|g| g.directory_id == d.id)
+                || directories.iter().any(|b| b.id == d.id || b.path == d.path)
+            {
+                return Err(StoreError::InvalidSnapshot);
+            }
+            directories.push(wex_local_resources::SavedDirectory {
+                id: d.id,
+                path: d.path,
+                protection: if d.protected {
+                    wex_local_resources::Protection::Protected
+                } else {
+                    wex_local_resources::Protection::General
+                },
+                platform: d.platform,
+                stamp: d.stamp,
+            });
+        }
         Ok(Snapshot {
             revision: wire.revision,
             grants,
+            directories,
         })
     }
 
-    fn save_locked(&self, state: &Snapshot) -> Result<(), StoreError> {
+    fn encode_snapshot(state: &Snapshot) -> Result<Vec<u8>, StoreError> {
         let wire = WireSnapshot {
-            schema_version: 1,
+            schema_version: 2,
+            directories: Some(
+                state
+                    .directories
+                    .iter()
+                    .map(|d| WireDirectory {
+                        id: d.id.clone(),
+                        path: d.path.clone(),
+                        protected: d.protection == wex_local_resources::Protection::Protected,
+                        platform: d.platform.clone(),
+                        stamp: d.stamp,
+                    })
+                    .collect(),
+            ),
             revision: state.revision,
             grants: state
                 .grants
@@ -263,6 +323,11 @@ impl Store {
         if bytes.len() as u64 > MAX_BYTES {
             return Err(StoreError::LimitExceeded);
         }
+        Ok(bytes)
+    }
+
+    fn save_locked(&self, state: &Snapshot) -> Result<(), StoreError> {
+        let bytes = Self::encode_snapshot(state)?;
         let path = self.root.join("grants.tmp");
         // A pre-existing temporary file is never removed or restored here.
         let mut file = private_create(&path).map_err(|_| StoreError::Unavailable)?;
@@ -343,6 +408,7 @@ impl Store {
         }
         let old_len = state.grants.len();
         state.grants.retain(|g| g.directory_id != directory_id);
+        state.directories.retain(|d| d.id != directory_id);
         if old_len == state.grants.len() {
             return Ok(state.revision);
         }
@@ -354,6 +420,186 @@ impl Store {
             }
         };
         self.commit(&state, lock)
+    }
+
+    /// Atomic trusted native user selection plus explicit scope grant.
+    /// Never expose path-based authorization as an AI tool.
+    pub fn authorize_directory(
+        &self,
+        expected_revision: u64,
+        path: impl AsRef<Path>,
+        access: Access,
+    ) -> Result<wex_local_resources::SavedDirectory, StoreError> {
+        let lock = self.lock()?;
+        let mut state = self.read_locked()?;
+        if state.revision != expected_revision {
+            return Err(StoreError::Conflict);
+        }
+        if state.grants.len() >= MAX_GRANTS {
+            return Err(StoreError::LimitExceeded);
+        }
+        let roots: Vec<_> = self.internal_roots.iter().map(PathBuf::as_path).collect();
+        let mut registry = wex_local_resources::DirectoryRegistry::new();
+        let id = registry
+            .register_with_exclusions(path, wex_local_resources::Protection::Protected, &roots)
+            .map_err(|_| StoreError::InvalidGrant)?;
+        let saved = registry
+            .export_binding(&id)
+            .map_err(|_| StoreError::InvalidGrant)?;
+        if state
+            .directories
+            .iter()
+            .any(|b| b.path == saved.path || b.stamp[..2] == saved.stamp[..2])
+        {
+            return Err(StoreError::InvalidGrant);
+        }
+        state.grants.push(Grant {
+            directory_id: id,
+            access,
+            explicit_personal: true,
+        });
+        state.directories.push(saved.clone());
+        state.revision = state
+            .revision
+            .checked_add(1)
+            .ok_or(StoreError::RevisionExhausted)?;
+        // Adding a new scope has not reduced existing authority or written any
+        // bytes. Reject capacity/encoding errors before entering the commit
+        // quarantine path, just like the pre-existing grant-count bound.
+        Self::encode_snapshot(&state)?;
+        self.commit(&state, lock)?;
+        Ok(saved)
+    }
+
+    /// Restore the selected native object and hold current grants through I/O.
+    /// Only a direct regular leaf is read; nested scopes cannot be traversed.
+    /// Unrelated missing directories do not revoke this directory.
+    pub fn read_authorized(
+        &self,
+        directory_id: &str,
+        leaf: &str,
+        system_access: bool,
+    ) -> Result<Vec<u8>, RegisteredReadError> {
+        self.read_authorized_at(None, directory_id, leaf, system_access)
+    }
+
+    /// An expected revision binds a reviewed request to its unchanged grant set.
+    pub fn read_authorized_at(
+        &self,
+        expected_revision: Option<u64>,
+        directory_id: &str,
+        leaf: &str,
+        system_access: bool,
+    ) -> Result<Vec<u8>, RegisteredReadError> {
+        self.with_snapshot(|state, grants| {
+            if expected_revision.is_some_and(|r| r != state.revision) {
+                return Err(wex_local_resources::FileReadError::Changed);
+            }
+            let saved = state
+                .directories
+                .iter()
+                .find(|d| d.id == directory_id)
+                .ok_or(wex_local_resources::FileReadError::Resource(
+                    wex_local_resources::ResourceError::UnknownDirectory,
+                ))?;
+            let decision = decide_local_access(
+                LocalTarget {
+                    directory_id,
+                    personal: saved.protection == wex_local_resources::Protection::Protected,
+                    system_access,
+                },
+                Access::Read,
+                grants,
+            );
+            if let Decision::Denied(reason) = decision {
+                return Err(wex_local_resources::FileReadError::Denied(reason));
+            }
+            // Direct-leaf reads cannot enter a nested registered directory.
+            // Each explicitly selected root has its own exact grant. Do not
+            // couple parent/child or unrelated directory availability here.
+            let roots: Vec<_> = self.internal_roots.iter().map(PathBuf::as_path).collect();
+            let mut registry = wex_local_resources::DirectoryRegistry::new();
+            registry
+                .restore_binding(saved, &roots)
+                .map_err(wex_local_resources::FileReadError::Resource)?;
+            registry.read_file_with_exclusions(directory_id, leaf, system_access, grants, &roots)
+        })
+    }
+
+    /// Read-only validation of a proposed existing-file update under the live
+    /// persistent grant lock. A successful result is NOT an executable token:
+    /// commit must re-open the same root and re-check the version atomically.
+    pub fn prepare_authorized_replace_at(
+        &self,
+        expected_revision: Option<u64>,
+        directory_id: &str,
+        leaf: &str,
+        expected_bytes: &[u8],
+        system_access: bool,
+    ) -> Result<(), RegisteredReadError> {
+        self.with_snapshot(|state, grants| {
+            if expected_revision.is_some_and(|r| r != state.revision) {
+                return Err(wex_local_resources::FileReadError::Changed);
+            }
+            let saved = state
+                .directories
+                .iter()
+                .find(|d| d.id == directory_id)
+                .ok_or(wex_local_resources::FileReadError::Resource(
+                    wex_local_resources::ResourceError::UnknownDirectory,
+                ))?;
+            let roots: Vec<_> = self.internal_roots.iter().map(PathBuf::as_path).collect();
+            let mut registry = wex_local_resources::DirectoryRegistry::new();
+            registry
+                .restore_binding(saved, &roots)
+                .map_err(wex_local_resources::FileReadError::Resource)?;
+            registry.prepare_file_replace_with_exclusions(
+                directory_id,
+                leaf,
+                expected_bytes,
+                system_access,
+                grants,
+                &roots,
+            )
+        })
+    }
+
+    /// Exclusive creation under current per-conversation write authority.
+    /// Authorization, directory identity and file I/O share the store lock.
+    /// A failed create can leave a partial file; consumers must not auto-retry.
+    pub fn create_authorized_at(
+        &self,
+        expected_revision: Option<u64>,
+        directory_id: &str,
+        leaf: &str,
+        bytes: &[u8],
+        system_access: bool,
+    ) -> Result<(), RegisteredReadError> {
+        self.with_snapshot(|state, grants| {
+            if expected_revision.is_some_and(|r| r != state.revision) {
+                return Err(wex_local_resources::FileReadError::Changed);
+            }
+            let saved = state
+                .directories
+                .iter()
+                .find(|d| d.id == directory_id)
+                .ok_or(wex_local_resources::FileReadError::Resource(
+                    wex_local_resources::ResourceError::UnknownDirectory,
+                ))?;
+            let roots: Vec<_> = self.internal_roots.iter().map(PathBuf::as_path).collect();
+            let mut registry = wex_local_resources::DirectoryRegistry::new();
+            registry
+                .restore_binding(saved, &roots)
+                .map_err(wex_local_resources::FileReadError::Resource)?;
+            registry.create_file_with_exclusions(
+                directory_id,
+                leaf,
+                bytes,
+                system_access,
+                grants,
+                &roots,
+            )
+        })
     }
 
     /// Hold the live grant transaction until the read returns.
@@ -383,6 +629,16 @@ impl Store {
         &self,
         action: impl FnOnce(&[DirectoryGrant<'_>]) -> Result<T, wex_local_resources::FileReadError>,
     ) -> Result<T, RegisteredReadError> {
+        self.with_snapshot(|_, grants| action(grants))
+    }
+
+    fn with_snapshot<T>(
+        &self,
+        action: impl FnOnce(
+            &Snapshot,
+            &[DirectoryGrant<'_>],
+        ) -> Result<T, wex_local_resources::FileReadError>,
+    ) -> Result<T, RegisteredReadError> {
         let _lock = self.lock().map_err(RegisteredReadError::Store)?;
         let state = self.read_locked().map_err(RegisteredReadError::Store)?;
         let grants: Vec<_> = state
@@ -394,7 +650,7 @@ impl Store {
                 explicit_personal: g.explicit_personal,
             })
             .collect();
-        action(&grants).map_err(RegisteredReadError::File)
+        action(&state, &grants).map_err(RegisteredReadError::File)
     }
 
     /// Resolve current metadata and trusted personal classification, then apply
