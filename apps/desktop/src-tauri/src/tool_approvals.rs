@@ -1092,6 +1092,134 @@ fn review_saved_read(
     Ok(serde_json::json!({"content":body?,"evidence_ref":evidence_id,"directory_id":id,"authorization_revision":state.revision}).to_string())
 }
 
+fn review_saved_create(
+    app: &AppHandle,
+    chat: &PreparedChat,
+    call: &ToolProposal,
+    authority: &impl Fn() -> Result<()>,
+    policies: &impl ToolPolicyAuthority,
+) -> Result<String> {
+    let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "新建参数无效"))?;
+    let id = value["directory_id"]
+        .as_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少授权目录"))?;
+    let leaf = value["file_name"]
+        .as_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
+    let content = value["content"].as_str().ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件内容"))?;
+    let policy = policies.policy("local_file_create")?;
+    policies.check(&policy)?;
+    let store = crate::local_access::open(app, &chat.conversation_id)?;
+    let state = store.load().map_err(crate::local_access::error)?;
+    let directory = state
+        .directories
+        .iter()
+        .find(|d| d.id == id)
+        .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "该目录未授权给当前对话"))?;
+    let grant = state
+        .grants
+        .iter()
+        .find(|g| g.directory_id == id)
+        .ok_or_else(|| ServiceError::new("PERMISSION_DENIED", "目录授权已撤销"))?;
+    if !matches!(grant.access, Access::Write | Access::ReadWrite) {
+        return Err(ServiceError::new("PERMISSION_DENIED", "当前目录未授权写入"));
+    }
+    authorize_execution_policy(policy.policy, || {
+        app.dialog()
+            .message(format!(
+                "在授权目录中新建文件（不覆盖已有文件）？\n目录：{}\n文件：{leaf}\n对话：{}",
+                directory.path.display(),
+                chat.conversation_id
+            ))
+            .title("WEXPC 本地新建确认")
+            .buttons(MessageDialogButtons::OkCancel)
+            .blocking_show()
+    })?;
+    let operation_id = format!("op_{}", uuid::Uuid::new_v4().simple());
+    let attempt_id = format!("at_{}", uuid::Uuid::new_v4().simple());
+    let evidence_id = format!("ev_{}", uuid::Uuid::new_v4().simple());
+    let intent = OperationIntent {
+        id: operation_id.clone(),
+        actor_id: "assistant".into(),
+        conversation_id: chat.conversation_id.clone(),
+        context_id: None,
+        connection_id: "local".into(),
+        capability_id: "local_file_create".into(),
+        resource_id: id.into(),
+        action: Action::Write,
+        expected_version: None,
+        intent_digest: digest_arguments("local_file_create", id, &[leaf.as_bytes(), content.as_bytes()]),
+    };
+    let mut ledger = OperationLedger::default();
+    ledger.propose(intent.clone()).map_err(|_| core_failure())?;
+    ledger
+        .approve(&operation_id, &intent, policy.revision)
+        .map_err(|_| core_failure())?;
+    let dispatch = begin_approved_dispatch(
+        &mut ledger,
+        &operation_id,
+        &attempt_id,
+        ExecutionChecks {
+            authority_revision: policy.revision,
+            connection_enabled: true,
+            authenticated: true,
+            platform_available: wex_local_resources::platform_supported(),
+            resource_allowed: true,
+        },
+        &|| {
+            authority()?;
+            policies.check(&policy)?;
+            if store.load().map_err(crate::local_access::error)?.revision != state.revision {
+                return Err(ServiceError::new(
+                    "AUTHORIZATION_CHANGED",
+                    "目录授权已变化，本次未派发新建",
+                ));
+            }
+            Ok(())
+        },
+    )?;
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        "in_flight",
+        Some(&intent.intent_digest),
+        Some(&policy),
+    )?;
+    // The store checks its revision and live grant under the same lock as I/O.
+    let body = crate::local_access::create(&dispatch, &store, state.revision, leaf, content);
+    let digest = body
+        .as_ref()
+        .ok()
+         .map(|_| digest_arguments("tool_receipt", &evidence_id, &[leaf.as_bytes(), content.as_bytes()]));
+    journal(
+        app,
+        chat,
+        &attempt_id,
+        &operation_id,
+        if body.is_ok() { "succeeded" } else { "unknown" },
+        digest.as_deref(),
+        Some(&policy),
+    )?;
+    ledger
+        .finish(
+            &operation_id,
+            &attempt_id,
+            if body.is_ok() {
+                Outcome::Succeeded {
+                    evidence_ref: evidence_id.clone(),
+                }
+            } else {
+                Outcome::Unknown
+            },
+        )
+        .map_err(|_| core_failure())?;
+    body?;
+    Ok(serde_json::json!({"created":true,"file_name":leaf,"evidence_ref":evidence_id,"directory_id":id,"authorization_revision":state.revision}).to_string())
+}
+
 #[cfg(test)]
 mod proposal_preflight_tests {
     use super::*;
