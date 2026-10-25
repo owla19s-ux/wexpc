@@ -123,11 +123,23 @@ pub fn drive_tool_rounds(
     prepared: &PreparedChat,
     key: &str,
     tools: Vec<ToolDefinition>,
+    settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
+) -> Result<String> {
+    drive_tool_rounds_with(
+        |history| execute_model_step(prepared, key, history, tools.clone()),
+        settle_approved,
+    )
+}
+
+// Keep the same dispatch path injectable for deterministic, network-free
+// tests. Production always supplies execute_model_step as the model source.
+fn drive_tool_rounds_with(
+    mut next_model_step: impl FnMut(Vec<Message>) -> Result<ModelStep>,
     mut settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
 ) -> Result<String> {
     let mut transcript = Vec::new();
     for model_step_index in 0..MAX_MODEL_STEPS {
-        match execute_model_step(prepared, key, transcript.clone(), tools.clone())? {
+        match next_model_step(transcript.clone())? {
             ModelStep::Text(text) => return Ok(text),
             ModelStep::Proposal { assistant_text, calls } => {
                 // A tool dispatch must leave a model request to consume its receipt.
@@ -214,4 +226,66 @@ mod tests {
         let msgs = committed_tool_messages(&calls, &[("x".into(), "ok".into())], None).unwrap();
         assert_eq!(msgs[1].tool_call_id.as_deref(), Some("x"));
     }
+    #[test]
+    fn final_step_proposal_does_not_reach_host_dispatch() {
+        let mut model_calls = 0;
+        let mut dispatches = 0;
+        let result = drive_tool_rounds_with(
+            |history| {
+                assert_eq!(history.len(), model_calls * 2);
+                model_calls += 1;
+                Ok(ModelStep::Proposal {
+                    assistant_text: None,
+                    calls: vec![ToolProposal {
+                        id: format!("call_{model_calls}"),
+                        name: "read_file".into(),
+                        arguments_json: "{}".into(),
+                    }],
+                })
+            },
+            |calls| {
+                dispatches += 1;
+                Ok(vec![(calls[0].id.clone(), "ok".into())])
+            },
+        );
+        assert_eq!(result.unwrap_err().code, "TOOL_ROUND_LIMIT");
+        assert_eq!(model_calls, MAX_MODEL_STEPS);
+        assert_eq!(dispatches, MAX_MODEL_STEPS - 1);
+    }
+
+    #[test]
+    fn final_step_text_consumes_prior_receipts_and_completes() {
+        let mut model_calls = 0;
+        let mut dispatches = 0;
+        let result = drive_tool_rounds_with(
+            |history| {
+                model_calls += 1;
+                if model_calls == MAX_MODEL_STEPS {
+                    assert_eq!(history.len(), (MAX_MODEL_STEPS - 1) * 2);
+                    assert_eq!(history.last().unwrap().role, Role::Tool);
+                    assert_eq!(
+                        history.last().unwrap().tool_call_id.as_deref(),
+                        Some("call_7")
+                    );
+                    return Ok(ModelStep::Text("completed".into()));
+                }
+                Ok(ModelStep::Proposal {
+                    assistant_text: None,
+                    calls: vec![ToolProposal {
+                        id: format!("call_{model_calls}"),
+                        name: "read_file".into(),
+                        arguments_json: "{}".into(),
+                    }],
+                })
+            },
+            |calls| {
+                dispatches += 1;
+                Ok(vec![(calls[0].id.clone(), "ok".into())])
+            },
+        );
+        assert_eq!(result.unwrap(), "completed");
+        assert_eq!(model_calls, MAX_MODEL_STEPS);
+        assert_eq!(dispatches, MAX_MODEL_STEPS - 1);
+    }
+
 }
