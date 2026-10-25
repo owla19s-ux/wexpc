@@ -183,11 +183,35 @@ pub fn drive_tool_rounds(
     )
 }
 
+/// Checkpoint callback runs before any dispatch (pending=true) and after a
+/// complete batch has been durably settled (pending=false). Failure stops the loop.
+pub fn drive_tool_rounds_checkpointed(
+    prepared: &PreparedChat,
+    key: &str,
+    tools: Vec<ToolDefinition>,
+    settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
+    checkpoint: impl FnMut(&[Message], bool) -> Result<()>,
+) -> Result<String> {
+    drive_tool_rounds_recorded_with(
+        |history| execute_model_step(prepared, key, history, tools.clone()),
+        settle_approved,
+        checkpoint,
+    )
+}
+
 // Keep the same dispatch path injectable for deterministic, network-free
 // tests. Production always supplies execute_model_step as the model source.
 fn drive_tool_rounds_with(
+    next_model_step: impl FnMut(Vec<Message>) -> Result<ModelStep>,
+    settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
+) -> Result<String> {
+    drive_tool_rounds_recorded_with(next_model_step, settle_approved, |_, _| Ok(()))
+}
+
+fn drive_tool_rounds_recorded_with(
     mut next_model_step: impl FnMut(Vec<Message>) -> Result<ModelStep>,
     mut settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
+    mut checkpoint: impl FnMut(&[Message], bool) -> Result<()>,
 ) -> Result<String> {
     let mut transcript = Vec::new();
     for model_step_index in 0..MAX_MODEL_STEPS {
@@ -209,8 +233,24 @@ fn drive_tool_rounds_with(
                 }
                 // The Host callback is the *only* path to execution.
                 // Rejection or interrupted approval ends the turn here.
+                let mut pending = transcript.clone();
+                pending.push(Message {
+                    role: Role::Assistant,
+                    content: assistant_text.clone(),
+                    tool_calls: calls
+                        .iter()
+                        .map(|c| ToolCall {
+                            id: c.id.clone(),
+                            name: c.name.clone(),
+                            arguments_json: c.arguments_json.clone(),
+                        })
+                        .collect(),
+                    tool_call_id: None,
+                });
+                checkpoint(&pending, true)?;
                 let results = settle_approved(&calls)?;
                 transcript.extend(committed_tool_messages(&calls, &results, assistant_text)?);
+                checkpoint(&transcript, false)?;
             }
         }
     }
@@ -224,6 +264,61 @@ fn drive_tool_rounds_with(
 mod tests {
     use super::*;
     use serde_json::json;
+    fn checkpoint_test_proposal() -> ModelStep {
+        ModelStep::Proposal {
+            assistant_text: None,
+            calls: vec![ToolProposal {
+                id: "call_1".into(),
+                name: "read_file".into(),
+                arguments_json: "{}".into(),
+            }],
+        }
+    }
+    #[test]
+    fn failed_pending_checkpoint_prevents_dispatch() {
+        let mut dispatches = 0;
+        let result = drive_tool_rounds_recorded_with(
+            |_| Ok(checkpoint_test_proposal()),
+            |_| {
+                dispatches += 1;
+                Ok(vec![("call_1".into(), "result".into())])
+            },
+            |_, pending| {
+                assert!(pending);
+                Err(ServiceError::new("STORAGE_ERROR", "unwritable"))
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(dispatches, 0);
+    }
+    #[test]
+    fn failed_ready_checkpoint_stops_before_next_model_request() {
+        let mut dispatches = 0;
+        let mut model_requests = 0;
+        let mut phases = vec![];
+        let result = drive_tool_rounds_recorded_with(
+            |_| {
+                model_requests += 1;
+                Ok(checkpoint_test_proposal())
+            },
+            |_| {
+                dispatches += 1;
+                Ok(vec![("call_1".into(), "result".into())])
+            },
+            |_, pending| {
+                phases.push(pending);
+                if pending {
+                    Ok(())
+                } else {
+                    Err(ServiceError::new("STORAGE_ERROR", "disk full"))
+                }
+            },
+        );
+        assert!(result.is_err());
+        assert_eq!(dispatches, 1);
+        assert_eq!(model_requests, 1);
+        assert_eq!(phases, vec![true, false]);
+    }
     #[test]
     fn proposal_is_not_a_successful_text_reply() {
         let value = json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"x","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]});

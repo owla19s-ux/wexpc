@@ -9,17 +9,24 @@ use std::{
 use wex_api::ToolDefinition;
 use wex_desktop_service::{drive_tool_rounds, ApiMessage, PreparedChat};
 
-fn mock_exchange(fail_continuation: bool) -> (String, thread::JoinHandle<Vec<serde_json::Value>>) {
+fn mock_exchange_plan(
+    fail_continuation: bool,
+    resume: bool,
+) -> (String, thread::JoinHandle<Vec<serde_json::Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let worker = thread::spawn(move || {
         let mut captured = Vec::new();
-        for (index, response) in [
+        let replies = [
             r#"{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\"file_name\":\"demo.txt\"}"}}]}}]}"#,
             r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"verified reply"}}]}"#,
-        ].iter().enumerate() {
+        ];
+        for index in 0..if resume { 3 } else { 2 } {
+            let response = if index == 0 { replies[0] } else { replies[1] };
             let (mut socket, _) = listener.accept().unwrap();
-            socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+            socket
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .unwrap();
             let mut received = Vec::new();
             let mut chunk = [0u8; 4096];
             loop {
@@ -28,18 +35,26 @@ fn mock_exchange(fail_continuation: bool) -> (String, thread::JoinHandle<Vec<ser
                 received.extend_from_slice(&chunk[..n]);
                 if let Some(sep) = received.windows(4).position(|s| s == b"\r\n\r\n") {
                     let header = String::from_utf8_lossy(&received[..sep]).to_ascii_lowercase();
-                    let len: usize = header.lines()
+                    let len: usize = header
+                        .lines()
                         .find_map(|l| l.strip_prefix("content-length: "))
-                        .unwrap().parse().unwrap();
+                        .unwrap()
+                        .parse()
+                        .unwrap();
                     if received.len() >= sep + 4 + len {
-                        let value = serde_json::from_slice(&received[sep + 4..sep + 4 + len]).unwrap();
+                        let value =
+                            serde_json::from_slice(&received[sep + 4..sep + 4 + len]).unwrap();
                         captured.push(value);
                         break;
                     }
                 }
             }
             let body = response.as_bytes();
-            let status = if fail_continuation && index == 1 { "500 Internal Server Error" } else { "200 OK" };
+            let status = if fail_continuation && index == 1 {
+                "500 Internal Server Error"
+            } else {
+                "200 OK"
+            };
             let wire = format!(
                 "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
                 body.len()
@@ -51,6 +66,10 @@ fn mock_exchange(fail_continuation: bool) -> (String, thread::JoinHandle<Vec<ser
         captured
     });
     (url, worker)
+}
+
+fn mock_exchange(fail_continuation: bool) -> (String, thread::JoinHandle<Vec<serde_json::Value>>) {
+    mock_exchange_plan(fail_continuation, false)
 }
 
 #[test]
@@ -141,4 +160,51 @@ fn failed_model_continuation_retains_tool_result_without_redispatch() {
     assert!(recovered[0].result.contains("actual mock tool result"));
     // Reading persisted results is a local operation with no dispatch callback.
     assert_eq!(dispatches, 1);
+}
+
+#[test]
+fn checkpointed_receipts_resume_model_reply_without_a_tool_callback() {
+    use wex_desktop_service::{
+        drive_tool_rounds_checkpointed, execute_model_step, load_tool_checkpoint,
+        save_tool_checkpoint, ModelStep,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let (base_url, server) = mock_exchange_plan(true, true);
+    let chat = PreparedChat {
+        turn_id: "turn_1".into(),
+        conversation_id: "conversation_1".into(),
+        connection_id: "connection_1".into(),
+        credential_ref: "mock".into(),
+        model_id: "mock-model".into(),
+        base_url,
+        messages: vec![ApiMessage {
+            role: "user".into(),
+            content: "Inspect demo".into(),
+        }],
+    };
+    let mut dispatches = 0;
+    let mut sequence = 0;
+    let result = drive_tool_rounds_checkpointed(
+        &chat,
+        "mock-key",
+        vec![],
+        |calls| {
+            dispatches += 1;
+            Ok(vec![(calls[0].id.clone(), "durable result".into())])
+        },
+        |history, pending| {
+            save_tool_checkpoint(dir.path(), &chat, sequence, history, pending)?;
+            sequence += 1;
+            Ok(())
+        },
+    );
+    assert!(result.is_err());
+    assert_eq!(dispatches, 1);
+    let restored = load_tool_checkpoint(dir.path(), &chat).unwrap();
+    let reply = execute_model_step(&chat, "mock-key", restored, vec![]).unwrap();
+    assert!(matches!(reply,ModelStep::Text(ref text) if text=="verified reply"));
+    assert_eq!(dispatches, 1);
+    let requests = server.join().unwrap();
+    assert_eq!(requests.len(), 3);
+    assert_eq!(requests[1]["messages"], requests[2]["messages"]);
 }
