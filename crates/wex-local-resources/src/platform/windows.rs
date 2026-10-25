@@ -306,6 +306,52 @@ pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadErro
     Ok(bytes)
 }
 
+/// Exclusive create beneath the trusted directory handle. Never overwrite.
+/// Failure after creation may leave a partial file and must not be retried blindly.
+pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), FileReadError> {
+    use std::io::Write;
+    if !valid_leaf(leaf) || bytes.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let name: Vec<u16> = OsStr::new(leaf).encode_wide().collect();
+    if name.is_empty() || name.len() > 255 || name.contains(&0) {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let object_name = UnicodeString { length: (name.len()*2) as u16,
+        maximum_length: (name.len()*2) as u16, buffer: name.as_ptr() };
+    let mut attributes = ObjectAttributes {
+        length: std::mem::size_of::<ObjectAttributes>() as u32,
+        root_directory: root.as_raw_handle() as isize,
+        object_name: &object_name, attributes: OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null(), security_quality_of_service: std::ptr::null(),
+    };
+    let mut iosb = IoStatusBlock { status: 0, information: 0 };
+    let mut handle = INVALID_HANDLE_VALUE;
+    // FILE_CREATE fails if this name already exists; OPEN_REPARSE_POINT never follows links.
+    const FILE_WRITE_DATA: u32 = 0x0002;
+    const FILE_CREATE: u32 = 0x0000_0002;
+    let status = unsafe { NtCreateFile(&mut handle,
+        FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+        &mut attributes, &mut iosb, std::ptr::null(), 0,
+        FILE_SHARE_ALL, FILE_CREATE,
+        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+        std::ptr::null(), 0) };
+    if status < 0 || handle == INVALID_HANDLE_VALUE {
+        return Err(FileReadError::Resource(ResourceError::Unavailable));
+    }
+    // SAFETY: NtCreateFile returned a new owned handle.
+    let mut file = unsafe { File::from_raw_handle(handle as RawHandle) };
+    let root_info = information(root).map_err(FileReadError::Resource)?;
+    let new_info = information(&file).map_err(FileReadError::Resource)?;
+    regular(&new_info)?;
+    if new_info.volume_serial != root_info.volume_serial {
+        return Err(FileReadError::Resource(ResourceError::OutsideDirectory));
+    }
+    file.write_all(bytes).map_err(|_| FileReadError::Changed)?;
+    file.sync_all().map_err(|_| FileReadError::Changed)?;
+    Ok(())
+}
+
 fn information(file: &File) -> Result<ByHandleFileInformation, ResourceError> {
     let mut info = ByHandleFileInformation {
         attributes: 0,
