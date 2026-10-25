@@ -91,6 +91,17 @@ fn selection(s: &DesktopSnapshot, connection_id: &str, model: &str) -> Result<()
     Ok(())
 }
 
+/// A task assignee must have an explicit duty in its project.
+/// A user-level secretary duty alone is not a project/task assignment.
+fn task_member_assigned(s: &DesktopSnapshot, agent_id: &str, project_id: &str) -> bool {
+    s.agents.iter().any(|a| a.id == agent_id)
+        && (s.agent_duties.iter().any(|d| {
+            d.agent_id == agent_id && d.project_id.as_deref() == Some(project_id)
+        }) || s.agents.iter().any(|a| {
+            a.id == agent_id && a.project_id == project_id
+        }))
+}
+
 impl DesktopService {
     pub fn open(path: &Path) -> Result<Self> {
         Self::init(DesktopStore::open(path)?)
@@ -283,13 +294,11 @@ impl DesktopService {
         self.mutate(|s| {
             project_exists(s, &input.project_id)?;
             if input.agent_ids.iter().any(|id| {
-                !s.agents
-                    .iter()
-                    .any(|a| &a.id == id && a.project_id == input.project_id)
+                !task_member_assigned(s, id, &input.project_id)
             }) {
                 return Err(ServiceError::new(
                     "INVALID_BINDING",
-                    "任务成员必须属于该项目",
+                    "任务成员必须拥有该项目的职责分配",
                 ));
             }
             let task = Task {
@@ -322,14 +331,12 @@ impl DesktopService {
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
             if task.project_id != input.project_id
                 || input.agent_ids.iter().any(|id| {
-                    !s.agents
-                        .iter()
-                        .any(|a| &a.id == id && a.project_id == task.project_id)
+                    !task_member_assigned(s, id, &task.project_id)
                 })
             {
                 return Err(ServiceError::new(
                     "INVALID_BINDING",
-                    "任务项目不可通过编辑变更，成员必须属于该项目",
+                    "任务项目不可通过编辑变更，成员必须拥有该项目职责分配",
                 ));
             }
             let task = s
