@@ -2,7 +2,7 @@
 //! Cargo builds may execute repository build scripts: always require a separate
 //! human-approved command intent, never infer access from a project link.
 use crate::{Result, ServiceError};
-use std::{io::Read, path::Path};
+use std::path::Path;
 use wex_core::operation::{Action, Dispatch};
 
 /// The only commands allowed by this first-stage terminal adapter.
@@ -23,6 +23,13 @@ impl TerminalTask {
         match self {
             Self::CargoTest => &["test", "--workspace", "--locked"],
             Self::CargoFmtCheck => &["fmt", "--all", "--", "--check"],
+        }
+    }
+    pub fn process_request(self) -> crate::ProcessRequest {
+        crate::ProcessRequest {
+            program: "cargo".into(),
+            arguments: self.arguments().iter().map(|s| (*s).into()).collect(),
+            timeout_ms: 180_000,
         }
     }
 }
@@ -66,6 +73,43 @@ pub fn execute_approved_terminal_report(
     trusted_root: &Path,
     task: TerminalTask,
 ) -> Result<TerminalReport> {
+    let report = execute_approved_terminal_process_report_with_control(
+        dispatch,
+        resource_id,
+        trusted_root,
+        task,
+        &crate::ProcessCancellation::default(),
+    )?;
+    if report.interrupted() {
+        return Err(ServiceError::new(
+            "OUTCOME_UNKNOWN",
+            "Cargo已中断，副作用需核查；未自动重试",
+        ));
+    }
+    let truncated = report.stdout_truncated || report.stderr_truncated;
+    Ok(TerminalReport {
+        success: report.success,
+        exit_code: report.exit_code,
+        output: format!(
+            "{}{}{}",
+            report.stdout,
+            report.stderr,
+            if truncated {
+                "\n[输出已截断；退出状态为实际进程结果]"
+            } else {
+                ""
+            }
+        ),
+    })
+}
+
+pub fn execute_approved_terminal_process_report_with_control(
+    dispatch: &Dispatch,
+    resource_id: &str,
+    trusted_root: &Path,
+    task: TerminalTask,
+    control: &crate::ProcessCancellation,
+) -> Result<crate::ProcessReport> {
     if dispatch.intent.action != Action::Write
         || dispatch.intent.capability_id != task.capability()
         || dispatch.intent.resource_id != resource_id
@@ -85,77 +129,17 @@ pub fn execute_approved_terminal_report(
         .to_str()
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码无效"))?;
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
-    let report = super::process_dispatch::run_process(
+    super::process_dispatch::run_process_with_control(
         trusted_root,
-        &super::process_dispatch::ProcessRequest {
-            program: "cargo".into(),
-            arguments: task.arguments().iter().map(|s| (*s).into()).collect(),
-            timeout_ms: 180_000,
-        },
-    )?;
-    let truncated = report.stdout_truncated || report.stderr_truncated;
-    Ok(TerminalReport {
-        success: report.success,
-        exit_code: report.exit_code,
-        output: format!(
-            "{}{}{}",
-            report.stdout,
-            report.stderr,
-            if truncated {
-                "\n[输出已截断；退出状态为实际进程结果]"
-            } else {
-                ""
-            }
-        ),
-    })
-}
-
-// Keep at most `limit` bytes in memory, but drain the entire pipe.
-// Stopping the read early can make a successful Cargo process fail with a
-// broken pipe (or block while writing) before its true exit status is known.
-pub(super) fn collect_bounded_output(
-    mut source: impl Read,
-    limit: usize,
-) -> std::io::Result<(Vec<u8>, bool)> {
-    let mut output = Vec::new();
-    let mut truncated = false;
-    let mut chunk = [0u8; 8192];
-    loop {
-        let count = source.read(&mut chunk)?;
-        if count == 0 {
-            break;
-        }
-        let kept = count.min(limit.saturating_sub(output.len()));
-        output.extend_from_slice(&chunk[..kept]);
-        truncated |= kept < count;
-    }
-    Ok((output, truncated))
+        &task.process_request(),
+        control,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use wex_core::operation::OperationIntent;
-    #[test]
-    fn oversized_output_is_drained_without_unbounded_retention() {
-        let mut source = std::io::Cursor::new(vec![b'x'; 128 * 1024]);
-        let (output, truncated) = collect_bounded_output(&mut source, 64 * 1024).unwrap();
-        assert!(truncated);
-        assert_eq!(output.len(), 64 * 1024);
-        assert_eq!(source.position(), 128 * 1024);
-    }
-
-    #[test]
-    fn exact_limit_and_short_output_are_not_truncated() {
-        for size in [0, 4096, 64 * 1024] {
-            let mut source = std::io::Cursor::new(vec![b'y'; size]);
-            let (output, truncated) = collect_bounded_output(&mut source, 64 * 1024).unwrap();
-            assert!(!truncated);
-            assert_eq!(output.len(), size);
-            assert_eq!(source.position(), size as u64);
-        }
-    }
-
     #[test]
     fn cargo_failure_is_not_a_successful_receipt() {
         assert!(require_success(true).is_ok());

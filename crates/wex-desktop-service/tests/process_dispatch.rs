@@ -273,3 +273,104 @@ fn inherited_output_timeout_stops_the_unix_process_group() {
     std::thread::sleep(std::time::Duration::from_millis(900));
     assert!(!root.path().join("late-side-effect").exists());
 }
+#[test]
+fn cancellable_writer() {
+    if !std::env::args().any(|a| a == "--exact") {
+        return;
+    }
+    std::io::stdout()
+        .write_all(b"output before cancellation")
+        .unwrap();
+    std::io::stdout().flush().unwrap();
+    std::fs::write("process-started", "started").unwrap();
+    std::thread::sleep(std::time::Duration::from_secs(30));
+}
+#[test]
+fn cancelling_a_running_process_preserves_partial_output_and_unknown_effects() {
+    use wex_desktop_service::{
+        execute_approved_process_report_with_control, ProcessCancellation, ProcessTermination,
+    };
+    let root = tempfile::tempdir().unwrap();
+    let request = ProcessRequest {
+        arguments: vec![
+            "--exact".into(),
+            "cancellable_writer".into(),
+            "--nocapture".into(),
+        ],
+        timeout_ms: 30_000,
+        ..request()
+    };
+    let control = ProcessCancellation::default();
+    let dispatch = approved(root.path(), &request);
+    let report = std::thread::scope(|scope| {
+        let worker = scope.spawn(|| {
+            execute_approved_process_report_with_control(
+                &dispatch,
+                "selected",
+                root.path(),
+                &request,
+                &control,
+            )
+            .unwrap()
+        });
+        let start = std::time::Instant::now();
+        while !root.path().join("process-started").exists() {
+            assert!(start.elapsed() < std::time::Duration::from_secs(5));
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        control.cancel();
+        worker.join().unwrap()
+    });
+    assert_eq!(report.termination, ProcessTermination::Cancelled);
+    assert!(!report.success);
+    assert!(report.interrupted());
+    assert!(report.stdout.contains("output before cancellation"));
+}
+#[test]
+fn cancellation_before_spawn_has_no_filesystem_side_effect() {
+    use wex_desktop_service::{execute_approved_process_report_with_control, ProcessCancellation};
+    let root = tempfile::tempdir().unwrap();
+    let request = ProcessRequest {
+        arguments: vec!["--exact".into(), "workspace_writer".into()],
+        ..request()
+    };
+    let control = ProcessCancellation::default();
+    control.cancel();
+    assert_eq!(
+        execute_approved_process_report_with_control(
+            &approved(root.path(), &request),
+            "selected",
+            root.path(),
+            &request,
+            &control
+        )
+        .unwrap_err()
+        .code,
+        "PROCESS_CANCELLED"
+    );
+    assert!(!root.path().join("created-by-process.txt").exists());
+}
+#[test]
+fn cancellation_cannot_claim_acceptance_after_process_completion() {
+    use wex_desktop_service::{execute_approved_process_report_with_control, ProcessSupervisor};
+    let root = tempfile::tempdir().unwrap();
+    let request = ProcessRequest {
+        arguments: vec!["--exact".into(), "workspace_writer".into()],
+        ..request()
+    };
+    let supervisor = std::sync::Arc::new(ProcessSupervisor::default());
+    let lease = supervisor
+        .start("chat_1", "attempt_1", "op_process", &request)
+        .unwrap();
+    let report = execute_approved_process_report_with_control(
+        &approved(root.path(), &request),
+        "selected",
+        root.path(),
+        &request,
+        lease.control(),
+    )
+    .unwrap();
+    assert!(report.success);
+    assert!(supervisor.cancel("chat_1", "attempt_1").is_err());
+    assert!(!lease.control().is_cancelled());
+}

@@ -20,6 +20,6 @@ export function SavedToolResults({conversationId,turnId,busy}:{conversationId:st
     {loading&&<p>{items.length?'正在更新已保存输出…':'正在读取…'}</p>}
     {error&&<p className="error">{items.length?'刷新失败，以下仍为上次读取的输出：':''}{error}</p>}
     {!loading&&!error&&!items.length&&<p>没有已保存的正文；旧记录可能只有状态摘要，不能推断工具未执行。</p>}
-    {items.map(item=><details key={item.record_id}><summary>{item.sequence==null?'旧记录：顺序未记录':`保存顺序 ${item.sequence}`} · {item.tool_name} · {item.call_id}</summary>{item.tool_name==='run_command'?<ProcessOutput body={item.result}/>:<pre className="prewrap">{item.result}</pre>}</details>)}
+    {items.map(item=><details key={item.record_id}><summary>{item.sequence==null?'旧记录：顺序未记录':`保存顺序 ${item.sequence}`} · {item.tool_name} · {item.call_id}</summary>{['run_command','cargo_test','cargo_fmt_check'].includes(item.tool_name)?<ProcessOutput body={item.result}/>:<pre className="prewrap">{item.result}</pre>}</details>)}
   </section>;
 }

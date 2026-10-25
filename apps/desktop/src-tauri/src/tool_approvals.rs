@@ -717,15 +717,45 @@ fn review_local_command(
         Some(&intent.intent_digest),
         None,
     )?;
+    let cargo_task = match call.name.as_str() {
+        "cargo_test" => Some(wex_desktop_service::TerminalTask::CargoTest),
+        "cargo_fmt_check" => Some(wex_desktop_service::TerminalTask::CargoFmtCheck),
+        _ => None,
+    };
+    let monitored_request = process_request
+        .clone()
+        .or_else(|| cargo_task.map(|task| task.process_request()));
+    let supervisor = app.state::<crate::Processes>();
+    let lease = monitored_request
+        .as_ref()
+        .map(|request| supervisor.start(&chat.conversation_id, &attempt_id, &operation_id, request))
+        .transpose()?;
     let mut process_details = None;
-    let outcome: Result<(bool, Option<i32>, String)> = if let Some(request) = &process_request {
-        wex_desktop_service::execute_approved_process_report(
-            &dispatch,
-            &resource_id,
-            &root,
-            request,
+    let mut interrupted_process = false;
+    let process_result = if let Some(request) = &process_request {
+        Some(
+            wex_desktop_service::execute_approved_process_report_with_control(
+                &dispatch,
+                &resource_id,
+                &root,
+                request,
+                lease.as_ref().expect("process lease").control(),
+            ),
         )
-        .and_then(|report| {
+    } else {
+        cargo_task.map(|task| {
+            wex_desktop_service::execute_approved_terminal_process_report_with_control(
+                &dispatch,
+                &resource_id,
+                &root,
+                task,
+                lease.as_ref().expect("cargo lease").control(),
+            )
+        })
+    };
+    let outcome: Result<(bool, Option<i32>, String)> = if let Some(result) = process_result {
+        result.and_then(|report| {
+            interrupted_process = report.interrupted();
             let output = serde_json::to_string(&report).map_err(|_| {
                 ServiceError::new("OUTCOME_UNKNOWN", "进程结果编码失败，须核查副作用")
             })?;
@@ -735,24 +765,15 @@ fn review_local_command(
             })?);
             Ok(result)
         })
-    } else if call.name == "git_status" || call.name == "git_diff" {
-        if call.name == "git_diff" {
-            wex_desktop_service::approved_git_diff(&dispatch, &resource_id, &root)
-                .map(|text| (true, None, text))
-        } else {
-            wex_desktop_service::approved_git_status(&dispatch, &resource_id, &root)
-                .map(|text| (true, None, text))
-        }
+    } else if call.name == "git_diff" {
+        wex_desktop_service::approved_git_diff(&dispatch, &resource_id, &root)
+            .map(|text| (true, None, text))
     } else {
-        let task = if call.name == "cargo_test" {
-            wex_desktop_service::TerminalTask::CargoTest
-        } else {
-            wex_desktop_service::TerminalTask::CargoFmtCheck
-        };
-        wex_desktop_service::execute_approved_terminal_report(&dispatch, &resource_id, &root, task)
-            .map(|report| (report.success, report.exit_code, report.output))
+        wex_desktop_service::approved_git_status(&dispatch, &resource_id, &root)
+            .map(|text| (true, None, text))
     };
     let status = match &outcome {
+        _ if interrupted_process => "unknown",
         Ok((true, _, _)) => "succeeded",
         Ok((false, _, _)) => "failed",
         Err(e) if e.code == "OUTCOME_UNKNOWN" || e.code == "TOOL_TIMEOUT" => "unknown",
@@ -762,15 +783,17 @@ fn review_local_command(
         .as_ref()
         .ok()
         .map(|(_, _, value)| digest_arguments("tool_receipt", &evidence_id, &[value.as_bytes()]));
-    journal(
-        app,
-        chat,
-        &attempt_id,
-        &operation_id,
-        status,
-        evidence_hash.as_deref(),
-        None,
-    )?;
+    if !interrupted_process {
+        journal(
+            app,
+            chat,
+            &attempt_id,
+            &operation_id,
+            status,
+            evidence_hash.as_deref(),
+            None,
+        )?;
+    }
     let core_outcome = match status {
         "succeeded" => Outcome::Succeeded {
             evidence_ref: evidence_id.clone(),
@@ -789,7 +812,52 @@ fn review_local_command(
     } else {
         result
     };
-    Ok(serde_json::json!({"evidence_ref":evidence_id,"success":success,"exit_code":exit_code,"output":result,"process":process_details}).to_string())
+    let body=serde_json::json!({"evidence_ref":evidence_id,"success":success,"exit_code":exit_code,"output":result,"process":process_details}).to_string();
+    if interrupted_process {
+        let root = app
+            .path()
+            .app_data_dir()
+            .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "进程已中断，无法定位回执目录"))?;
+        return persist_interrupted_process(
+            &root,
+            chat,
+            call,
+            &wex_desktop_service::ToolReceiptMarker {
+                operation_id,
+                attempt_id,
+                state: "unknown".into(),
+                content_digest: evidence_hash,
+                conversation_id: Some(chat.conversation_id.clone()),
+                turn_id: Some(chat.turn_id.clone()),
+                policy: None,
+            },
+            &body,
+        );
+    }
+    Ok(body)
+}
+
+/// Unknown is durable before the partial body. Returning an error deliberately
+/// prevents the tool driver from issuing another model/tool step automatically.
+fn persist_interrupted_process(
+    root: &std::path::Path,
+    chat: &PreparedChat,
+    call: &ToolProposal,
+    marker: &wex_desktop_service::ToolReceiptMarker,
+    body: &str,
+) -> Result<String> {
+    wex_desktop_service::append_tool_marker(&root.join("tool-receipts"), marker)?;
+    wex_desktop_service::save_tool_result(
+        &root.join("tool-results"),
+        &chat.conversation_id,
+        &chat.turn_id,
+        call,
+        body,
+    )?;
+    Err(ServiceError::new(
+        "OUTCOME_UNKNOWN",
+        "本地进程已取消或中断；已保存可取得的输出，须核查副作用后再继续，未自动重跑",
+    ))
 }
 
 /// Ask policy displays the exact repo/path and, for writes, every byte
@@ -1341,6 +1409,75 @@ fn review_saved_create(
 #[cfg(test)]
 mod proposal_preflight_tests {
     use super::*;
+
+    #[test]
+    fn interrupted_process_persists_unknown_and_output_without_model_continuation() {
+        use wex_desktop_service::*;
+        let root =
+            std::env::temp_dir().join(format!("wex-interrupted-{}", uuid::Uuid::new_v4().simple()));
+        std::fs::create_dir_all(&root).unwrap();
+        let chat = PreparedChat {
+            conversation_id: "conv_1".into(),
+            turn_id: "turn_1".into(),
+            connection_id: "conn_1".into(),
+            model_id: "model".into(),
+            base_url: "https://example.test".into(),
+            credential_ref: "vault".into(),
+            messages: vec![ApiMessage {
+                role: "user".into(),
+                content: "run".into(),
+            }],
+        };
+        let proposal = call(
+            "run_command",
+            r#"{"program":"compiler","arguments":[],"timeout_ms":1000}"#,
+        );
+        let marker = ToolReceiptMarker {
+            operation_id: "op_1".into(),
+            attempt_id: "at_1".into(),
+            state: "unknown".into(),
+            content_digest: None,
+            conversation_id: Some(chat.conversation_id.clone()),
+            turn_id: Some(chat.turn_id.clone()),
+            policy: None,
+        };
+        let body =
+            r#"{"success":false,"process":{"termination":"cancelled","stdout":"partial output"}}"#;
+        let mut requests = 0;
+        let mut sequence = 0;
+        let result = drive_tool_rounds_from_history(
+            vec![],
+            |_| {
+                requests += 1;
+                Ok(ModelStep::Proposal {
+                    assistant_text: None,
+                    calls: vec![proposal.clone()],
+                })
+            },
+            |calls| {
+                persist_interrupted_process(&root, &chat, &calls[0], &marker, body)
+                    .map(|result| vec![(calls[0].id.clone(), result)])
+            },
+            |history, pending| {
+                save_tool_checkpoint(&root.join("checkpoints"), &chat, sequence, history, pending)?;
+                sequence += 1;
+                Ok(())
+            },
+        );
+        assert_eq!(result.unwrap_err().code, "OUTCOME_UNKNOWN");
+        assert_eq!(requests, 1);
+        assert_eq!(sequence, 1);
+        assert_eq!(
+            read_tool_markers(&root.join("tool-receipts"), "conv_1").unwrap()[0].state,
+            "unknown"
+        );
+        assert_eq!(
+            read_tool_results(&root.join("tool-results"), "conv_1", "turn_1").unwrap()[0].result,
+            body
+        );
+        assert!(load_tool_checkpoint(&root.join("checkpoints"), &chat).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn generic_process_arguments_are_typed_and_do_not_depend_on_github() {

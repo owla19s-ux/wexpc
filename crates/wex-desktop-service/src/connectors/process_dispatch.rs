@@ -6,7 +6,7 @@ use std::{
     io::Read,
     path::Path,
     process::{Command, Stdio},
-    sync::mpsc,
+    sync::{Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -50,8 +50,17 @@ impl ProcessRequest {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProcessTermination {
+    Exited,
+    Cancelled,
+    TimedOut,
+    OutputInterrupted,
+}
 #[derive(Debug, Serialize)]
 pub struct ProcessReport {
+    pub termination: ProcessTermination,
     pub program: String,
     pub working_directory: String,
     pub timeout_ms: u64,
@@ -70,6 +79,31 @@ pub fn execute_approved_process_report(
     root: &Path,
     request: &ProcessRequest,
 ) -> Result<ProcessReport> {
+    let report = execute_approved_process_report_with_control(
+        dispatch,
+        resource,
+        root,
+        request,
+        &crate::ProcessCancellation::default(),
+    )?;
+    if report.interrupted() {
+        Err(unknown_error())
+    } else {
+        Ok(report)
+    }
+}
+impl ProcessReport {
+    pub fn interrupted(&self) -> bool {
+        self.termination != ProcessTermination::Exited
+    }
+}
+pub fn execute_approved_process_report_with_control(
+    dispatch: &Dispatch,
+    resource: &str,
+    root: &Path,
+    request: &ProcessRequest,
+    control: &crate::ProcessCancellation,
+) -> Result<ProcessReport> {
     if dispatch.intent.action != Action::Write
         || dispatch.intent.capability_id != "terminal_execute"
         || dispatch.intent.resource_id != resource
@@ -85,13 +119,73 @@ pub fn execute_approved_process_report(
             "程序参数或工作目录与批准时不一致",
         ));
     }
-    run_process(root, request)
+    run_process_with_control(root, request, control)
 }
 
-pub(super) fn run_process(root: &Path, request: &ProcessRequest) -> Result<ProcessReport> {
+#[derive(Default)]
+struct Capture {
+    bytes: Vec<u8>,
+    truncated: bool,
+    finished: bool,
+    failed: bool,
+}
+fn collect(mut source: impl Read + Send + 'static) -> Arc<Mutex<Capture>> {
+    let capture = Arc::new(Mutex::new(Capture::default()));
+    let target = capture.clone();
+    thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        loop {
+            let read = source.read(&mut chunk);
+            let Ok(mut state) = target.lock() else {
+                return;
+            };
+            match read {
+                Ok(0) => {
+                    state.finished = true;
+                    return;
+                }
+                Ok(size) => {
+                    let kept = size.min((64usize * 1024).saturating_sub(state.bytes.len()));
+                    state.bytes.extend_from_slice(&chunk[..kept]);
+                    state.truncated |= kept < size;
+                }
+                Err(_) => {
+                    state.failed = true;
+                    state.finished = true;
+                    return;
+                }
+            }
+        }
+    });
+    capture
+}
+pub(super) fn run_process_with_control(
+    root: &Path,
+    request: &ProcessRequest,
+    control: &crate::ProcessCancellation,
+) -> Result<ProcessReport> {
+    struct Finish<'a>(&'a crate::ProcessCancellation);
+    impl Drop for Finish<'_> {
+        fn drop(&mut self) {
+            self.0.finish();
+        }
+    }
+    let _finish = Finish(control);
     request.validate()?;
     if !root.is_absolute() || !root.is_dir() {
         return Err(ServiceError::new("RESOURCE_UNAVAILABLE", "工作目录不可用"));
+    }
+    if control.is_finished() {
+        return Err(ServiceError::new(
+            "PROCESS_FINISHED",
+            "执行控制已结算，不能用于新进程",
+        ));
+    }
+    if control.is_cancelled() {
+        return Err(ServiceError::new(
+            "PROCESS_CANCELLED",
+            "程序启动前已取消，未执行程序",
+        ));
     }
     let start = Instant::now();
     let timeout = Duration::from_millis(request.timeout_ms);
@@ -112,23 +206,26 @@ pub(super) fn run_process(root: &Path, request: &ProcessRequest) -> Result<Proce
     let mut child = command
         .spawn()
         .map_err(|_| ServiceError::new("TOOL_UNAVAILABLE", "无法启动所选程序"))?;
-    // An interrupted runner must not leave descendants holding its pipes.
-    // Unix process groups cover descendants that remain in the inherited group;
-    // this is lifecycle cleanup, not containment of a hostile setsid caller.
     #[cfg(unix)]
     struct Group {
         id: u32,
         armed: bool,
     }
     #[cfg(unix)]
-    impl Drop for Group {
-        fn drop(&mut self) {
-            // SAFETY: this group was created for our newly spawned child.
+    impl Group {
+        fn stop(&mut self) {
             if self.armed {
                 unsafe {
                     libc::kill(-(self.id as i32), libc::SIGKILL);
                 }
+                self.armed = false;
             }
+        }
+    }
+    #[cfg(unix)]
+    impl Drop for Group {
+        fn drop(&mut self) {
+            self.stop();
         }
     }
     #[cfg(unix)]
@@ -136,59 +233,128 @@ pub(super) fn run_process(root: &Path, request: &ProcessRequest) -> Result<Proce
         id: child.id(),
         armed: true,
     };
-    fn collect(
-        source: impl Read + Send + 'static,
-    ) -> mpsc::Receiver<std::io::Result<(Vec<u8>, bool)>> {
-        let (send, receive) = mpsc::sync_channel(1);
-        thread::spawn(move || {
-            let _ = send.send(super::terminal_dispatch::collect_bounded_output(
-                source,
-                64 * 1024,
-            ));
-        });
-        receive
-    }
     let stdout = collect(child.stdout.take().expect("piped stdout"));
     let stderr = collect(child.stderr.take().expect("piped stderr"));
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if start.elapsed() < timeout => thread::sleep(Duration::from_millis(10)),
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(unknown_error());
+    let mut status = None;
+    let termination = loop {
+        if control.is_cancelled() {
+            break ProcessTermination::Cancelled;
+        }
+        if start.elapsed() >= timeout {
+            break ProcessTermination::TimedOut;
+        }
+        if status.is_none() {
+            match child.try_wait() {
+                Ok(value) => status = value,
+                Err(_) => break ProcessTermination::OutputInterrupted,
             }
         }
+        let out = stdout.lock().map_err(|_| unknown_error())?;
+        let err = stderr.lock().map_err(|_| unknown_error())?;
+        if out.failed || err.failed {
+            break ProcessTermination::OutputInterrupted;
+        }
+        if status.is_some() && out.finished && err.finished {
+            break if control.finish() {
+                ProcessTermination::Exited
+            } else {
+                ProcessTermination::Cancelled
+            };
+        }
+        drop(out);
+        drop(err);
+        thread::sleep(Duration::from_millis(10));
     };
-    let out = stdout
-        .recv_timeout(timeout.saturating_sub(start.elapsed()))
-        .map_err(|_| unknown_error())?
-        .map_err(|_| unknown_error())?;
-    let err = stderr
-        .recv_timeout(timeout.saturating_sub(start.elapsed()))
-        .map_err(|_| unknown_error())?
-        .map_err(|_| unknown_error())?;
-    #[cfg(unix)]
-    {
-        group.armed = false;
+    if termination != ProcessTermination::Exited {
+        #[cfg(unix)]
+        group.stop();
+        if status.is_none() {
+            let _ = child.kill();
+            status = child.wait().ok();
+        }
+        // Bounded grace period for final pipe bytes after termination. Windows
+        // descendants can retain pipes until Job-object support is implemented.
+        let cleanup = Instant::now();
+        while cleanup.elapsed() < Duration::from_millis(200) {
+            if stdout.lock().map_err(|_| unknown_error())?.finished
+                && stderr.lock().map_err(|_| unknown_error())?.finished
+            {
+                break;
+            }
+            thread::sleep(Duration::from_millis(5));
+        }
+    } else {
+        #[cfg(unix)]
+        {
+            group.armed = false;
+        }
     }
+    let out = stdout.lock().map_err(|_| unknown_error())?;
+    let err = stderr.lock().map_err(|_| unknown_error())?;
     Ok(ProcessReport {
+        termination,
         program: request.program.clone(),
         working_directory: root.to_string_lossy().into_owned(),
         timeout_ms: request.timeout_ms,
-        success: status.success(),
-        exit_code: status.code(),
-        stdout: String::from_utf8_lossy(&out.0).into_owned(),
-        stderr: String::from_utf8_lossy(&err.0).into_owned(),
-        stdout_truncated: out.1,
-        stderr_truncated: err.1,
+        success: termination == ProcessTermination::Exited && status.is_some_and(|s| s.success()),
+        exit_code: status.and_then(|s| s.code()),
+        stdout: String::from_utf8_lossy(&out.bytes).into_owned(),
+        stderr: String::from_utf8_lossy(&err.bytes).into_owned(),
+        stdout_truncated: out.truncated,
+        stderr_truncated: err.truncated,
         elapsed_ms: start.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
     })
 }
 fn unknown_error() -> ServiceError {
     ServiceError::new(
         "OUTCOME_UNKNOWN",
-        "进程或输出管道超时/中断，副作用需核查；未自动重试",
+        "进程或输出管道中断，副作用需核查；未自动重试",
     )
+}
+
+#[cfg(test)]
+mod capture_tests {
+    use super::*;
+    fn finished(capture: &Arc<Mutex<Capture>>) {
+        let start = Instant::now();
+        while !capture.lock().unwrap().finished {
+            assert!(start.elapsed() < Duration::from_secs(2));
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    #[test]
+    fn oversized_output_is_drained_without_unbounded_retention() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        struct Counted {
+            cursor: std::io::Cursor<Vec<u8>>,
+            read: Arc<AtomicUsize>,
+        }
+        impl Read for Counted {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                let n = self.cursor.read(buffer)?;
+                self.read.fetch_add(n, Ordering::SeqCst);
+                Ok(n)
+            }
+        }
+        let count = Arc::new(AtomicUsize::new(0));
+        let capture = collect(Counted {
+            cursor: std::io::Cursor::new(vec![b'x'; 128 * 1024]),
+            read: count.clone(),
+        });
+        finished(&capture);
+        let state = capture.lock().unwrap();
+        assert!(state.truncated);
+        assert_eq!(state.bytes.len(), 64 * 1024);
+        assert_eq!(count.load(Ordering::SeqCst), 128 * 1024);
+    }
+    #[test]
+    fn exact_limit_and_short_output_are_not_truncated() {
+        for size in [0, 4096, 64 * 1024] {
+            let capture = collect(std::io::Cursor::new(vec![b'y'; size]));
+            finished(&capture);
+            let state = capture.lock().unwrap();
+            assert!(!state.truncated);
+            assert_eq!(state.bytes.len(), size);
+        }
+    }
 }
