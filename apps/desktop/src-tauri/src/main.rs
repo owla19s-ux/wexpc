@@ -224,6 +224,16 @@ struct TaskAdmissionPreview {
 }
 
 #[tauri::command]
+fn queue_dispatch_attempt(
+    state: State<'_, Shared>,
+    revision: u64,
+    task_id: String,
+    agent_id: String,
+) -> Result<DispatchAttempt> {
+    locked(&state)?.queue_dispatch_attempt(revision, &task_id, &agent_id)
+}
+
+#[tauri::command]
 fn preview_task_dispatch(
     state: State<'_, Shared>,
     revision: u64,
@@ -604,6 +614,7 @@ fn main() {
             append_task_record,
             publish_task,
             preview_task_dispatch,
+            queue_dispatch_attempt,
             create_conversation,
             send_message,
             active_processes,
