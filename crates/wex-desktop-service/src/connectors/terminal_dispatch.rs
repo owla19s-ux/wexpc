@@ -2,13 +2,7 @@
 //! Cargo builds may execute repository build scripts: always require a separate
 //! human-approved command intent, never infer access from a project link.
 use crate::{Result, ServiceError};
-use std::{
-    io::Read,
-    path::Path,
-    process::{Command, Stdio},
-    thread,
-    time::{Duration, Instant},
-};
+use std::path::Path;
 use wex_core::operation::{Action, Dispatch};
 
 /// The only commands allowed by this first-stage terminal adapter.
@@ -29,6 +23,13 @@ impl TerminalTask {
         match self {
             Self::CargoTest => &["test", "--workspace", "--locked"],
             Self::CargoFmtCheck => &["fmt", "--all", "--", "--check"],
+        }
+    }
+    pub fn process_request(self) -> crate::ProcessRequest {
+        crate::ProcessRequest {
+            program: "cargo".into(),
+            arguments: self.arguments().iter().map(|s| (*s).into()).collect(),
+            timeout_ms: 180_000,
         }
     }
 }
@@ -72,6 +73,43 @@ pub fn execute_approved_terminal_report(
     trusted_root: &Path,
     task: TerminalTask,
 ) -> Result<TerminalReport> {
+    let report = execute_approved_terminal_process_report_with_control(
+        dispatch,
+        resource_id,
+        trusted_root,
+        task,
+        &crate::ProcessCancellation::default(),
+    )?;
+    if report.interrupted() {
+        return Err(ServiceError::new(
+            "OUTCOME_UNKNOWN",
+            "Cargo已中断，副作用需核查；未自动重试",
+        ));
+    }
+    let truncated = report.stdout_truncated || report.stderr_truncated;
+    Ok(TerminalReport {
+        success: report.success,
+        exit_code: report.exit_code,
+        output: format!(
+            "{}{}{}",
+            report.stdout,
+            report.stderr,
+            if truncated {
+                "\n[输出已截断；退出状态为实际进程结果]"
+            } else {
+                ""
+            }
+        ),
+    })
+}
+
+pub fn execute_approved_terminal_process_report_with_control(
+    dispatch: &Dispatch,
+    resource_id: &str,
+    trusted_root: &Path,
+    task: TerminalTask,
+    control: &crate::ProcessCancellation,
+) -> Result<crate::ProcessReport> {
     if dispatch.intent.action != Action::Write
         || dispatch.intent.capability_id != task.capability()
         || dispatch.intent.resource_id != resource_id
@@ -91,112 +129,17 @@ pub fn execute_approved_terminal_report(
         .to_str()
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码无效"))?;
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
-    let mut child = Command::new("cargo")
-        .args(task.arguments())
-        .current_dir(trusted_root)
-        .env("CARGO_TERM_COLOR", "never")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|_| ServiceError::new("TOOL_UNAVAILABLE", "无法启动 Cargo"))?;
-    let out = child
-        .stdout
-        .take()
-        .ok_or_else(|| ServiceError::new("TOOL_ERROR", "无标准输出"))?;
-    let err = child
-        .stderr
-        .take()
-        .ok_or_else(|| ServiceError::new("TOOL_ERROR", "无错误输出"))?;
-    fn collect(
-        source: impl Read + Send + 'static,
-    ) -> thread::JoinHandle<std::io::Result<(Vec<u8>, bool)>> {
-        thread::spawn(move || collect_bounded_output(source, 64 * 1024))
-    }
-    let stdout = collect(out);
-    let stderr = collect(err);
-    let start = Instant::now();
-    let status = loop {
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) if start.elapsed() < Duration::from_secs(180) => {
-                thread::sleep(Duration::from_millis(50))
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(ServiceError::new(
-                    "OUTCOME_UNKNOWN",
-                    "Cargo 超时或异常中断；未自动重试",
-                ));
-            }
-        }
-    };
-    let (mut output, stdout_truncated) = stdout
-        .join()
-        .map_err(|_| ServiceError::new("TOOL_ERROR", "读取线程中断"))?
-        .map_err(|_| ServiceError::new("TOOL_ERROR", "标准输出读取失败"))?;
-    let (error, stderr_truncated) = stderr
-        .join()
-        .map_err(|_| ServiceError::new("TOOL_ERROR", "读取线程中断"))?
-        .map_err(|_| ServiceError::new("TOOL_ERROR", "错误输出读取失败"))?;
-    if stdout_truncated || stderr_truncated || output.len().saturating_add(error.len()) > 64 * 1024
-    {
-        return Err(ServiceError::new("TOOL_OUTPUT_LIMIT", "终端输出超过上限"));
-    }
-    output.extend(error);
-    let report = String::from_utf8_lossy(&output);
-    Ok(TerminalReport {
-        success: status.success(),
-        exit_code: status.code(),
-        output: report.into_owned(),
-    })
-}
-
-// Keep at most `limit` bytes in memory, but drain the entire pipe.
-// Stopping the read early can make a successful Cargo process fail with a
-// broken pipe (or block while writing) before its true exit status is known.
-fn collect_bounded_output(mut source: impl Read, limit: usize) -> std::io::Result<(Vec<u8>, bool)> {
-    let mut output = Vec::new();
-    let mut truncated = false;
-    let mut chunk = [0u8; 8192];
-    loop {
-        let count = source.read(&mut chunk)?;
-        if count == 0 {
-            break;
-        }
-        let kept = count.min(limit.saturating_sub(output.len()));
-        output.extend_from_slice(&chunk[..kept]);
-        truncated |= kept < count;
-    }
-    Ok((output, truncated))
+    super::process_dispatch::run_process_with_control(
+        trusted_root,
+        &task.process_request(),
+        control,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use wex_core::operation::OperationIntent;
-    #[test]
-    fn oversized_output_is_drained_without_unbounded_retention() {
-        let mut source = std::io::Cursor::new(vec![b'x'; 128 * 1024]);
-        let (output, truncated) = collect_bounded_output(&mut source, 64 * 1024).unwrap();
-        assert!(truncated);
-        assert_eq!(output.len(), 64 * 1024);
-        assert_eq!(source.position(), 128 * 1024);
-    }
-
-    #[test]
-    fn exact_limit_and_short_output_are_not_truncated() {
-        for size in [0, 4096, 64 * 1024] {
-            let mut source = std::io::Cursor::new(vec![b'y'; size]);
-            let (output, truncated) = collect_bounded_output(&mut source, 64 * 1024).unwrap();
-            assert!(!truncated);
-            assert_eq!(output.len(), size);
-            assert_eq!(source.position(), size as u64);
-        }
-    }
-
     #[test]
     fn cargo_failure_is_not_a_successful_receipt() {
         assert!(require_success(true).is_ok());

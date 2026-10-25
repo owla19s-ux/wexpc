@@ -1,7 +1,7 @@
 //! GitHub credential reference is local metadata; PAT lives in Windows vault.
+use serde::{Deserialize, Serialize};
 /// This service is independent from AI API connections and project associations.
 use std::{fs, io::Write, path::PathBuf};
-use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 use wex_desktop_service::{Result, ServiceError};
 
@@ -19,7 +19,9 @@ pub struct GithubStatus {
 }
 
 fn location(app: &AppHandle) -> Result<PathBuf> {
-    let root = app.path().app_data_dir()
+    let root = app
+        .path()
+        .app_data_dir()
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法定位 GitHub 配置目录"))?;
     Ok(root.join("github-connection.json"))
 }
@@ -42,15 +44,20 @@ fn load(app: &AppHandle) -> Result<Option<Config>> {
 
 fn persist(app: &AppHandle, config: &Config) -> Result<()> {
     let path = location(app)?;
-    let dir = path.parent().ok_or_else(|| ServiceError::new("STORAGE_ERROR", "路径无效"))?;
-    fs::create_dir_all(dir)
-        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法创建配置目录"))?;
+    let dir = path
+        .parent()
+        .ok_or_else(|| ServiceError::new("STORAGE_ERROR", "路径无效"))?;
+    fs::create_dir_all(dir).map_err(|_| ServiceError::new("STORAGE_ERROR", "无法创建配置目录"))?;
     let temporary = dir.join(format!("github_{}.tmp", uuid::Uuid::new_v4().simple()));
-    let mut file = fs::OpenOptions::new().write(true).create_new(true)
-        .open(&temporary).map_err(|_| ServiceError::new("STORAGE_ERROR", "无法写入 GitHub 配置"))?;
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法写入 GitHub 配置"))?;
     let body = serde_json::to_vec(config)
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法编码 GitHub 配置"))?;
-    file.write_all(&body).and_then(|_| file.sync_all())
+    file.write_all(&body)
+        .and_then(|_| file.sync_all())
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法持久化 GitHub 配置"))?;
     fs::rename(&temporary, &path)
         .map_err(|_| ServiceError::new("STORAGE_ERROR", "无法提交 GitHub 配置"))?;
@@ -73,10 +80,13 @@ pub fn configure(app: &AppHandle, token: &str) -> Result<()> {
     let previous = load(app)?;
     let reference = format!("github_{}", uuid::Uuid::new_v4().simple());
     crate::vault::save(&reference, token)?;
-    if let Err(error) = persist(app, &Config {
-        enabled: false,
-        credential_ref: reference.clone(),
-    }) {
+    if let Err(error) = persist(
+        app,
+        &Config {
+            enabled: false,
+            credential_ref: reference.clone(),
+        },
+    ) {
         crate::vault::remove(&reference);
         return Err(error);
     }
@@ -119,6 +129,9 @@ pub fn revoke(app: &AppHandle) -> Result<()> {
     match fs::remove_file(location(app)?) {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(_) => Err(ServiceError::new("STORAGE_ERROR", "凭证已删除，但无法清除 GitHub 配置，请重试")),
+        Err(_) => Err(ServiceError::new(
+            "STORAGE_ERROR",
+            "凭证已删除，但无法清除 GitHub 配置，请重试",
+        )),
     }
 }

@@ -48,7 +48,8 @@ fn validate(record: &SavedToolResult) -> Result<()> {
         || record.tool_name.is_empty()
         || record.tool_name.len() > 128
         || record.arguments_json.len() > 1024 * 1024
-        || record.result.len() > 512 * 1024
+        // Bounded process stdout/stderr can expand when JSON escapes controls.
+        || record.result.len() > crate::MAX_TOOL_RESULT_BYTES
         || !serde_json::from_str::<serde_json::Value>(&record.arguments_json)
             .is_ok_and(|v| v.is_object())
     {
