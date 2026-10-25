@@ -81,15 +81,24 @@ fn run_with_history(
                 }
             }
         }
-        if policies.policy("local_file_create").is_ok_and(|setting|
-            setting.policy != wex_desktop_service::PolicyChoice::Block)
+        if policies
+            .policy("local_file_create")
+            .is_ok_and(|setting| setting.policy != wex_desktop_service::PolicyChoice::Block)
         {
             if let Ok(status) = crate::local_access::open(app, &chat.conversation_id)
                 .and_then(|store| crate::local_access::status(&store))
             {
-                let directories: Vec<_> = status.directories.into_iter()
-                    .filter(|d| d.available && matches!(d.access,
-                        crate::local_access::Scope::Write | crate::local_access::Scope::ReadWrite))
+                let directories: Vec<_> = status
+                    .directories
+                    .into_iter()
+                    .filter(|d| {
+                        d.available
+                            && matches!(
+                                d.access,
+                                crate::local_access::Scope::Write
+                                    | crate::local_access::Scope::ReadWrite
+                            )
+                    })
                     .collect();
                 if !directories.is_empty() {
                     let ids: Vec<_> = directories.iter().map(|d| d.id.clone()).collect();
@@ -131,6 +140,14 @@ fn run_with_history(
                     r#"{"type":"object","properties":{},"additionalProperties":false}"#.into(),
             });
         }
+        tools.push(ToolDefinition {
+            name:"run_command".into(),
+            description:"Run a program with exact arguments in a user-selected working directory after explicit native approval. Returns actual exit status and bounded stdout/stderr. No implicit shell; timeout or interrupted output requires checking side effects before retry.".into(),
+            parameters_json:serde_json::json!({"type":"object","properties":{
+                "program":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},
+                "timeout_ms":{"type":"integer","minimum":1}},
+                "required":["program","arguments","timeout_ms"],"additionalProperties":false}).to_string(),
+        });
         if crate::github_config::status(app).is_ok_and(|status| status.enabled) {
             let available = |capability: &str| {
                 policies.policy(capability).is_ok_and(|setting| {
@@ -181,8 +198,10 @@ fn run_with_history(
                 .map(|call| {
                     let output: (String, String) = (|| -> Result<(String, String)> {
                         if call.name == "create_authorized_file" {
-                            return Ok((call.id.clone(),
-                                review_saved_create(app, chat, call, &before_step, policies)?));
+                            return Ok((
+                                call.id.clone(),
+                                review_saved_create(app, chat, call, &before_step, policies)?,
+                            ));
                         }
                         if call.name == "read_authorized_file" {
                             return Ok((
@@ -192,7 +211,11 @@ fn run_with_history(
                         }
                         if matches!(
                             call.name.as_str(),
-                            "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check"
+                            "git_status"
+                                | "git_diff"
+                                | "cargo_test"
+                                | "cargo_fmt_check"
+                                | "run_command"
                         ) {
                             return Ok((
                                 call.id.clone(),
@@ -317,11 +340,18 @@ fn preflight_local_edit_intent(call: &ToolProposal) -> Result<()> {
     }
     let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "修改参数无效"))?;
-    let obj = value.as_object().ok_or_else(|| ServiceError::new("INVALID_INPUT", "修改参数必须是对象"))?;
-    if obj.len() != 4 ||
-        !["directory_id", "file_name", "expected_sha256", "content"]
-            .iter().all(|key| obj.get(*key).is_some_and(serde_json::Value::is_string)) {
-        return Err(ServiceError::new("INVALID_INPUT", "修改参数字段与声明不一致"));
+    let obj = value
+        .as_object()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "修改参数必须是对象"))?;
+    if obj.len() != 4
+        || !["directory_id", "file_name", "expected_sha256", "content"]
+            .iter()
+            .all(|key| obj.get(*key).is_some_and(serde_json::Value::is_string))
+    {
+        return Err(ServiceError::new(
+            "INVALID_INPUT",
+            "修改参数字段与声明不一致",
+        ));
     }
     let intent = wex_core::local_edit::EditIntent {
         directory_id: obj["directory_id"].as_str().unwrap_or_default(),
@@ -329,10 +359,19 @@ fn preflight_local_edit_intent(call: &ToolProposal) -> Result<()> {
         expected_sha256: obj["expected_sha256"].as_str().unwrap_or_default(),
         replacement: obj["content"].as_str().unwrap_or_default(),
     };
-    intent.validate().map_err(|_| ServiceError::new("INVALID_INPUT", "文件修改版本或路径无效"))
+    intent
+        .validate()
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "文件修改版本或路径无效"))
 }
 
 fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
+    if call.name == "run_command" {
+        let request: wex_desktop_service::ProcessRequest =
+            serde_json::from_str(&call.arguments_json)
+                .map_err(|_| ServiceError::new("INVALID_INPUT", "程序执行参数与声明不一致"))?;
+        return request.validate();
+    }
+
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数不是有效 JSON"))?;
     let obj = args
@@ -371,7 +410,10 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
             ));
         }
     }
-    if matches!(call.name.as_str(), "read_file" | "read_authorized_file" | "create_authorized_file") {
+    if matches!(
+        call.name.as_str(),
+        "read_file" | "read_authorized_file" | "create_authorized_file"
+    ) {
         let leaf = obj["file_name"].as_str().unwrap_or_default();
         if leaf.len() > 255
             || leaf == "."
@@ -385,8 +427,13 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
             ));
         }
     }
-    if call.name == "create_authorized_file" && obj["content"].as_str().is_some_and(|s| s.len() > 65536) {
-        return Err(ServiceError::new("INVALID_INPUT", "本地新建内容超出当前64KiB安全上限"));
+    if call.name == "create_authorized_file"
+        && obj["content"].as_str().is_some_and(|s| s.len() > 65536)
+    {
+        return Err(ServiceError::new(
+            "INVALID_INPUT",
+            "本地新建内容超出当前64KiB安全上限",
+        ));
     }
     if call.name == "github_create_file"
         && obj
@@ -536,8 +583,8 @@ fn review_and_read(
     content.map(|body| (body, evidence_id))
 }
 
-/// The user chooses the target repository each time. No AI-supplied cwd,
-/// shell expression or arbitrary argument enters the subprocess.
+/// Current per-run native approval chooses cwd and displays exact arguments.
+/// This does not implement persistent terminal grants or a default shell.
 fn review_local_command(
     app: &AppHandle,
     chat: &PreparedChat,
@@ -546,13 +593,23 @@ fn review_local_command(
 ) -> Result<String> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "命令参数无效"))?;
-    if !args.as_object().is_some_and(|o| o.is_empty()) {
-        return Err(ServiceError::new(
-            "INVALID_INPUT",
-            "当前命令不接受模型提供的参数",
-        ));
-    }
+    let process_request = if call.name == "run_command" {
+        let request: wex_desktop_service::ProcessRequest = serde_json::from_value(args)
+            .map_err(|_| ServiceError::new("INVALID_INPUT", "程序执行参数无效"))?;
+        request.validate()?;
+        Some(request)
+    } else {
+        if !args.as_object().is_some_and(|o| o.is_empty()) {
+            return Err(ServiceError::new("INVALID_INPUT", "此工具不接受额外参数"));
+        }
+        None
+    };
+    let generic_summary = process_request
+        .as_ref()
+        .map(|r| serde_json::to_string(r).unwrap_or_default())
+        .unwrap_or_default();
     let (capability, action, command) = match call.name.as_str() {
+        "run_command" => ("terminal_execute",Action::Write,generic_summary.as_str()),
         "git_status" => (
             "git_status",
             Action::Read,
@@ -600,7 +657,7 @@ fn review_local_command(
         .to_str()
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码不支持"))?;
     let extra = if action == Action::Write {
-        "注意：Cargo 构建可能执行仓库自身的构建脚本，仅在信任此代码时批准。"
+        "程序可按当前系统账号权限产生文件、网络或其它副作用；工作目录选择不构成操作系统沙箱。仅在信任程序与项目时批准。"
     } else {
         "仅查询 Git 状态，不执行提交或推送。"
     };
@@ -627,7 +684,11 @@ fn review_local_command(
         resource_id: resource_id.clone(),
         action,
         expected_version: None,
-        intent_digest: digest_arguments(capability, &resource_id, &[cwd.as_bytes()]),
+        intent_digest: if let Some(request) = &process_request {
+            request.intent_digest(&resource_id, &root)?
+        } else {
+            digest_arguments(capability, &resource_id, &[cwd.as_bytes()])
+        },
     };
     let mut ledger = OperationLedger::default();
     ledger.propose(intent.clone()).map_err(|_| core_failure())?;
@@ -656,9 +717,25 @@ fn review_local_command(
         Some(&intent.intent_digest),
         None,
     )?;
-    let outcome: Result<(bool, Option<i32>, String)> = if call.name == "git_status"
-        || call.name == "git_diff"
-    {
+    let mut process_details = None;
+    let outcome: Result<(bool, Option<i32>, String)> = if let Some(request) = &process_request {
+        wex_desktop_service::execute_approved_process_report(
+            &dispatch,
+            &resource_id,
+            &root,
+            request,
+        )
+        .and_then(|report| {
+            let output = serde_json::to_string(&report).map_err(|_| {
+                ServiceError::new("OUTCOME_UNKNOWN", "进程结果编码失败，须核查副作用")
+            })?;
+            let result = (report.success, report.exit_code, output);
+            process_details = Some(serde_json::to_value(report).map_err(|_| {
+                ServiceError::new("OUTCOME_UNKNOWN", "进程回执编码失败，须核查副作用")
+            })?);
+            Ok(result)
+        })
+    } else if call.name == "git_status" || call.name == "git_diff" {
         if call.name == "git_diff" {
             wex_desktop_service::approved_git_diff(&dispatch, &resource_id, &root)
                 .map(|text| (true, None, text))
@@ -707,7 +784,12 @@ fn review_local_command(
         .finish(&operation_id, &attempt_id, core_outcome)
         .map_err(|_| core_failure())?;
     let (success, exit_code, result) = outcome?;
-    Ok(serde_json::json!({"evidence_ref":evidence_id,"success":success,"exit_code":exit_code,"output":result}).to_string())
+    let result = if process_details.is_some() {
+        "进程结果见 process 字段；截断标记不改变实际退出状态".to_string()
+    } else {
+        result
+    };
+    Ok(serde_json::json!({"evidence_ref":evidence_id,"success":success,"exit_code":exit_code,"output":result,"process":process_details}).to_string())
 }
 
 /// Ask policy displays the exact repo/path and, for writes, every byte
@@ -1134,7 +1216,9 @@ fn review_saved_create(
     let leaf = value["file_name"]
         .as_str()
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件名"))?;
-    let content = value["content"].as_str().ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件内容"))?;
+    let content = value["content"]
+        .as_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "缺少文件内容"))?;
     let policy = policies.policy("local_file_create")?;
     policies.check(&policy)?;
     let store = crate::local_access::open(app, &chat.conversation_id)?;
@@ -1176,7 +1260,11 @@ fn review_saved_create(
         resource_id: id.into(),
         action: Action::Write,
         expected_version: None,
-        intent_digest: digest_arguments("local_file_create", id, &[leaf.as_bytes(), content.as_bytes()]),
+        intent_digest: digest_arguments(
+            "local_file_create",
+            id,
+            &[leaf.as_bytes(), content.as_bytes()],
+        ),
     };
     let mut ledger = OperationLedger::default();
     ledger.propose(intent.clone()).map_err(|_| core_failure())?;
@@ -1217,10 +1305,13 @@ fn review_saved_create(
     )?;
     // The store checks its revision and live grant under the same lock as I/O.
     let body = crate::local_access::create(&dispatch, &store, state.revision, leaf, content);
-    let digest = body
-        .as_ref()
-        .ok()
-         .map(|_| digest_arguments("tool_receipt", &evidence_id, &[leaf.as_bytes(), content.as_bytes()]));
+    let digest = body.as_ref().ok().map(|_| {
+        digest_arguments(
+            "tool_receipt",
+            &evidence_id,
+            &[leaf.as_bytes(), content.as_bytes()],
+        )
+    });
     journal(
         app,
         chat,
@@ -1250,6 +1341,25 @@ fn review_saved_create(
 #[cfg(test)]
 mod proposal_preflight_tests {
     use super::*;
+
+    #[test]
+    fn generic_process_arguments_are_typed_and_do_not_depend_on_github() {
+        assert!(preflight_proposal(
+            &call(
+                "run_command",
+                r#"{"program":"python","arguments":["-m","pytest"],"timeout_ms":120000}"#
+            ),
+            false
+        )
+        .is_ok());
+        for args in [
+            r#"{"program":"python","arguments":"-m pytest","timeout_ms":120000}"#,
+            r#"{"program":"python","arguments":[],"timeout_ms":0}"#,
+            r#"{"program":"python","arguments":[],"timeout_ms":120000,"cwd":"C:/unapproved"}"#,
+        ] {
+            assert!(preflight_proposal(&call("run_command", args), false).is_err());
+        }
+    }
 
     fn call(name: &str, arguments_json: &str) -> ToolProposal {
         ToolProposal {
@@ -1518,34 +1628,55 @@ mod proposal_preflight_tests {
     #[test]
     fn existing_file_edit_schema_is_validated_but_never_dispatched() {
         let sha = "a".repeat(64);
-        let valid = call("update_authorized_file", &serde_json::json!({
-            "directory_id":"saved", "file_name":"main.rs",
-            "expected_sha256": sha, "content":"new content"
-        }).to_string());
+        let valid = call(
+            "update_authorized_file",
+            &serde_json::json!({
+                "directory_id":"saved", "file_name":"main.rs",
+                "expected_sha256": sha, "content":"new content"
+            })
+            .to_string(),
+        );
         assert!(preflight_local_edit_intent(&valid).is_ok());
-        assert_eq!(preflight_proposal(&valid, false).unwrap_err().code, "TOOL_UNSUPPORTED");
+        assert_eq!(
+            preflight_proposal(&valid, false).unwrap_err().code,
+            "TOOL_UNSUPPORTED"
+        );
         for payload in [
             serde_json::json!({"directory_id":"saved","file_name":"../secret","expected_sha256":sha,"content":"x"}),
             serde_json::json!({"directory_id":"saved","file_name":"main.rs","expected_sha256":"old","content":"x"}),
             serde_json::json!({"directory_id":"saved","file_name":"main.rs","expected_sha256":sha,"content":"x","path":"/tmp"}),
         ] {
-            assert_eq!(preflight_local_edit_intent(&call("update_authorized_file", &payload.to_string()))
-                .unwrap_err().code, "INVALID_INPUT");
+            assert_eq!(
+                preflight_local_edit_intent(&call("update_authorized_file", &payload.to_string()))
+                    .unwrap_err()
+                    .code,
+                "INVALID_INPUT"
+            );
         }
     }
 
     #[test]
     fn local_create_requires_exact_scope_and_no_traversal_or_extra_arguments() {
-        assert!(preflight_proposal(&call("create_authorized_file",
-            r#"{"directory_id":"saved","file_name":"new.rs","content":"fn main() {}"}"#), false).is_ok());
+        assert!(preflight_proposal(
+            &call(
+                "create_authorized_file",
+                r#"{"directory_id":"saved","file_name":"new.rs","content":"fn main() {}"}"#
+            ),
+            false
+        )
+        .is_ok());
         for bad in [
             r#"{"directory_id":"saved","file_name":"../escape","content":"x"}"#,
             r#"{"directory_id":"saved","file_name":"nested/file","content":"x"}"#,
             r#"{"directory_id":"saved","file_name":"new.rs","content":"x","path":"/tmp/other"}"#,
             r#"{"directory_id":"saved","file_name":"new.rs"}"#,
         ] {
-            assert_eq!(preflight_proposal(&call("create_authorized_file", bad), false)
-                .unwrap_err().code, "INVALID_INPUT");
+            assert_eq!(
+                preflight_proposal(&call("create_authorized_file", bad), false)
+                    .unwrap_err()
+                    .code,
+                "INVALID_INPUT"
+            );
         }
     }
 

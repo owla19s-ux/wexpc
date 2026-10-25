@@ -143,7 +143,7 @@ pub fn committed_tool_messages(
         tool_call_id: None,
     }];
     for (call, (id, body)) in calls.iter().zip(results) {
-        if &call.id != id || body.len() > 512 * 1024 {
+        if &call.id != id || body.len() > crate::MAX_TOOL_RESULT_BYTES {
             return Err(ServiceError::new("INVALID_INPUT", "工具回执 ID 或大小无效"));
         }
         messages.push(Message {
@@ -402,7 +402,7 @@ mod tests {
         assert!(output.len() < 512 * 1024);
         let result = committed_tool_messages(&calls, &[("a".into(), output)], None);
         assert!(result.is_ok());
-        let oversized = "a".repeat(512 * 1024 + 1);
+        let oversized = "a".repeat(1024 * 1024 + 1);
         assert_eq!(
             committed_tool_messages(&calls, &[("a".into(), oversized)], None)
                 .unwrap_err()

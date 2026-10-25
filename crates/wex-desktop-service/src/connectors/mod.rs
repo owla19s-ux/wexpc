@@ -3,6 +3,7 @@ pub mod github_dispatch;
 pub mod intent_binding;
 pub mod local_dispatch;
 pub mod openai_compatible;
+pub mod process_dispatch;
 pub mod terminal_dispatch;
 pub mod tool_proposals;
 pub mod tool_round;

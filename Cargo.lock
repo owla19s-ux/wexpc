@@ -1254,6 +1254,7 @@ version = "0.1.1"
 dependencies = [
  "base64 0.22.1",
  "fs2",
+ "libc",
  "reqwest",
  "ring",
  "rusqlite",
