@@ -48,7 +48,7 @@ it('edits and revokes current scope with the updated authorization revision',asy
  expect(ipc).toHaveBeenCalledWith('revoke_local_directory',{conversationId:'conv_A',expectedRevision:4,directoryId:'root_A'});
 });
 it('keeps prior scope on conflict and displays failure without retrying',async()=>{
- ipc.mockImplementation(async(name:string)=>{if(name==='local_directory_status')return state;if(name==='local_read_policy')return {policy:'ask',revision:0};throw new Error('授权已变化，请刷新');});
+ ipc.mockImplementation(async(name:string)=>{if(name==='local_directory_status')return state;if(name==='local_read_policy'||name==='local_create_policy')return {policy:'ask',revision:0};throw new Error('授权已变化，请刷新');});
  render(<LocalDirectories conversationId="conv_A" onChanged={async()=>{}}/>);
  const select=await screen.findByRole('combobox',{name:'目录权限 /project/A'});fireEvent.change(select,{target:{value:'write'}});
  await screen.findByText('授权已变化，请刷新');expect((select as HTMLSelectElement).value).toBe('read');
@@ -70,7 +70,7 @@ it('does not show a late directory save in another conversation',async()=>{
  let release:((v:unknown)=>void)|undefined;
  ipc.mockImplementation(async(name:string,args:Record<string,unknown>)=>{
  if(name==='local_directory_status')return args.conversationId==='conv_B'?{revision:0,directories:[]}:state;
- if(name==='local_read_policy')return {policy:'ask',revision:0};return new Promise(resolve=>{release=resolve;});
+ if(name==='local_read_policy'||name==='local_create_policy')return {policy:'ask',revision:0};return new Promise(resolve=>{release=resolve;});
  });
  const view=render(<LocalDirectories key="A" conversationId="conv_A" onChanged={async()=>{}}/>);
  await screen.findByText('/project/A');fireEvent.click(screen.getByRole('button',{name:'选择并授权目录'}));
