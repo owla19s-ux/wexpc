@@ -71,7 +71,7 @@ it('ignores an older status reply after credential replacement was rechecked',as
     throw new Error(name);
   });
   render(<GithubConnection run={run}/>);
-  fireEvent.change(screen.getByRole('textbox',{name:'GitHub Personal Access Token'}),{target:{value:'test-token'}});
+  fireEvent.change(screen.getByLabelText('GitHub Personal Access Token'),{target:{value:'test-token'}});
   fireEvent.click(screen.getByRole('button',{name:'保存 GitHub 凭证'}));
   await screen.findByText('GitHub 已配置，尚未启用');
   await act(async()=>{releaseFirst?.({configured:false,enabled:false});});
