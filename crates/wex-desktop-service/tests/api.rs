@@ -277,10 +277,7 @@ fn both_transports_reject_unsupported_transcript_roles_before_network() {
 
 #[test]
 fn both_transports_encode_the_same_ordered_transcript() {
-    let (url, handle) = server(
-        "200 OK",
-        r#"{"choices":[{"message":{"content":"ok"}}]}"#,
-    );
+    let (url, handle) = server("200 OK", r#"{"choices":[{"message":{"content":"ok"}}]}"#);
     let mut complete = request(url);
     complete.messages.insert(
         0,
@@ -354,7 +351,10 @@ fn non_streaming_accepts_explicit_stop_finish_reason() {
         "200 OK",
         r#"{"choices":[{"finish_reason":"stop","message":{"content":"complete"}}]}"#,
     );
-    assert_eq!(execute_chat(&request(url), "secret-key").unwrap(), "complete");
+    assert_eq!(
+        execute_chat(&request(url), "secret-key").unwrap(),
+        "complete"
+    );
     handle.join().unwrap();
 }
 
@@ -378,28 +378,40 @@ fn approved_tool_round_trip_sends_exact_tool_receipt_to_next_model_step() {
         let mut second_body = serde_json::Value::Null;
         for round in 0..2 {
             let (mut socket, _) = listener.accept().unwrap();
-            socket.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
             let mut incoming = Vec::new();
             let mut buf = [0u8; 4096];
             loop {
                 let n = socket.read(&mut buf).unwrap();
-                if n == 0 { break; }
+                if n == 0 {
+                    break;
+                }
                 incoming.extend_from_slice(&buf[..n]);
                 if let Some(pos) = incoming.windows(4).position(|v| v == b"\r\n\r\n") {
                     let head = String::from_utf8_lossy(&incoming[..pos]).to_lowercase();
-                    let len: usize = head.lines()
+                    let len: usize = head
+                        .lines()
                         .find_map(|line| line.strip_prefix("content-length: "))
-                        .unwrap().parse().unwrap();
-                    if incoming.len() >= pos + 4 + len { break; }
+                        .unwrap()
+                        .parse()
+                        .unwrap();
+                    if incoming.len() >= pos + 4 + len {
+                        break;
+                    }
                 }
             }
             let text = String::from_utf8(incoming).unwrap();
-            let body: serde_json::Value = serde_json::from_str(text.split("\r\n\r\n").nth(1).unwrap()).unwrap();
-            if round == 1 { second_body = body; }
+            let body: serde_json::Value =
+                serde_json::from_str(text.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+            if round == 1 {
+                second_body = body;
+            }
             let answer = if round == 0 {
-                r#"{"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]}"#
+                r#"{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]}"#
             } else {
-                r#"{"choices":[{"finish_reason":"stop","message":{"content":"读取完成"}}]}"#
+                r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"读取完成"}}]}"#
             };
             let header = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n", answer.len());
             socket.write_all(header.as_bytes()).unwrap();
@@ -409,9 +421,11 @@ fn approved_tool_round_trip_sends_exact_tool_receipt_to_next_model_step() {
     });
     let mut approvals = 0;
     let result = drive_tool_rounds(
-        &request(base), "fake-token",
+        &request(base),
+        "fake-token",
         vec![wex_api::ToolDefinition {
-            name: "read_file".into(), description: "test".into(),
+            name: "read_file".into(),
+            description: "test".into(),
             parameters_json: "{}".into(),
         }],
         |calls| {
@@ -420,7 +434,8 @@ fn approved_tool_round_trip_sends_exact_tool_receipt_to_next_model_step() {
             assert_eq!(calls[0].id, "call_1");
             Ok(vec![("call_1".into(), "trusted receipt".into())])
         },
-    ).unwrap();
+    )
+    .unwrap();
     assert_eq!(result, "读取完成");
     assert_eq!(approvals, 1);
     let body = server.join().unwrap();
@@ -436,14 +451,22 @@ fn tool_round_rejection_must_not_issue_second_api_request() {
     use wex_desktop_service::drive_tool_rounds;
     let (base, handle) = server(
         "200 OK",
-        r#"{"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]}"#,
+        r#"{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]}"#,
     );
-    let result = drive_tool_rounds(&request(base), "fake-token",
+    let result = drive_tool_rounds(
+        &request(base),
+        "fake-token",
         vec![wex_api::ToolDefinition {
-            name: "read_file".into(), description: "test".into(),
+            name: "read_file".into(),
+            description: "test".into(),
             parameters_json: "{}".into(),
         }],
-        |_| Err(wex_desktop_service::ServiceError::new("PERMISSION_DENIED", "user rejected")),
+        |_| {
+            Err(wex_desktop_service::ServiceError::new(
+                "PERMISSION_DENIED",
+                "user rejected",
+            ))
+        },
     );
     handle.join().unwrap();
     assert_eq!(result.unwrap_err().code, "PERMISSION_DENIED");

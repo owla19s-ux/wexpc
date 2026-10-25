@@ -1238,10 +1238,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wex-core"
-version = "0.1.0"
-
-[[package]]
 name = "wex-api"
 version = "0.1.1"
 dependencies = [
@@ -1249,10 +1245,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "wex-core"
+version = "0.1.0"
+
+[[package]]
 name = "wex-desktop-service"
 version = "0.1.1"
 dependencies = [
- "base64",
+ "base64 0.22.1",
  "fs2",
  "reqwest",
  "ring",

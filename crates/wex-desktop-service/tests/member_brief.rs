@@ -197,7 +197,8 @@ fn real_request_uses_same_brief_as_preview_and_updates_after_assignment_changes(
     assert!(content.contains("手动记录"));
     assert!(content.contains("未自动核验"));
     assert!(content.contains("自动派工"));
-    assert!(content.contains("尚未接通"));
+    assert!(content.contains("自动派工、持久权限策略及独立审查验证流程尚未形成"));
+    assert!(content.contains("不代表已授权或已读取文件"));
     assert!(!content.contains("PRIVATE_VAULT_REFERENCE"));
     let before = app.member_brief(&worker.id).unwrap();
     assert!(before.tasks.is_empty());
