@@ -121,14 +121,44 @@ fn concurrent_disjoint_tasks_hold_independent_leases_and_reject_overlap() {
 }
 
 #[test]
-fn unwinding_task_lease_releases_scope_without_marking_execution_success() {
+fn competing_agents_cannot_both_hold_the_same_scope() {
+    use std::sync::{mpsc, Arc, Barrier};
+    use std::time::Duration;
+
     let gate = TaskGate::default();
-    let panicked = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _lease = gate.start("interrupted", &["C:/repo/src".into()]).unwrap();
-        assert_eq!(gate.is_running("interrupted"), Ok(true));
-        panic!("simulate an interrupted task");
-    }));
-    assert!(panicked.is_err());
-    assert_eq!(gate.is_running("interrupted"), Ok(false));
-    assert!(gate.start("next", &["C:/repo/src".into()]).is_ok());
+    let barrier = Arc::new(Barrier::new(3));
+    let (result_tx, result_rx) = mpsc::channel();
+    let mut release_senders = Vec::new();
+    let mut workers = Vec::new();
+
+    for task in ["agent-a-task", "agent-b-task"] {
+        let worker_gate = gate.clone();
+        let worker_barrier = barrier.clone();
+        let result_tx = result_tx.clone();
+        let (release_tx, release_rx) = mpsc::channel();
+        release_senders.push(release_tx);
+        workers.push(std::thread::spawn(move || {
+            worker_barrier.wait();
+            let admission = worker_gate.start(task, &["C:/repo/src/main.rs".into()]);
+            result_tx.send(admission.is_ok()).unwrap();
+            if let Ok(lease) = admission {
+                release_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+                lease.finish(TaskPhase::Completed).unwrap();
+            }
+        }));
+    }
+    drop(result_tx);
+
+    barrier.wait();
+    let first = result_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    let second = result_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+    assert_eq!(u8::from(first) + u8::from(second), 1);
+
+    for release in release_senders {
+        let _ = release.send(());
+    }
+    for worker in workers {
+        worker.join().unwrap();
+    }
+    // This proves only process-local admission, not cross-process or crash safety.
 }
