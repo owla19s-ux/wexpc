@@ -1,5 +1,5 @@
 use super::task_gate::{TaskError, TaskGate, TaskPhase};
-use super::ReservationError;
+use super::{ReservationError, ScopeRegistry};
 
 #[test]
 fn task_lifecycle_releases_scope_on_completion() {
@@ -200,4 +200,32 @@ fn multi_scope_conflict_rejects_entire_task_without_partial_reservation() {
     drop(held);
     assert_eq!(gate.is_running("disjoint"), Ok(false));
     assert_eq!(gate.is_running("held"), Ok(false));
+}
+
+#[test]
+fn distinct_task_gates_share_registry_without_sharing_task_state() {
+    let registry = ScopeRegistry::default();
+    let first = TaskGate::with_registry(registry.clone());
+    let second = TaskGate::with_registry(registry);
+
+    let held = first.start("agent-a", &["C:/repo/src".into()]).unwrap();
+    assert!(matches!(
+        second.start("agent-b", &["c:/REPO/src/main.rs".into()]),
+        Err(TaskError::Scope(ReservationError::Conflict))
+    ));
+
+    // Separate agents can still work in disjoint directories.
+    let disjoint = second.start("agent-b", &["C:/repo/tests".into()]).unwrap();
+    assert_eq!(first.is_running("agent-b"), Ok(false));
+    assert_eq!(second.is_running("agent-b"), Ok(true));
+
+    drop(held);
+    let replacement = first.start("agent-c", &["C:/repo/src/main.rs".into()]).unwrap();
+    assert!(matches!(
+        second.start("agent-d", &["C:/repo/src".into()]),
+        Err(TaskError::Scope(ReservationError::Conflict))
+    ));
+    drop(replacement);
+    drop(disjoint);
+    assert!(second.start("agent-d", &["C:/repo/src".into()]).is_ok());
 }
