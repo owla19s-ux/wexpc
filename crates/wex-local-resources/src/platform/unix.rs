@@ -145,6 +145,44 @@ pub(super) fn prepare_replace_leaf(root: &File, leaf: &str, expected: &[u8]) -> 
     Ok(())
 }
 
+/// Strict existing-file replacement, using an exclusive advisory OS lock and
+/// one pinned inode. The lock coordinates cooperating WEX writers only; this
+/// primitive is not exposed to model tools until cross-process CAS is solved.
+pub(super) fn replace_leaf_locked(
+    root: &File, leaf: &str, expected: &[u8], replacement: &[u8],
+) -> Result<(), FileReadError> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+    if !valid_leaf(leaf) || expected.len() > 65536 || replacement.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let pinned = pin_leaf(root, leaf)?;
+    let meta = pinned.metadata().map_err(|_| unavailable())?;
+    regular(&meta)?;
+    if meta.len() > 65536 { return Err(FileReadError::TooLarge); }
+    let mut file = std::fs::OpenOptions::new().read(true).write(true)
+        .open(format!("/proc/self/fd/{}", pinned.as_raw_fd()))
+        .map_err(|_| unavailable())?;
+    let opened = file.metadata().map_err(|_| unavailable())?;
+    if stamp(&meta) != stamp(&opened) { return Err(FileReadError::Changed); }
+    // Advisory flock is not a security boundary against uncooperative writers.
+    // WEX's storage layer must additionally serialize its own edits.
+    let locked = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+    if locked != 0 { return Err(FileReadError::Changed); }
+    let mut actual = Vec::new();
+    (&file).take(65537).read_to_end(&mut actual).map_err(|_| unavailable())?;
+    if actual != expected || actual.len() as u64 != opened.len() {
+        return Err(FileReadError::Changed);
+    }
+    if stamp(&opened) != stamp(&file.metadata().map_err(|_| unavailable())?) {
+        return Err(FileReadError::Changed);
+    }
+    file.seek(SeekFrom::Start(0)).map_err(|_| unavailable())?;
+    file.write_all(replacement).map_err(|_| FileReadError::Changed)?;
+    file.set_len(replacement.len() as u64).map_err(|_| FileReadError::Changed)?;
+    file.sync_all().map_err(|_| FileReadError::Changed)?;
+    Ok(())
+}
+
 fn unavailable() -> FileReadError {
     FileReadError::Resource(ResourceError::Unavailable)
 }
