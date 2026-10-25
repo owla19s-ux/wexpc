@@ -231,3 +231,34 @@ fn read_only_grant_and_other_conversation_cannot_create_files() {
     assert!(different_store.create_authorized_at(None, &directory.id, "foreign.txt", b"data", true).is_err());
     assert!(!s.0.join("a/foreign.txt").exists());
 }
+
+#[test]
+fn create_denies_internal_roots_and_requires_exact_directory_binding() {
+    let s = Sandbox::new();
+    let store = s.store();
+    // An application-managed directory must never become a user-selected
+    // write target, even if a model proposes a plausible directory name.
+    assert!(store.authorize_directory(0, s.0.join("private"), Access::Write).is_err());
+    let directory = store.authorize_directory(0, s.0.join("a"), Access::Write).unwrap();
+    assert!(store.create_authorized_at(Some(1), &directory.id, "direct.txt", b"ok", true).is_ok());
+    assert!(store.create_authorized_at(Some(1), &directory.id, "nested/direct.txt", b"bad", true).is_err());
+    assert!(store.create_authorized_at(Some(1), &directory.id, ".", b"bad", true).is_err());
+    assert!(store.create_authorized_at(Some(1), &directory.id, "..", b"bad", true).is_err());
+    assert!(!s.0.join("a/nested").exists());
+    assert!(store.create_authorized_at(Some(1), &directory.id, "system-off.txt", b"bad", false).is_err());
+    assert!(!s.0.join("a/system-off.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn exclusive_create_rejects_existing_symbolic_link_without_following_it() {
+    use std::os::unix::fs::symlink;
+    let s = Sandbox::new();
+    let store = s.store();
+    let directory = store.authorize_directory(0, s.0.join("a"), Access::Write).unwrap();
+    let target = s.0.join("b/file");
+    let original = fs::read(&target).unwrap();
+    symlink(&target, s.0.join("a/link.txt")).unwrap();
+    assert!(store.create_authorized_at(Some(1), &directory.id, "link.txt", b"overwrite", true).is_err());
+    assert_eq!(fs::read(&target).unwrap(), original);
+}
