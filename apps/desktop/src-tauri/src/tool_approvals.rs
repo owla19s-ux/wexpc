@@ -302,19 +302,23 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     let repo = field(&args, "repo")?;
     let path = field(&args, "path")?;
     let write = call.name == "github_write_file";
+    let create = call.name == "github_create_file";
     let sha = if write { field(&args, "sha")? } else { "" };
-    let content = if write { field(&args, "content")? } else { "" };
+    let content = if write || create { field(&args, "content")? } else { "" };
     if owner.is_empty() || repo.is_empty() || path.is_empty()
         || owner.len() > 255 || repo.len() > 255 || path.len() > 4096
         || owner.chars().any(char::is_control)
         || repo.chars().any(char::is_control)
         || path.chars().any(char::is_control)
         || (write && (sha.len() != 40 || content.len() > 4096))
+        || (create && content.len() > 4096)
     {
         return Err(ServiceError::new("INVALID_INPUT", "GitHub 审批参数或文件内容超过限制"));
     }
     let summary = if write {
         format!("WEXPC 请求修改 GitHub 文件\n仓库：{owner}/{repo}\n文件：{path}\n原 SHA：{sha}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
+    } else if create {
+        format!("WEXPC 请求新建 GitHub 文件（仅当路径尚不存在）\n仓库：{owner}/{repo}\n文件：{path}\n写入字节数：{}\n完整写入内容：\n{content}",content.len())
     } else {
         format!("WEXPC 请求读取 GitHub 文件\n仓库：{owner}/{repo}\n文件：{path}")
     };
@@ -327,10 +331,12 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     }
     let token = crate::github_config::credential(app)?;
     let resource_id = digest_arguments("github_repo", "global", &[owner.as_bytes(), repo.as_bytes()]);
-    let capability = if write { "github_file_write" } else { "github_file_read" };
-    let action = if write { Action::Write } else { Action::Read };
+    let capability = if write { "github_file_write" } else if create { "github_file_create" } else { "github_file_read" };
+    let action = if write || create { Action::Write } else { Action::Read };
     let parameters: Vec<&[u8]> = if write {
         vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes(), sha.as_bytes(), content.as_bytes()]
+    } else if create {
+        vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes(), content.as_bytes()]
     } else {
         vec![owner.as_bytes(), repo.as_bytes(), path.as_bytes()]
     };
@@ -356,6 +362,10 @@ fn review_github(app: &AppHandle, chat: &PreparedChat, call: &ToolProposal) -> R
     let outcome = if write {
         wex_desktop_service::update_approved_github_file(
             &dispatch, &resource_id, owner, repo, path, sha, content.as_bytes(), &token,
+        )
+    } else if create {
+        wex_desktop_service::create_approved_github_file(
+            &dispatch, &resource_id, owner, repo, path, content.as_bytes(), &token,
         )
     } else {
         wex_desktop_service::read_approved_github_file(
