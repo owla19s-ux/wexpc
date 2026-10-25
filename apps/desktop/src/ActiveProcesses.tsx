@@ -7,16 +7,17 @@ export function ActiveProcesses({conversationId,busy}:{conversationId:string;bus
   const [failure,setFailure]=useState<{conversationId:string;text:string}>({conversationId,text:''});
   const [cancelFailure,setCancelFailure]=useState<{conversationId:string;text:string}>({conversationId,text:''});
   const [sending,setSending]=useState<Set<string>>(new Set());
+  const [querying,setQuerying]=useState(false);
   const [refresh,setRefresh]=useState(0);
   useEffect(()=>{
     let active=true;let reading=false;
     async function read() {
-      if(reading)return;reading=true;
+      if(reading)return;reading=true;if(active)setQuerying(true);
       try {
         const rows=await command<Process[]>('active_processes',{conversationId});
         if(active){setSnapshot({conversationId,rows:rows.filter(p=>p.conversation_id===conversationId)});setFailure({conversationId,text:''});}
       }catch(e){if(active)setFailure({conversationId,text:errorMessage(e)});}
-      finally{reading=false;}
+      finally{reading=false;if(active)setQuerying(false);}
     }
     void read();const timer=window.setInterval(()=>void read(),1000);
     return ()=>{active=false;window.clearInterval(timer);};
@@ -39,7 +40,7 @@ export function ActiveProcesses({conversationId,busy}:{conversationId:string;bus
     {!items.length&&<p className="muted">当前没有查询到本会话的运行进程；历史结果请查看工具执行记录。</p>}
     {items.map(item=><article key={item.attempt_id}>
       <p>{item.program} {JSON.stringify(item.arguments)}</p><small>尝试已登记 {Math.floor(item.elapsed_ms/1000)} 秒 · 尝试 {item.attempt_id}</small>
-      {item.finished?<p>执行器已取得终态，正在保存回执。</p>:item.cancellation_requested?<p>已请求取消，等待执行器回收并保存回执。</p>:<button type="button" disabled={stale||sending.has(conversationId+':'+item.attempt_id)} onClick={()=>void cancel(item.attempt_id)}>取消此进程</button>}
+      {item.finished?<p>执行器已取得终态，正在保存回执。</p>:item.cancellation_requested?<p>已请求取消，等待执行器回收并保存回执。</p>:<button type="button" disabled={stale||querying||sending.has(conversationId+':'+item.attempt_id)} onClick={()=>void cancel(item.attempt_id)}>取消此进程</button>}
     </article>)}
     {!!items.length&&<p className="muted">取消不会回滚已经发生的副作用；结果需按保存回执核查，不会自动重跑。</p>}
   </section>;
