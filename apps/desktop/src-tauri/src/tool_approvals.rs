@@ -50,7 +50,8 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         for call in calls {
             preflight_proposal(call, crate::github_config::status(app)?.enabled)?;
         }
-        calls.iter().map(|call| {
+        let mut completed = 0usize;
+        let result = calls.iter().map(|call| {
             if matches!(call.name.as_str(), "git_status" | "cargo_test" | "cargo_fmt_check") {
                 return Ok((call.id.clone(), review_local_command(app, chat, call)?));
             }
@@ -74,7 +75,19 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
             let (content, evidence_ref) = review_and_read(app, chat, leaf)?;
             let result = serde_json::json!({"content":content,"evidence_ref":evidence_ref});
             Ok((call.id.clone(), result.to_string()))
-        }).collect::<Result<Vec<_>>>()
+        }).inspect(|item| {
+            if item.is_ok() { completed += 1; }
+        }).collect::<Result<Vec<_>>>();
+        result.map_err(|error| {
+            if completed == 0 {
+                error
+            } else {
+                ServiceError::new(
+                    "TOOL_BATCH_PARTIAL",
+                    format!("本批已有 {completed} 项工具取得执行结果，后续失败（{}）。请核对回执后再继续，禁止自动重试", error.code),
+                )
+            }
+        })
     })
 }
 
