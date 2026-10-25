@@ -55,17 +55,13 @@ fn approved_git_read(
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "仓库路径编码不可用"))?;
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("git");
-    // A child must not inherit ambient Git repository/config overrides.
-    // Otherwise an approved -C worktree can silently target an unrelated
-    // Git directory, index or worktree supplied by the launching shell.
-    for key in [
-        "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
-        "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
-        "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0",
-        "GIT_CONFIG_PARAMETERS", "GIT_CONFIG", "GIT_NAMESPACE",
-        "GIT_CEILING_DIRECTORIES", "GIT_DISCOVERY_ACROSS_FILESYSTEM",
-    ] {
-        child.env_remove(key);
+    // Clear all Git-specific ambient variables, including numbered
+    // GIT_CONFIG_KEY_N entries and alternate indexes/worktrees.
+    // Windows environment variable names are case-insensitive.
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_") {
+            child.env_remove(key);
+        }
     }
     child
         .arg("--no-optional-locks")
@@ -141,23 +137,6 @@ fn collect_bounded_output(mut source: impl Read, limit: usize) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn approved_git_commands_cannot_inherit_repository_redirection() {
-        let root = tempfile::tempdir().unwrap();
-        let alternate = tempfile::tempdir().unwrap();
-        for dir in [root.path(), alternate.path()] {
-            let outcome = Command::new("git").args(["init", "--quiet"]).arg(dir).output().unwrap();
-            assert!(outcome.status.success());
-        }
-        // Git -C alone is insufficient when a launcher supplies GIT_DIR.
-        let mut unsafe_command = Command::new("git");
-        unsafe_command.env("GIT_DIR", alternate.path().join(".git"))
-            .arg("-C").arg(root.path()).args(GIT_STATUS_ARGS);
-        assert!(unsafe_command.status().unwrap().success());
-        // The production command explicitly removes Git's ambient overrides.
-        // Review the exact removal list above when adding new Git actions.
-    }
-
     #[test]
     fn oversized_git_output_is_drained_without_unbounded_retention() {
         let mut source = std::io::Cursor::new(vec![b'x'; 128 * 1024]);
