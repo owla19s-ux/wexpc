@@ -300,3 +300,26 @@ fn duplicate_new_id_in_a_single_proposal_is_rejected_before_dispatch() {
     assert_eq!(error.code, "TOOL_CALL_ID_REUSED");
     assert_eq!((dispatched, checkpointed), (0, 0));
 }
+
+#[test]
+fn repeated_tool_ids_in_restored_batches_fail_before_model_or_dispatch() {
+    let mut repeated = history();
+    repeated.extend(history());
+    let mut model_requests = 0;
+    let mut dispatched = 0;
+    let error = drive_tool_rounds_from_history(
+        repeated,
+        |_| {
+            model_requests += 1;
+            Ok(ModelStep::Text("invalid history was used".into()))
+        },
+        |_| {
+            dispatched += 1;
+            Ok(Vec::new())
+        },
+        |_, _| Ok(()),
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "TOOL_CHECKPOINT_ERROR");
+    assert_eq!((model_requests, dispatched), (0, 0));
+}
