@@ -749,6 +749,34 @@ mod publication_tests {
     }
 
     #[test]
+    fn claim_is_single_use_and_recovery_blocks_automatic_replay() {
+        let mut service = draft_service();
+        let revision = service.snapshot().unwrap().revision;
+        service.publish_task(revision, "task_1").unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        let queued = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        let claimed = service.claim_dispatch_attempt(revision, &queued.id).unwrap();
+        assert_eq!(claimed.status, DispatchAttemptStatus::InFlight);
+        let saved = service.snapshot().unwrap();
+        assert_eq!(
+            service.claim_dispatch_attempt(saved.revision, &queued.id).unwrap_err().code,
+            "ATTEMPT_NOT_PENDING"
+        );
+        assert_eq!(service.snapshot().unwrap().revision, saved.revision);
+        let original = saved.dispatch_attempts[0].clone();
+        service.mutate(|s| {
+            assert_eq!(s.dispatch_attempts[0].id, original.id);
+            s.dispatch_attempts[0].status = DispatchAttemptStatus::OutcomeUnknown;
+            Ok(())
+        }).unwrap();
+        assert_eq!(
+            service.claim_dispatch_attempt(service.snapshot().unwrap().revision, &queued.id).unwrap_err().code,
+            "ATTEMPT_NOT_PENDING"
+        );
+    }
+
+    #[test]
     fn dispatch_queue_rejects_stale_revision_without_creating_attempt() {
         let mut service = draft_service();
         let initial = service.snapshot().unwrap().revision;
