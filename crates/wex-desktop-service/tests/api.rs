@@ -78,7 +78,7 @@ fn server(status: &str, body: &str) -> (String, thread::JoinHandle<String>) {
 fn compatible_http_request_and_response_are_real_and_provider_errors_are_sanitized() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"message":{"content":"你好，WEX"}}]}"#,
+        r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"你好，WEX"}}]}"#,
     );
     assert_eq!(
         execute_chat(&request(url), "secret-key").unwrap(),
@@ -206,7 +206,7 @@ fn streaming_adapter_does_not_execute_provider_tool_calls() {
 fn streaming_adapter_rejects_json_success_body() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"message":{"content":"not an SSE stream"}}]}"#,
+        r#"{"choices":[{"message":{"role":"assistant","content":"not an SSE stream"}}]}"#,
     );
     let error = execute_chat_stream(&request(url), "secret-key").unwrap_err();
     handle.join().unwrap();
@@ -247,7 +247,7 @@ fn streaming_adapter_rejects_incomplete_tool_calls() {
 fn non_streaming_malformed_tool_calls_never_become_text_success() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"message":{"content":"looks successful","tool_calls":{"unexpected":"object"}}}]}"#,
+        r#"{"choices":[{"message":{"role":"assistant","content":"looks successful","tool_calls":{"unexpected":"object"}}}]}"#,
     );
     let error = execute_chat(&request(url), "secret-key").unwrap_err();
     handle.join().unwrap();
@@ -258,7 +258,7 @@ fn non_streaming_malformed_tool_calls_never_become_text_success() {
 fn non_streaming_valid_tool_intent_is_not_executed_or_committed_as_text() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"message":{"content":"looks successful","tool_calls":[{"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{}"}}]}}]}"#,
+        r#"{"choices":[{"message":{"role":"assistant","content":"looks successful","tool_calls":[{"id":"call_1","type":"function","function":{"name":"write_file","arguments":"{}"}}]}}]}"#,
     );
     let error = execute_chat(&request(url), "secret-key").unwrap_err();
     handle.join().unwrap();
@@ -277,7 +277,10 @@ fn both_transports_reject_unsupported_transcript_roles_before_network() {
 
 #[test]
 fn both_transports_encode_the_same_ordered_transcript() {
-    let (url, handle) = server("200 OK", r#"{"choices":[{"message":{"content":"ok"}}]}"#);
+    let (url, handle) = server(
+        "200 OK",
+        r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]}"#,
+    );
     let mut complete = request(url);
     complete.messages.insert(
         0,
@@ -314,7 +317,7 @@ fn both_transports_encode_the_same_ordered_transcript() {
 fn non_streaming_rejects_truncated_reply_even_with_text() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"finish_reason":"length","message":{"content":"unfinished"}}]}"#,
+        r#"{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"unfinished"}}]}"#,
     );
     let error = execute_chat(&request(url), "secret-key").unwrap_err();
     handle.join().unwrap();
@@ -325,7 +328,7 @@ fn non_streaming_rejects_truncated_reply_even_with_text() {
 fn non_streaming_rejects_tool_finish_reason_without_tool_payload() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"finish_reason":"tool_calls","message":{"content":"not a final reply"}}]}"#,
+        r#"{"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","content":"not a final reply"}}]}"#,
     );
     let error = execute_chat(&request(url), "secret-key").unwrap_err();
     handle.join().unwrap();
@@ -335,8 +338,8 @@ fn non_streaming_rejects_tool_finish_reason_without_tool_payload() {
 #[test]
 fn non_streaming_rejects_multiple_candidates_and_unknown_finish_reason() {
     for body in [
-        r#"{"choices":[{"message":{"content":"one"}},{"message":{"content":"two"}}]}"#,
-        r#"{"choices":[{"finish_reason":"unexpected","message":{"content":"one"}}]}"#,
+        r#"{"choices":[{"message":{"role":"assistant","content":"one"}},{"message":{"role":"assistant","content":"two"}}]}"#,
+        r#"{"choices":[{"finish_reason":"unexpected","message":{"role":"assistant","content":"one"}}]}"#,
     ] {
         let (url, handle) = server("200 OK", body);
         let error = execute_chat(&request(url), "secret-key").unwrap_err();
@@ -349,7 +352,7 @@ fn non_streaming_rejects_multiple_candidates_and_unknown_finish_reason() {
 fn non_streaming_accepts_explicit_stop_finish_reason() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"finish_reason":"stop","message":{"content":"complete"}}]}"#,
+        r#"{"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"complete"}}]}"#,
     );
     assert_eq!(
         execute_chat(&request(url), "secret-key").unwrap(),
@@ -362,7 +365,7 @@ fn non_streaming_accepts_explicit_stop_finish_reason() {
 fn legacy_function_call_cannot_be_committed_as_plain_text() {
     let (url, handle) = server(
         "200 OK",
-        r#"{"choices":[{"message":{"content":"looks complete","function_call":{"name":"write_file","arguments":"{}"}}}]}"#,
+        r#"{"choices":[{"message":{"role":"assistant","content":"looks complete","function_call":{"name":"write_file","arguments":"{}"}}}]}"#,
     );
     let error = execute_chat(&request(url), "secret-key").unwrap_err();
     handle.join().unwrap();

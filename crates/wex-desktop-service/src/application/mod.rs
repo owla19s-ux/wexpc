@@ -1,9 +1,9 @@
 use crate::*;
+mod execution_policy;
 mod member_brief;
 mod organization;
 mod task_records;
 mod tool_reply;
-mod execution_policy;
 use crate::infrastructure::sqlite::DesktopStore;
 use std::{collections::BTreeMap, path::Path};
 use wex_core::connection_session::{
@@ -97,11 +97,13 @@ fn selection(s: &DesktopSnapshot, connection_id: &str, model: &str) -> Result<()
 /// A user-level secretary duty alone is not a project/task assignment.
 fn task_member_assigned(s: &DesktopSnapshot, agent_id: &str, project_id: &str) -> bool {
     s.agents.iter().any(|a| a.id == agent_id)
-        && (s.agent_duties.iter().any(|d| {
-            d.agent_id == agent_id && d.project_id.as_deref() == Some(project_id)
-        }) || s.agents.iter().any(|a| {
-            a.id == agent_id && a.project_id == project_id
-        }))
+        && (s
+            .agent_duties
+            .iter()
+            .any(|d| d.agent_id == agent_id && d.project_id.as_deref() == Some(project_id))
+            || s.agents
+                .iter()
+                .any(|a| a.id == agent_id && a.project_id == project_id))
 }
 
 impl DesktopService {
@@ -244,7 +246,8 @@ impl DesktopService {
                     AgentRole::Worker => "worker",
                     AgentRole::Verifier => "verifier",
                     AgentRole::Reviewer => "reviewer",
-                }.into(),
+                }
+                .into(),
             });
             s.agents.push(agent.clone());
             Ok(agent)
@@ -269,9 +272,7 @@ impl DesktopService {
                 project_exists(s, project_id)?;
             }
             if s.agent_duties.iter().any(|a| {
-                a.agent_id == agent_id
-                    && a.project_id == project_id
-                    && a.duty_id == duty_id
+                a.agent_id == agent_id && a.project_id == project_id && a.duty_id == duty_id
             }) {
                 return Err(ServiceError::new("DUPLICATE_ASSIGNMENT", "职责分配已存在"));
             }
@@ -295,9 +296,11 @@ impl DesktopService {
         }
         self.mutate(|s| {
             project_exists(s, &input.project_id)?;
-            if input.agent_ids.iter().any(|id| {
-                !task_member_assigned(s, id, &input.project_id)
-            }) {
+            if input
+                .agent_ids
+                .iter()
+                .any(|id| !task_member_assigned(s, id, &input.project_id))
+            {
                 return Err(ServiceError::new(
                     "INVALID_BINDING",
                     "任务成员必须拥有该项目的职责分配",
@@ -332,9 +335,10 @@ impl DesktopService {
                 .find(|t| t.id == task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
             if task.project_id != input.project_id
-                || input.agent_ids.iter().any(|id| {
-                    !task_member_assigned(s, id, &task.project_id)
-                })
+                || input
+                    .agent_ids
+                    .iter()
+                    .any(|id| !task_member_assigned(s, id, &task.project_id))
             {
                 return Err(ServiceError::new(
                     "INVALID_BINDING",
@@ -485,4 +489,3 @@ impl DesktopService {
         })
     }
 }
-

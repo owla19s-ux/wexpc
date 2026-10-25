@@ -4,7 +4,7 @@ use crate::{committed_tool_messages, PreparedChat, Result, ServiceError, ToolPro
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
 };
 use wex_api::{Message, Role, ToolCall};
@@ -141,7 +141,7 @@ fn validate(history: &[Message], pending: bool) -> Result<()> {
                 || call.name.len() > 128
                 || call.arguments_json.len() > 1024 * 1024
                 || !seen.insert(&call.id)
-                || !seen_all.insert(&call.id)
+                || !seen_all.insert(call.id.clone())
                 || !serde_json::from_str::<serde_json::Value>(&call.arguments_json)
                     .is_ok_and(|v| v.is_object())
             {
@@ -179,8 +179,8 @@ fn validate(history: &[Message], pending: bool) -> Result<()> {
         Ok(())
     }
 }
-/// Sequence is local to a turn and starts at zero. create_new prevents overwriting
-/// another writer's checkpoint. A damaged write causes future reads to fail closed.
+/// Sequence is local to a turn and starts at zero. Immutable atomic publication
+/// prevents overwrites and hides incomplete writes from checkpoint readers.
 pub fn save_tool_checkpoint(
     root: &Path,
     request: &PreparedChat,
@@ -213,18 +213,7 @@ pub fn save_tool_checkpoint(
     if bytes.len() as u64 > MAX_BYTES {
         return Err(error());
     }
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(dir.join(format!("{sequence:08}.json")))
-        .map_err(|_| error())?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
+    crate::infrastructure::immutable_file::publish(&dir.join(format!("{sequence:08}.json")), &bytes)
         .map_err(|_| error())
 }
 /// Load only the latest complete checkpoint for this exact frozen request.

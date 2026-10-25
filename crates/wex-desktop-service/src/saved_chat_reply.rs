@@ -4,7 +4,7 @@ use crate::{PreparedChat, Result, ServiceError};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
 };
 const MAX_BYTES: u64 = 64 * 1024 * 1024;
@@ -58,17 +58,7 @@ pub fn save_chat_reply(root: &Path, request: &PreparedChat, response: &str) -> R
         return Err(error());
     }
     fs::create_dir_all(path.parent().ok_or_else(error)?).map_err(|_| error())?;
-    let mut options = fs::OpenOptions::new();
-    options.create_new(true).write(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options.open(path).map_err(|_| error())?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|_| error())
+    crate::infrastructure::immutable_file::publish(&path, &bytes).map_err(|_| error())
 }
 pub fn read_chat_reply(
     root: &Path,

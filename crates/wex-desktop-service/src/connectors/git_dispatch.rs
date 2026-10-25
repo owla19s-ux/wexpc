@@ -160,7 +160,11 @@ mod tests {
         assert!(init.status.success(), "git init failed: {:?}", init.stderr);
         std::fs::create_dir(root.path().join("src")).unwrap();
         std::fs::write(root.path().join("new_module.rs"), "pub fn new() {}").unwrap();
-        std::fs::write(root.path().join("src").join("new_test.rs"), "#[test] fn test() {}").unwrap();
+        std::fs::write(
+            root.path().join("src").join("new_test.rs"),
+            "#[test] fn test() {}",
+        )
+        .unwrap();
         std::fs::write(root.path().join(".gitignore"), "ignored.tmp\n").unwrap();
         std::fs::write(root.path().join("ignored.tmp"), "not part of status").unwrap();
         // Use the same arguments as the approved production status path.
@@ -170,7 +174,11 @@ mod tests {
             .args(GIT_STATUS_ARGS)
             .output()
             .unwrap();
-        assert!(result.status.success(), "git status failed: {:?}", result.stderr);
+        assert!(
+            result.status.success(),
+            "git status failed: {:?}",
+            result.stderr
+        );
         let status = String::from_utf8(result.stdout).unwrap();
         assert!(status.contains("?? new_module.rs"), "{status}");
         assert!(status.contains("?? src/new_test.rs"), "{status}");

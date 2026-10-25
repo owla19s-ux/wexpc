@@ -39,11 +39,14 @@ pub fn digest_arguments(capability: &str, resource_id: &str, args: &[&[u8]]) -> 
 
 pub fn verify_arguments(dispatch: &Dispatch, args: &[&[u8]]) -> Result<()> {
     let expected = digest_arguments(
-        &dispatch.intent.capability_id, &dispatch.intent.resource_id, args,
+        &dispatch.intent.capability_id,
+        &dispatch.intent.resource_id,
+        args,
     );
     if expected != dispatch.intent.intent_digest {
         return Err(ServiceError::new(
-            "INTENT_MISMATCH", "操作参数与批准时的摘要不一致",
+            "INTENT_MISMATCH",
+            "操作参数与批准时的摘要不一致",
         ));
     }
     Ok(())
@@ -54,12 +57,18 @@ mod tests {
     use super::*;
     #[test]
     fn content_version_is_stable_and_distinct_from_tool_intent() {
-        assert_eq!(file_content_sha256(b""),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
-        assert_eq!(file_content_sha256(b"hello"),
-            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
-        assert_ne!(file_content_sha256(b"hello"),
-            digest_arguments("local_file_read", "saved", &[b"hello"]));
+        assert_eq!(
+            file_content_sha256(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            file_content_sha256(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+        );
+        assert_ne!(
+            file_content_sha256(b"hello"),
+            digest_arguments("local_file_read", "saved", &[b"hello"])
+        );
     }
     #[test]
     fn length_prefix_prevents_ambiguous_tuple_collision() {

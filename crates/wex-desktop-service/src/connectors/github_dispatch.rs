@@ -329,9 +329,7 @@ fn verify_written_content(
         .pointer("/content/sha")
         .and_then(|v| v.as_str())
         .filter(|s| valid_git_sha(s))
-        .ok_or_else(|| {
-            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少有效文件版本")
-        })?;
+        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少有效文件版本"))?;
     let commit_sha = write_response
         .pointer("/commit/sha")
         .and_then(|v| v.as_str())
@@ -347,7 +345,10 @@ fn verify_written_content(
         .bearer_auth(token)
         .send()
         .map_err(|_| {
-            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 已接受写入，但提交回读失败；禁止自动重试")
+            ServiceError::new(
+                "OUTCOME_UNKNOWN",
+                "GitHub 已接受写入，但提交回读失败；禁止自动重试",
+            )
         })?;
     if !response.status().is_success() {
         return Err(ServiceError::new(
@@ -378,10 +379,9 @@ fn valid_git_sha(value: &str) -> bool {
 
 fn verify_readback_body(body: &[u8], expected_sha: &str, expected_content: &[u8]) -> Result<()> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
-    let value: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|_| {
-            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读响应无法解析；禁止自动重试")
-        })?;
+    let value: serde_json::Value = serde_json::from_slice(body).map_err(|_| {
+        ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读响应无法解析；禁止自动重试")
+    })?;
     if value["type"].as_str() != Some("file")
         || value["sha"].as_str() != Some(expected_sha)
         || value["encoding"].as_str() != Some("base64")
@@ -393,18 +393,14 @@ fn verify_readback_body(body: &[u8], expected_sha: &str, expected_content: &[u8]
     }
     let encoded = value["content"]
         .as_str()
-        .ok_or_else(|| {
-            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读缺少内容；禁止自动重试")
-        })?;
+        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读缺少内容；禁止自动重试"))?;
     let compact: Vec<u8> = encoded
         .bytes()
         .filter(|byte| !byte.is_ascii_whitespace())
         .collect();
-    let actual = STANDARD
-        .decode(compact)
-        .map_err(|_| {
-            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读内容编码无效；禁止自动重试")
-        })?;
+    let actual = STANDARD.decode(compact).map_err(|_| {
+        ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读内容编码无效；禁止自动重试")
+    })?;
     if actual.as_slice() != expected_content {
         return Err(ServiceError::new(
             "OUTCOME_UNKNOWN",

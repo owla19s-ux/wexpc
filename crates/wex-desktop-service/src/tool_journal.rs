@@ -1,7 +1,7 @@
 //! Durable execution metadata. This is not replay authorization or stored tool output.
 use crate::{Result, ServiceError};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, fs, io::Write, path::Path};
+use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolReceiptMarker {
@@ -56,21 +56,14 @@ fn validate(marker: &ToolReceiptMarker) -> Result<()> {
     }
     Ok(())
 }
-/// Publish an immutable marker using create_new. A partial write is surfaced as
-/// damaged evidence on reads; it must never be mistaken for an absent operation.
+/// Publish a fully written immutable marker. The caller must not execute a tool
+/// until its in_flight marker has been successfully published.
 pub fn append_tool_marker(root: &Path, marker: &ToolReceiptMarker) -> Result<()> {
     validate(marker)?;
     fs::create_dir_all(root).map_err(|_| error())?;
     let path = root.join(format!("{}_{}.json", marker.attempt_id, marker.state));
     let bytes = serde_json::to_vec(marker).map_err(|_| error())?;
-    let mut file = fs::OpenOptions::new()
-        .create_new(true)
-        .write(true)
-        .open(path)
-        .map_err(|_| error())?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|_| error())
+    crate::infrastructure::immutable_file::publish(&path, &bytes).map_err(|_| error())
 }
 /// Return one state per attempt. An unfinished attempt stays in_flight, meaning
 /// execution may have happened. No reader dispatches or retries an operation.

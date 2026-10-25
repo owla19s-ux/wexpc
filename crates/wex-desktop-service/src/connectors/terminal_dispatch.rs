@@ -2,12 +2,21 @@
 //! Cargo builds may execute repository build scripts: always require a separate
 //! human-approved command intent, never infer access from a project link.
 use crate::{Result, ServiceError};
-use std::{io::Read, path::Path, process::{Command, Stdio}, thread, time::{Duration, Instant}};
+use std::{
+    io::Read,
+    path::Path,
+    process::{Command, Stdio},
+    thread,
+    time::{Duration, Instant},
+};
 use wex_core::operation::{Action, Dispatch};
 
 /// The only commands allowed by this first-stage terminal adapter.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TerminalTask { CargoTest, CargoFmtCheck }
+pub enum TerminalTask {
+    CargoTest,
+    CargoFmtCheck,
+}
 
 impl TerminalTask {
     fn capability(self) -> &'static str {
@@ -28,7 +37,10 @@ fn require_success(success: bool) -> Result<()> {
     if success {
         Ok(())
     } else {
-        Err(ServiceError::new("TOOL_EXIT_NONZERO", "Cargo returned a nonzero exit status"))
+        Err(ServiceError::new(
+            "TOOL_EXIT_NONZERO",
+            "Cargo returned a nonzero exit status",
+        ))
     }
 }
 
@@ -64,21 +76,39 @@ pub fn execute_approved_terminal_report(
         || dispatch.intent.capability_id != task.capability()
         || dispatch.intent.resource_id != resource_id
     {
-        return Err(ServiceError::new("DISPATCH_REJECTED", "终端指令未获匹配授权"));
+        return Err(ServiceError::new(
+            "DISPATCH_REJECTED",
+            "终端指令未获匹配授权",
+        ));
     }
     if !trusted_root.is_absolute() || !trusted_root.is_dir() {
-        return Err(ServiceError::new("RESOURCE_UNAVAILABLE", "仓库工作目录无效"));
+        return Err(ServiceError::new(
+            "RESOURCE_UNAVAILABLE",
+            "仓库工作目录无效",
+        ));
     }
-    let root = trusted_root.to_str().ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码无效"))?;
+    let root = trusted_root
+        .to_str()
+        .ok_or_else(|| ServiceError::new("INVALID_INPUT", "目录编码无效"))?;
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("cargo")
-        .args(task.arguments()).current_dir(trusted_root)
+        .args(task.arguments())
+        .current_dir(trusted_root)
         .env("CARGO_TERM_COLOR", "never")
         .env("GIT_TERMINAL_PROMPT", "0")
-        .stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped())
-        .spawn().map_err(|_| ServiceError::new("TOOL_UNAVAILABLE", "无法启动 Cargo"))?;
-    let out = child.stdout.take().ok_or_else(|| ServiceError::new("TOOL_ERROR", "无标准输出"))?;
-    let err = child.stderr.take().ok_or_else(|| ServiceError::new("TOOL_ERROR", "无错误输出"))?;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|_| ServiceError::new("TOOL_UNAVAILABLE", "无法启动 Cargo"))?;
+    let out = child
+        .stdout
+        .take()
+        .ok_or_else(|| ServiceError::new("TOOL_ERROR", "无标准输出"))?;
+    let err = child
+        .stderr
+        .take()
+        .ok_or_else(|| ServiceError::new("TOOL_ERROR", "无错误输出"))?;
     fn collect(
         source: impl Read + Send + 'static,
     ) -> thread::JoinHandle<std::io::Result<(Vec<u8>, bool)>> {
@@ -90,22 +120,28 @@ pub fn execute_approved_terminal_report(
     let status = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status,
-            Ok(None) if start.elapsed() < Duration::from_secs(180) => thread::sleep(Duration::from_millis(50)),
+            Ok(None) if start.elapsed() < Duration::from_secs(180) => {
+                thread::sleep(Duration::from_millis(50))
+            }
             _ => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return Err(ServiceError::new("OUTCOME_UNKNOWN", "Cargo 超时或异常中断；未自动重试"));
+                return Err(ServiceError::new(
+                    "OUTCOME_UNKNOWN",
+                    "Cargo 超时或异常中断；未自动重试",
+                ));
             }
         }
     };
-    let (mut output, stdout_truncated) = stdout.join()
+    let (mut output, stdout_truncated) = stdout
+        .join()
         .map_err(|_| ServiceError::new("TOOL_ERROR", "读取线程中断"))?
         .map_err(|_| ServiceError::new("TOOL_ERROR", "标准输出读取失败"))?;
-    let (error, stderr_truncated) = stderr.join()
+    let (error, stderr_truncated) = stderr
+        .join()
         .map_err(|_| ServiceError::new("TOOL_ERROR", "读取线程中断"))?
         .map_err(|_| ServiceError::new("TOOL_ERROR", "错误输出读取失败"))?;
-    if stdout_truncated || stderr_truncated
-        || output.len().saturating_add(error.len()) > 64 * 1024
+    if stdout_truncated || stderr_truncated || output.len().saturating_add(error.len()) > 64 * 1024
     {
         return Err(ServiceError::new("TOOL_OUTPUT_LIMIT", "终端输出超过上限"));
     }
@@ -164,23 +200,39 @@ mod tests {
     #[test]
     fn cargo_failure_is_not_a_successful_receipt() {
         assert!(require_success(true).is_ok());
-        assert_eq!(require_success(false).unwrap_err().code, "TOOL_EXIT_NONZERO");
+        assert_eq!(
+            require_success(false).unwrap_err().code,
+            "TOOL_EXIT_NONZERO"
+        );
     }
 
     #[test]
     fn rejects_wrong_command_before_spawn() {
         let dispatch = Dispatch {
             intent: OperationIntent {
-                id: "op".into(), actor_id: "a".into(), conversation_id: "c".into(),
-                context_id: None, connection_id: "terminal".into(),
-                capability_id: "terminal_cargo_fmt_check".into(), resource_id: "repo".into(),
-                action: Action::Write, expected_version: None, intent_digest: "0".repeat(64),
+                id: "op".into(),
+                actor_id: "a".into(),
+                conversation_id: "c".into(),
+                context_id: None,
+                connection_id: "terminal".into(),
+                capability_id: "terminal_cargo_fmt_check".into(),
+                resource_id: "repo".into(),
+                action: Action::Write,
+                expected_version: None,
+                intent_digest: "0".repeat(64),
             },
             attempt_id: "try".into(),
         };
         assert_eq!(
-            execute_approved_terminal(&dispatch, "repo", Path::new("/none"), TerminalTask::CargoTest)
-                .unwrap_err().code, "DISPATCH_REJECTED"
+            execute_approved_terminal(
+                &dispatch,
+                "repo",
+                Path::new("/none"),
+                TerminalTask::CargoTest
+            )
+            .unwrap_err()
+            .code,
+            "DISPATCH_REJECTED"
         );
     }
 }

@@ -16,7 +16,9 @@ pub struct AgentDutyAssignment {
 pub fn valid_duty_id(duty: &str) -> bool {
     !duty.is_empty()
         && duty.len() <= 64
-        && duty.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
+        && duty
+            .bytes()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-')
 }
 
 #[cfg(test)]
