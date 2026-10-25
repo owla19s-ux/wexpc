@@ -27,6 +27,9 @@ fn approved_git_read(dispatch: &Dispatch, repo_id: &str, trusted_root: &Path, ca
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("git")
         .arg("--no-optional-locks")
+        // A repository-controlled core.fsmonitor hook can execute a program
+        // even during read-only `git status`; never inherit that setting.
+        .args(["-c", "core.fsmonitor=false"])
         .args(["-C"]).arg(trusted_root);
     if capability == "git_diff" {
         child.args(["diff", "--no-ext-diff", "--no-textconv", "--"]);
