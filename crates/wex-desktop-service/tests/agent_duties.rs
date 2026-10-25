@@ -65,3 +65,30 @@ fn legacy_snapshot_missing_duties_restores_without_inventing_new_grants() {
     let snapshot: DesktopSnapshot = serde_json::from_value(old).unwrap();
     assert!(snapshot.agent_duties.is_empty());
 }
+
+#[test]
+fn version_four_snapshot_upgrades_and_retains_existing_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("desktop.sqlite");
+    let mut app = DesktopService::open(&file).unwrap();
+    let project = app.create_project("Legacy project".into(), "Existing goal".into(), vec![]).unwrap();
+    drop(app);
+
+    let db = rusqlite::Connection::open(&file).unwrap();
+    let body: String = db.query_row(
+        "SELECT body FROM desktop_state WHERE id=1", [], |row| row.get(0)
+    ).unwrap();
+    let mut value: serde_json::Value = serde_json::from_str(&body).unwrap();
+    value.as_object_mut().unwrap().remove("agent_duties");
+    db.execute("UPDATE desktop_state SET body=?1 WHERE id=1", [value.to_string()]).unwrap();
+    db.pragma_update(None, "user_version", 4).unwrap();
+    drop(db);
+
+    let restored = DesktopService::open(&file).unwrap();
+    assert_eq!(restored.snapshot().unwrap().projects[0].id, project.id);
+    assert!(restored.snapshot().unwrap().agent_duties.is_empty());
+    drop(restored);
+    let db = rusqlite::Connection::open(&file).unwrap();
+    let version: u32 = db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+    assert_eq!(version, 5, "older binaries must not silently drop assignment data");
+}
