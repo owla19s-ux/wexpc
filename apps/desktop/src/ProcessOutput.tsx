@@ -35,7 +35,9 @@ export function ProcessOutput({body,argumentsJson}:{body:string;argumentsJson?:s
       : <p className="muted">请求参数缺失、无效或与进程结果不一致，无法核对完整命令。</p>}
     <p>退出码：{report.exit_code??'未取得数值退出码'}</p><p>耗时：{report.elapsed_ms} ms</p>
     <p>标准输出{report.stdout_complete===false?'未完整收集':report.stdout_complete===true?'已收集至管道关闭':''}{report.stdout_truncated?'已截断':''}</p><pre className="prewrap">{report.stdout||'（空）'}</pre>
+    {typeof report.stdout_complete!=='boolean'&&<p className="muted">标准输出完整性未记录，不能推定已读取至管道关闭。</p>}
     <p>标准错误{report.stderr_complete===false?'未完整收集':report.stderr_complete===true?'已收集至管道关闭':''}{report.stderr_truncated?'已截断':''}</p><pre className="prewrap">{report.stderr||'（空）'}</pre>
+    {typeof report.stderr_complete!=='boolean'&&<p className="muted">标准错误完整性未记录，不能推定已读取至管道关闭。</p>}
     <p className="muted">这是已保存的执行结果；截断不改变退出状态，也不代表独立验证通过。</p>
   </section>;
 }
