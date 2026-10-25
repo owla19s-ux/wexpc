@@ -52,7 +52,7 @@ export function App() {
   async function run(action:()=>Promise<void>) {setError('');try {await action();await refresh();}catch(e){setError(errorMessage(e));}}
   const project=data?.projects.find(p=>p.id===projectId);
   const conversation=data?.conversations.find(c=>c.id===conversationId);
-  function showConversation(c:Conversation) {setConversationId(c.id);setPage('conversation');}
+  function showConversation(c:Conversation) {setProjectId(c.project_id||'');setConversationId(c.id);setPage('conversation');}
   async function createProject(form:HTMLFormElement) {
     const fields=new FormData(form);
     const p=await command<Project>('create_project',{name:fields.get('name'),goal:fields.get('goal'),resources:String(fields.get('resources')||'').split('\n').map(s=>s.trim()).filter(Boolean)});
@@ -95,7 +95,9 @@ export function App() {
       {!!data?.projects.length&&<small>最近项目</small>}
       {data?.projects.map(p=><button key={p.id} aria-current={page==='projects'&&p.id===projectId?'page':undefined} onClick={()=>{setProjectId(p.id);setPage('projects');}}>{p.name}</button>)}
       {!!data?.conversations.filter(c=>!c.project_id).length&&<small>独立对话</small>}
-      {data?.conversations.filter(c=>!c.project_id).map(c=><button key={c.id} onClick={()=>showConversation(c)}>{c.title}{pending.has(c.id)?' · 回复中':''}</button>)}
+      {data?.conversations.filter(c=>!c.project_id).map(c=><button key={c.id} aria-current={page==='conversation'&&c.id===conversationId?'page':undefined} onClick={()=>showConversation(c)}>{c.title}{pending.has(c.id)?' · 回复中':''}</button>)}
+      {!!project&&!!data?.conversations.some(c=>c.project_id===project.id)&&<small>项目工作对话 · {project.name}</small>}
+      {data?.conversations.filter(c=>c.project_id===projectId&&!!projectId).map(c=><button key={c.id} aria-current={page==='conversation'&&c.id===conversationId?'page':undefined} onClick={()=>showConversation(c)}>{c.title}{pending.has(c.id)?' · 回复中':''}</button>)}
     </nav><main>
       {!desktopAvailable&&<p className="notice">浏览器预览未连接桌面服务。请运行桌面程序后管理项目和调用 API。</p>}
       {error&&<p className="error" role="alert">{error}<button onClick={()=>setError('')} aria-label="关闭错误提示">×</button></p>}
@@ -113,7 +115,7 @@ export function App() {
       {page==='connections'&&<section><h1>连接与服务</h1><h2>AI API</h2>{data?.connections.map(c=><div className="item" key={c.id}><strong>{c.name}</strong><span>{c.base_url}</span><span>{c.models.join(' · ')}</span><button onClick={()=>void run(async()=>{await command('set_connection_enabled',{connectionId:c.id,enabled:!c.enabled});})}>{c.enabled?'停用':'启用'}</button></div>)}<ConnectionForm run={run}/><hr/><h2>GitHub</h2><GithubConnection run={run}/><hr/><h2>后续接入项</h2><p>完整本地文件写入、任意终端指令、Git 提交与 Android 模拟器尚未完成桌面执行验收。</p></section>}
       {page==='conversation'&&!conversation&&data&&<section><h1>新建普通对话</h1><form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void run(async()=>{const c=await command<Conversation>('create_conversation',{projectId:null,title:fields.get('title'),connectionId:fields.get('connection'),modelId:fields.get('model')});showConversation(c);});}}><label>对话名称<input name="title" required maxLength={128} defaultValue="普通对话"/></label><Selection connections={data.connections}/><button className="primary" disabled={!data.connections.some(c=>c.enabled)}>创建对话</button></form></section>}
       {page==='conversation'&&conversation&&data&&<label>关联上下文<select value={conversation.context_id||''} onChange={e=>{const contextId=e.target.value||null;void run(async()=>{await command('bind_conversation_context',{conversationId:conversation.id,contextId});});}}><option value="">独立对话，不关联上下文</option>{data.contexts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
-      {page==='conversation'&&conversation&&data&&<Chat conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} resume={resumeReply} recovering={recovering} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
+      {page==='conversation'&&conversation&&data&&<Chat key={conversation.id} conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} resume={resumeReply} recovering={recovering} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
     </main></div><footer>{pending.size?`${pending.size} 个对话正在请求 API`:'本地项目数据由桌面服务保存'} · 任务仍为草案；非流式工具支持人工逐次审批，自动多 Agent 施工尚未完成</footer>
   </div>;
 }
