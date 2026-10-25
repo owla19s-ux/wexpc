@@ -29,6 +29,16 @@ pub fn approved_git_diff(
     approved_git_read(dispatch, repo_id, trusted_root, "git_diff")
 }
 
+/// Remove inherited Git-specific overrides, including arbitrary indexed
+/// GIT_CONFIG_KEY_N values. Git's own prompt restriction is set afterward.
+fn sanitize_git_environment(command: &mut Command) {
+    for (key, _) in std::env::vars_os() {
+        if key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_") {
+            command.env_remove(key);
+        }
+    }
+}
+
 fn approved_git_read(
     dispatch: &Dispatch,
     repo_id: &str,
@@ -55,14 +65,7 @@ fn approved_git_read(
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "仓库路径编码不可用"))?;
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("git");
-    // Clear all Git-specific ambient variables, including numbered
-    // GIT_CONFIG_KEY_N entries and alternate indexes/worktrees.
-    // Windows environment variable names are case-insensitive.
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_") {
-            child.env_remove(key);
-        }
-    }
+    sanitize_git_environment(&mut child);
     child
         .arg("--no-optional-locks")
         // A repository-controlled core.fsmonitor hook can execute a program
@@ -137,6 +140,30 @@ fn collect_bounded_output(mut source: impl Read, limit: usize) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn sanitized_git_process_does_not_inherit_repository_redirection() {
+        let trusted = tempfile::tempdir().unwrap();
+        let hostile = tempfile::tempdir().unwrap();
+        for root in [trusted.path(), hostile.path()] {
+            assert!(Command::new("git").arg("init").arg("--quiet")
+                .arg(root).status().unwrap().success());
+        }
+        std::fs::write(trusted.path().join("trusted.txt"), b"allowed").unwrap();
+        std::fs::write(hostile.path().join("hostile.txt"), b"wrong repo").unwrap();
+        let mut cmd = Command::new("git");
+        // Simulate inherited environment without modifying global env: the
+        // sanitized process receives a clean set of Git overrides.
+        sanitize_git_environment(&mut cmd);
+        cmd.env_remove("GIT_DIR").env_remove("GIT_WORK_TREE")
+            .arg("-C").arg(trusted.path())
+            .args(GIT_STATUS_ARGS);
+        let output = cmd.output().unwrap();
+        assert!(output.status.success());
+        let status = String::from_utf8(output.stdout).unwrap();
+        assert!(status.contains("trusted.txt"), "{status}");
+        assert!(!status.contains("hostile.txt"), "{status}");
+    }
+
     #[test]
     fn oversized_git_output_is_drained_without_unbounded_retention() {
         let mut source = std::io::Cursor::new(vec![b'x'; 128 * 1024]);
