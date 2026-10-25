@@ -465,6 +465,20 @@ impl DesktopService {
             {
                 return Err(ServiceError::new("DISPATCH_REFUSED", "任务版本或成员授权关系已变化"));
             }
+            // Temporary fail-closed project-wide fence until the Host can hold
+            // canonical, path-overlap-aware leases for entire tool lifetimes.
+            // It is safer to serialize a project's attempts than race writes.
+            if s.dispatch_attempts.iter().any(|other| {
+                other.id != attempt_id
+                    && other.project_id == prior.project_id
+                    && matches!(other.status,
+                        DispatchAttemptStatus::InFlight | DispatchAttemptStatus::OutcomeUnknown)
+            }) {
+                return Err(ServiceError::new(
+                    "PROJECT_DISPATCH_BLOCKED",
+                    "同项目已有执行中或结果未知的派工，请先核对，不能并发领取",
+                ));
+            }
             let attempt = s.dispatch_attempts.iter_mut().find(|a| a.id == attempt_id)
                 .expect("attempt checked above");
             attempt.status = DispatchAttemptStatus::InFlight;
