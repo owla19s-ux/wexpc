@@ -63,3 +63,26 @@ it('marks cached process rows stale and blocks cancellation until a successful r
  expect(screen.queryByText('进程列表暂时不可用')).toBeNull();
  expect(screen.queryByText('以下是上次成功查询的进程，当前状态尚未核实；重新查询成功前不能取消。')).toBeNull();
 });
+
+it('disables cancellation while refreshing an old process snapshot',async()=>{
+ let resolveRefresh:((rows:typeof row[])=>void)|undefined;
+ let reads=0;
+ ipc.mockImplementation(async(name:string)=>{
+  if(name==='active_processes'){
+   reads++;
+   if(reads===1)return [row];
+   return await new Promise<typeof row[]>(resolve=>{resolveRefresh=resolve;});
+  }
+  if(name==='cancel_process')throw new Error('must not cancel stale state');
+  throw new Error(name);
+ });
+ render(<ActiveProcesses conversationId="conv_A" busy/>);
+ const cancel=await screen.findByRole('button',{name:'取消此进程'});
+ expect((cancel as HTMLButtonElement).disabled).toBe(false);
+ fireEvent.click(screen.getByRole('button',{name:'重新查询进程'}));
+ await waitFor(()=>expect((cancel as HTMLButtonElement).disabled).toBe(true));
+ fireEvent.click(cancel);
+ expect(ipc.mock.calls.filter(([name])=>name==='cancel_process')).toHaveLength(0);
+ await act(async()=>{resolveRefresh?.([row]);});
+ await waitFor(()=>expect((cancel as HTMLButtonElement).disabled).toBe(false));
+});
