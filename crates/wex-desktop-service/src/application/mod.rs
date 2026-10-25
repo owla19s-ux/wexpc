@@ -492,9 +492,9 @@ impl DesktopService {
             {
                 return Err(ServiceError::new("DISPATCH_REFUSED", "任务版本或成员授权关系已变化"));
             }
-            // Temporary fail-closed project-wide fence until the Host can hold
+            // Temporary fail-closed global fence until the Host can hold
             // canonical, path-overlap-aware leases for entire tool lifetimes.
-            // It is safer to serialize a project's attempts than race writes.
+            // Projects can share resources; serialize all claims until scoped leases exist.
             // A restored OutcomeUnknown in another project may still refer to
             // a shared filesystem or connector. Without durable scoped leases,
             // globally refuse another claim until the uncertainty is resolved.
@@ -509,13 +509,11 @@ impl DesktopService {
             }
             if s.dispatch_attempts.iter().any(|other| {
                 other.id != attempt_id
-                    && other.project_id == prior.project_id
-                    && matches!(other.status,
-                        DispatchAttemptStatus::InFlight | DispatchAttemptStatus::OutcomeUnknown)
+                    && other.status == DispatchAttemptStatus::InFlight
             }) {
                 return Err(ServiceError::new(
-                    "PROJECT_DISPATCH_BLOCKED",
-                    "同项目已有执行中或结果未知的派工，请先核对，不能并发领取",
+                    "ACTIVE_DISPATCH_BLOCKED",
+                    "存在执行中的派工，资源隔离接通前禁止并发领取",
                 ));
             }
             let attempt = s.dispatch_attempts.iter_mut().find(|a| a.id == attempt_id)
@@ -851,7 +849,7 @@ mod publication_tests {
         let rev = service.snapshot().unwrap().revision;
         assert_eq!(
             service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
-            "PROJECT_DISPATCH_BLOCKED"
+            "ACTIVE_DISPATCH_BLOCKED"
         );
         assert_eq!(service.snapshot().unwrap().revision, rev);
         service.mutate(|snapshot| {
