@@ -253,6 +253,32 @@ mod tests {
     }
 
     #[test]
+    fn create_requires_distinct_capability_and_exact_arguments() {
+        use crate::digest_arguments;
+        use wex_core::operation::OperationIntent;
+        let target = "repo_identity";
+        let mut intent = OperationIntent {
+            id: "create_1".into(), actor_id: "actor".into(), conversation_id: "conv".into(),
+            context_id: None, connection_id: "github".into(),
+            capability_id: "github_file_create".into(), resource_id: target.into(),
+            action: Action::Write, expected_version: None,
+            intent_digest: digest_arguments("github_file_create", target,
+                &[b"owner", b"repo", b"new.txt", b"hello"]),
+        };
+        let dispatch = Dispatch { intent: intent.clone(), attempt_id: "try".into() };
+        assert_eq!(
+            create_approved_github_file(&dispatch, target, "owner", "repo", "new.txt", b"changed", "token")
+                .unwrap_err().code, "INTENT_MISMATCH"
+        );
+        intent.expected_version = Some("a".repeat(40));
+        let stale = Dispatch { intent, attempt_id: "try".into() };
+        assert_eq!(
+            create_approved_github_file(&stale, target, "owner", "repo", "new.txt", b"hello", "token")
+                .unwrap_err().code, "DISPATCH_REJECTED"
+        );
+    }
+
+    #[test]
     fn refuses_missing_authorization_without_network() {
         let intent = wex_core::operation::OperationIntent {
             id: "one".into(), actor_id: "actor".into(), conversation_id: "conv".into(),
