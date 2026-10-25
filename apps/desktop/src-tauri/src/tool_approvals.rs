@@ -307,6 +307,31 @@ fn preflight_batch(
     Ok(())
 }
 
+/// Validate a future versioned local edit *without* authorizing dispatch.
+/// The edit tool is intentionally not advertised or handled until an atomic
+/// Windows/Unix commit path is available.
+#[allow(dead_code)]
+fn preflight_local_edit_intent(call: &ToolProposal) -> Result<()> {
+    if call.name != "update_authorized_file" {
+        return Err(ServiceError::new("TOOL_UNSUPPORTED", "不是本地修改请求"));
+    }
+    let value: serde_json::Value = serde_json::from_str(&call.arguments_json)
+        .map_err(|_| ServiceError::new("INVALID_INPUT", "修改参数无效"))?;
+    let obj = value.as_object().ok_or_else(|| ServiceError::new("INVALID_INPUT", "修改参数必须是对象"))?;
+    if obj.len() != 4 ||
+        !["directory_id", "file_name", "expected_sha256", "content"]
+            .iter().all(|key| obj.get(*key).is_some_and(serde_json::Value::is_string)) {
+        return Err(ServiceError::new("INVALID_INPUT", "修改参数字段与声明不一致"));
+    }
+    let intent = wex_core::local_edit::EditIntent {
+        directory_id: obj["directory_id"].as_str().unwrap_or_default(),
+        file_name: obj["file_name"].as_str().unwrap_or_default(),
+        expected_sha256: obj["expected_sha256"].as_str().unwrap_or_default(),
+        replacement: obj["content"].as_str().unwrap_or_default(),
+    };
+    intent.validate().map_err(|_| ServiceError::new("INVALID_INPUT", "文件修改版本或路径无效"))
+}
+
 fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
     let args: serde_json::Value = serde_json::from_str(&call.arguments_json)
         .map_err(|_| ServiceError::new("INVALID_INPUT", "工具参数不是有效 JSON"))?;
