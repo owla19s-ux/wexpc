@@ -314,13 +314,10 @@ pub fn create_approved_github_file(
     verify_written_content(&client, url, token, &result, content)
 }
 
-
-/**
- * A successful PUT confirms that GitHub accepted the mutation, not that its
- * target bytes were independently checked. Read the immutable commit returned
- * by that PUT: a moving default branch would make a later read ambiguous.
- * A failed readback is UNKNOWN, never a reason to replay the PUT.
- */
+// A successful PUT confirms that GitHub accepted the mutation, not that its
+// target bytes were independently checked. Read the immutable commit returned
+// by that PUT: a moving default branch would make a later read ambiguous.
+// A failed readback is UNKNOWN, never a reason to replay the PUT.
 fn verify_written_content(
     client: &Client,
     mut url: Url,
@@ -332,12 +329,16 @@ fn verify_written_content(
         .pointer("/content/sha")
         .and_then(|v| v.as_str())
         .filter(|s| valid_git_sha(s))
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少有效文件版本"))?;
+        .ok_or_else(|| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少有效文件版本")
+        })?;
     let commit_sha = write_response
         .pointer("/commit/sha")
         .and_then(|v| v.as_str())
         .filter(|s| valid_git_sha(s))
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少可回读的提交版本"))?;
+        .ok_or_else(|| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入响应缺少可回读的提交版本")
+        })?;
     url.query_pairs_mut().append_pair("ref", commit_sha);
     let response = client
         .get(url)
@@ -345,7 +346,9 @@ fn verify_written_content(
         .header("Accept", "application/vnd.github+json")
         .bearer_auth(token)
         .send()
-        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 已接受写入，但提交回读失败；禁止自动重试"))?;
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 已接受写入，但提交回读失败；禁止自动重试")
+        })?;
     if !response.status().is_success() {
         return Err(ServiceError::new(
             "OUTCOME_UNKNOWN",
@@ -356,7 +359,9 @@ fn verify_written_content(
     response
         .take(512 * 1024 + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入后回读不完整；禁止自动重试"))?;
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 写入后回读不完整；禁止自动重试")
+        })?;
     if bytes.len() > 512 * 1024 {
         return Err(ServiceError::new(
             "OUTCOME_UNKNOWN",
@@ -374,7 +379,9 @@ fn valid_git_sha(value: &str) -> bool {
 fn verify_readback_body(body: &[u8], expected_sha: &str, expected_content: &[u8]) -> Result<()> {
     use base64::{engine::general_purpose::STANDARD, Engine as _};
     let value: serde_json::Value = serde_json::from_slice(body)
-        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读响应无法解析；禁止自动重试"))?;
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读响应无法解析；禁止自动重试")
+        })?;
     if value["type"].as_str() != Some("file")
         || value["sha"].as_str() != Some(expected_sha)
         || value["encoding"].as_str() != Some("base64")
@@ -386,15 +393,19 @@ fn verify_readback_body(body: &[u8], expected_sha: &str, expected_content: &[u8]
     }
     let encoded = value["content"]
         .as_str()
-        .ok_or_else(|| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读缺少内容；禁止自动重试"))?;
+        .ok_or_else(|| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读缺少内容；禁止自动重试")
+        })?;
     let compact: Vec<u8> = encoded
         .bytes()
         .filter(|byte| !byte.is_ascii_whitespace())
         .collect();
     let actual = STANDARD
         .decode(compact)
-        .map_err(|_| ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读内容编码无效；禁止自动重试"))?;
-    if actual != expected_content {
+        .map_err(|_| {
+            ServiceError::new("OUTCOME_UNKNOWN", "GitHub 回读内容编码无效；禁止自动重试")
+        })?;
+    if actual.as_slice() != expected_content {
         return Err(ServiceError::new(
             "OUTCOME_UNKNOWN",
             "GitHub 回读内容与已批准写入字节不一致；禁止自动重试",
@@ -463,7 +474,8 @@ mod tests {
     fn readback_ref_is_pinned_to_the_put_commit() {
         let mut url = Url::parse("https://api.github.com/repos/a/b/contents/README.md").unwrap();
         url.query_pairs_mut().append_pair("ref", &"b".repeat(40));
-        assert_eq!(url.query_pairs().find(|(key, _)| key == "ref").unwrap().1, "b".repeat(40));
+        let selected_ref = url.query_pairs().find(|(key, _)| key == "ref").unwrap().1;
+        assert_eq!(selected_ref, "b".repeat(40));
     }
 
     #[test]
