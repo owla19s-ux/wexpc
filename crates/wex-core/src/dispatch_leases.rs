@@ -70,6 +70,7 @@ impl ResourceLeases {
     }
 
     pub fn is_busy(&self, scope: &str) -> Result<bool, LeaseError> {
+        if !valid(scope) { return Err(LeaseError::InvalidScope); }
         Ok(self.state.lock().map_err(|_| LeaseError::Poisoned)?.held.keys().any(|held| scopes_overlap(scope, held)))
     }
 }
@@ -132,6 +133,13 @@ mod tests {
         assert!(matches!(registry.acquire("agent", &[]), Err(LeaseError::InvalidScope)));
         assert!(matches!(registry.acquire("agent", &scopes(&["bad\npath"])), Err(LeaseError::InvalidScope)));
     }
+    #[test]
+    fn busy_probe_rejects_invalid_scope() {
+        let registry = ResourceLeases::default();
+        assert_eq!(registry.is_busy(""), Err(LeaseError::InvalidScope));
+        assert_eq!(registry.is_busy("bad\\npath"), Err(LeaseError::InvalidScope));
+    }
+
     #[test]
     fn duplicate_scope_names_do_not_self_conflict() {
         let registry = ResourceLeases::default();
