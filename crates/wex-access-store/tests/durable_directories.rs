@@ -262,3 +262,20 @@ fn exclusive_create_rejects_existing_symbolic_link_without_following_it() {
     assert!(store.create_authorized_at(Some(1), &directory.id, "link.txt", b"overwrite", true).is_err());
     assert_eq!(fs::read(&target).unwrap(), original);
 }
+
+#[test]
+fn versioned_replace_preflight_requires_live_write_grant_and_exact_bytes() {
+    let s = Sandbox::new();
+    let store = s.store();
+    let directory = store.authorize_directory(0, s.0.join("a"), Access::Read).unwrap();
+    assert!(store.prepare_authorized_replace_at(Some(1), &directory.id, "file", b"a", true).is_err());
+    store.set(1, Grant { directory_id: directory.id.clone(),
+        access: Access::ReadWrite, explicit_personal: true }).unwrap();
+    assert!(store.prepare_authorized_replace_at(Some(2), &directory.id, "file", b"a", true).is_ok());
+    assert!(store.prepare_authorized_replace_at(Some(2), &directory.id, "file", b"stale", true).is_err());
+    assert!(store.prepare_authorized_replace_at(Some(1), &directory.id, "file", b"a", true).is_err());
+    assert!(store.prepare_authorized_replace_at(Some(2), &directory.id, "../file", b"a", true).is_err());
+    assert_eq!(fs::read(s.0.join("a/file")).unwrap(), b"a");
+    store.revoke(2, &directory.id).unwrap();
+    assert!(store.prepare_authorized_replace_at(Some(3), &directory.id, "file", b"a", true).is_err());
+}
