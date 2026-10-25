@@ -104,6 +104,18 @@ pub fn committed_tool_messages(
     Ok(messages)
 }
 
+const MAX_MODEL_STEPS: usize = 8;
+
+fn ensure_followup_budget(model_step_index: usize) -> Result<()> {
+    if model_step_index >= MAX_MODEL_STEPS - 1 {
+        return Err(ServiceError::new(
+            "TOOL_ROUND_LIMIT",
+            "工具回合已达到上限；本轮未派发新的工具操作",
+        ));
+    }
+    Ok(())
+}
+
 /// Drive bounded model/tool turns. The callback is owned by a trusted Host:
 /// it MUST await human approval and durably settle tool evidence before
 /// returning. Neither this function nor the model can authorize a tool.
@@ -114,10 +126,13 @@ pub fn drive_tool_rounds(
     mut settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
 ) -> Result<String> {
     let mut transcript = Vec::new();
-    for _ in 0..8 {
+    for model_step_index in 0..MAX_MODEL_STEPS {
         match execute_model_step(prepared, key, transcript.clone(), tools.clone())? {
             ModelStep::Text(text) => return Ok(text),
             ModelStep::Proposal { assistant_text, calls } => {
+                // A tool dispatch must leave a model request to consume its receipt.
+                // Never execute the final step's proposal and then report a bare limit error.
+                ensure_followup_budget(model_step_index)?;
                 // Cap the batch BEFORE any potentially irreversible dispatch.
                 if calls.len() > 4 {
                     return Err(ServiceError::new("TOOL_BATCH_LIMIT", "一次工具回合最多执行四项操作"));
@@ -179,6 +194,17 @@ mod tests {
         assert_eq!(messages[1].role, Role::Tool);
         assert_eq!(messages[1].content.as_deref(), Some(payload.as_str()));
         assert_eq!(messages[1].tool_call_id.as_deref(), Some("cargo_1"));
+    }
+
+    #[test]
+    fn final_model_step_cannot_dispatch_without_a_followup() {
+        for step in 0..MAX_MODEL_STEPS - 1 {
+            assert!(ensure_followup_budget(step).is_ok());
+        }
+        assert_eq!(
+            ensure_followup_budget(MAX_MODEL_STEPS - 1).unwrap_err().code,
+            "TOOL_ROUND_LIMIT"
+        );
     }
 
     #[test]
