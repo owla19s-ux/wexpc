@@ -1122,6 +1122,31 @@ mod publication_tests {
     }
 
     #[test]
+    fn publication_checks_all_assignees_not_only_first() {
+        let mut service = draft_service();
+        service.mutate(|snapshot| {
+            let other = "a".repeat(65);
+            snapshot.agents.push(Agent {
+                id: other.clone(), project_id: "p_1".into(),
+                name: "Invalid Core agent".into(), role: AgentRole::Worker,
+                connection_id: "c_1".into(), model_id: "model".into(),
+                conversation_id: "conv_other".into(),
+            });
+            snapshot.tasks[0].agent_ids.push(other);
+            Ok(())
+        }).unwrap();
+        let before = service.snapshot().unwrap();
+        assert_eq!(
+            service.publish_task(before.revision, "task_1").unwrap_err().code,
+            "INVALID_TASK"
+        );
+        let after = service.snapshot().unwrap();
+        assert_eq!(after.revision, before.revision);
+        assert_eq!(after.tasks[0].status, TaskStatus::Draft);
+        assert_eq!(after.tasks[0].publication_epoch, 0);
+    }
+
+    #[test]
     fn publish_rejects_objective_exceeding_core_limit_without_durable_changes() {
         let mut service = draft_service();
         service.mutate(|snapshot| {
