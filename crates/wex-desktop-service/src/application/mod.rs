@@ -791,6 +791,47 @@ mod publication_tests {
     }
 
     #[test]
+    fn claiming_second_task_in_same_project_is_blocked_by_inflight_or_unknown() {
+        let mut service = draft_service();
+        let mut second = service.snapshot().unwrap().tasks[0].clone();
+        second.id = "task_2".into();
+        service.mutate(|snapshot| {
+            snapshot.tasks.push(second);
+            Ok(())
+        }).unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        service.publish_task(rev, "task_1").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        service.publish_task(rev, "task_2").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        let first = service.queue_dispatch_attempt(rev, "task_1", "a_1").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        let second = service.queue_dispatch_attempt(rev, "task_2", "a_1").unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        service.claim_dispatch_attempt(rev, &first.id).unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        assert_eq!(
+            service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
+            "PROJECT_DISPATCH_BLOCKED"
+        );
+        assert_eq!(service.snapshot().unwrap().revision, rev);
+        service.mutate(|snapshot| {
+            snapshot.dispatch_attempts.iter_mut().find(|a| a.id == first.id).unwrap().status =
+                DispatchAttemptStatus::OutcomeUnknown;
+            Ok(())
+        }).unwrap();
+        let rev = service.snapshot().unwrap().revision;
+        assert_eq!(
+            service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
+            "PROJECT_DISPATCH_BLOCKED"
+        );
+        assert_eq!(
+            service.snapshot().unwrap().dispatch_attempts.iter().find(|a| a.id == second.id).unwrap().status,
+            DispatchAttemptStatus::Pending
+        );
+    }
+
+    #[test]
     fn dispatch_queue_rejects_stale_revision_without_creating_attempt() {
         let mut service = draft_service();
         let initial = service.snapshot().unwrap().revision;
