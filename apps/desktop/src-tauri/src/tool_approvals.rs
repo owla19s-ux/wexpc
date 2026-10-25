@@ -24,6 +24,7 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
     let mut tools = vec![tool];
     for (name, description) in [
         ("git_status", "Read Git status of a repository selected by the user."),
+        ("git_diff", "Read the current unstaged Git diff without executing external diff helpers."),
         ("cargo_test", "Run cargo test --workspace --locked only after explicit per-run approval."),
         ("cargo_fmt_check", "Run cargo fmt --all -- --check after explicit per-run approval."),
     ] {
@@ -57,7 +58,7 @@ pub fn run_non_streaming(app: &AppHandle, chat: &PreparedChat, key: &str) -> Res
         }
         let mut completed = 0usize;
         let result = calls.iter().map(|call| {
-            if matches!(call.name.as_str(), "git_status" | "cargo_test" | "cargo_fmt_check") {
+            if matches!(call.name.as_str(), "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check") {
                 return Ok((call.id.clone(), review_local_command(app, chat, call)?));
             }
             if matches!(call.name.as_str(), "github_read_file" | "github_write_file" | "github_create_file") {
@@ -103,7 +104,7 @@ fn preflight_proposal(call: &ToolProposal, github_enabled: bool) -> Result<()> {
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "工具参数必须是对象"))?;
     let fields: &[&str] = match call.name.as_str() {
         "read_file" => &["file_name"],
-        "git_status" | "cargo_test" | "cargo_fmt_check" => &[],
+        "git_status" | "git_diff" | "cargo_test" | "cargo_fmt_check" => &[],
         "github_read_file" if github_enabled => &["owner", "repo", "path"],
         "github_write_file" if github_enabled => &["owner", "repo", "path", "sha", "content"],
         "github_create_file" if github_enabled => &["owner", "repo", "path", "content"],
@@ -206,6 +207,7 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
     }
     let (capability, action, command) = match call.name.as_str() {
         "git_status" => ("git_status", Action::Read, "git --no-optional-locks status --porcelain=v1 -uno"),
+        "git_diff" => ("git_diff", Action::Read, "git diff --no-ext-diff --no-textconv --"),
         "cargo_test" => ("terminal_cargo_test", Action::Write, "cargo test --workspace --locked"),
         "cargo_fmt_check" => ("terminal_cargo_fmt_check", Action::Write, "cargo fmt --all -- --check"),
         _ => return Err(ServiceError::new("TOOL_UNSUPPORTED", "不支持的命令")),
@@ -256,9 +258,14 @@ fn review_local_command(app: &AppHandle, chat: &PreparedChat, call: &ToolProposa
         platform_available: true, resource_allowed: true,
     }).map_err(|_| core_failure())?;
     journal(app, &attempt_id, &operation_id, "in_flight", Some(&intent.intent_digest))?;
-    let outcome: Result<(bool, Option<i32>, String)> = if call.name == "git_status" {
-        wex_desktop_service::approved_git_status(&dispatch, &resource_id, &root)
-            .map(|text| (true, None, text))
+    let outcome: Result<(bool, Option<i32>, String)> = if call.name == "git_status" || call.name == "git_diff" {
+        if call.name == "git_diff" {
+            wex_desktop_service::approved_git_diff(&dispatch, &resource_id, &root)
+                .map(|text| (true, None, text))
+        } else {
+            wex_desktop_service::approved_git_status(&dispatch, &resource_id, &root)
+                .map(|text| (true, None, text))
+        }
     } else {
         let task = if call.name == "cargo_test" {
             wex_desktop_service::TerminalTask::CargoTest
