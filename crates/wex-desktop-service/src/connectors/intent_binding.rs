@@ -7,6 +7,18 @@ use wex_core::operation::Dispatch;
 
 /// Callers must include *all* effectful arguments, excluding credentials.
 /// The capability and resource ID are always part of the digest.
+/// Content version for optimistic file replacement. Unlike the intent digest,
+/// this hashes only the exact file bytes returned by an authorized read.
+pub fn file_content_sha256(bytes: &[u8]) -> String {
+    let hash = digest(&SHA256, bytes);
+    let mut encoded = String::with_capacity(64);
+    for byte in hash.as_ref() {
+        use std::fmt::Write;
+        write!(&mut encoded, "{byte:02x}").expect("write to String");
+    }
+    encoded
+}
+
 pub fn digest_arguments(capability: &str, resource_id: &str, args: &[&[u8]]) -> String {
     let mut bytes = b"WEXPC_TOOL_INTENT_V1\0".to_vec();
     for part in std::iter::once(capability.as_bytes())
