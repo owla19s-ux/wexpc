@@ -222,10 +222,57 @@ impl DesktopService {
                 model_id: input.model_id,
                 conversation_id: conversation.id,
             };
+            s.agent_duties.push(AgentDutyAssignment {
+                id: id("duty"),
+                agent_id: agent.id.clone(),
+                project_id: Some(agent.project_id.clone()),
+                duty_id: match agent.role {
+                    AgentRole::Lead => "lead",
+                    AgentRole::Worker => "worker",
+                    AgentRole::Verifier => "verifier",
+                    AgentRole::Reviewer => "reviewer",
+                }.into(),
+            });
             s.agents.push(agent.clone());
             Ok(agent)
         })
     }
+    /// Assign a work responsibility without granting tool or data permissions.
+    /// The legacy Agent.project_id and role remain for old UI compatibility.
+    pub fn assign_agent_duty(
+        &mut self,
+        agent_id: &str,
+        project_id: Option<String>,
+        duty_id: String,
+    ) -> Result<AgentDutyAssignment> {
+        if !valid_duty_id(&duty_id) {
+            return Err(invalid("职责标识无效"));
+        }
+        self.mutate(|s| {
+            if !s.agents.iter().any(|a| a.id == agent_id) {
+                return Err(ServiceError::new("AGENT_NOT_FOUND", "成员不存在"));
+            }
+            if let Some(project_id) = &project_id {
+                project_exists(s, project_id)?;
+            }
+            if s.agent_duties.iter().any(|a| {
+                a.agent_id == agent_id
+                    && a.project_id == project_id
+                    && a.duty_id == duty_id
+            }) {
+                return Err(ServiceError::new("DUPLICATE_ASSIGNMENT", "职责分配已存在"));
+            }
+            let assignment = AgentDutyAssignment {
+                id: id("duty"),
+                agent_id: agent_id.to_owned(),
+                project_id,
+                duty_id,
+            };
+            s.agent_duties.push(assignment.clone());
+            Ok(assignment)
+        })
+    }
+
     pub fn create_task(&mut self, input: NewTask) -> Result<Task> {
         let name = title(&input.title)?;
         text(&input.goal)?;
