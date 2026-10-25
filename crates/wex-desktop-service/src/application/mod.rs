@@ -376,6 +376,23 @@ impl DesktopService {
             if task.agent_ids.iter().any(|id| !task_member_assigned(s, id, &task.project_id)) {
                 return Err(ServiceError::new("INVALID_BINDING", "任务成员不再拥有项目职责"));
             }
+            // Publication must never create a task the Core dispatcher will
+            // subsequently reject for intrinsic task format constraints.
+            let candidate = wex_core::task::Task {
+                id: task.id.clone(),
+                project_id: task.project_id.clone(),
+                objective: task.goal.clone(),
+                assigned_agent: Some(task.agent_ids[0].clone()),
+                assignment_epoch: s.revision.checked_add(1).ok_or_else(|| {
+                    ServiceError::new("STORAGE_ERROR", "任务发布版本无法保存")
+                })?,
+                status: wex_core::task::TaskStatus::Queued,
+                evidence_refs: vec![],
+            };
+            let mut board = wex_core::task::TaskBoard::default();
+            board.insert(candidate).map_err(|_| {
+                ServiceError::new("INVALID_TASK", "任务目标或标识不符合 Core 调度格式")
+            })?;
             let task = s.tasks.iter_mut().find(|task| task.id == task_id)
                 .expect("task checked above");
             task.publication_epoch = s.revision.checked_add(1).ok_or_else(|| {
