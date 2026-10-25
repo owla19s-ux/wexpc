@@ -1101,6 +1101,24 @@ mod publication_tests {
     }
 
     #[test]
+    fn publication_rejects_blank_and_control_character_scopes() {
+        for invalid_scope in [" ", "src\nother"] {
+            let mut service = draft_service();
+            service.mutate(|snapshot| {
+                snapshot.tasks[0].scope = vec![invalid_scope.into()];
+                Ok(())
+            }).unwrap();
+            let revision = service.snapshot().unwrap().revision;
+            assert_eq!(
+                service.publish_task(revision, "task_1").unwrap_err().code,
+                "INVALID_INPUT"
+            );
+            assert_eq!(service.snapshot().unwrap().revision, revision);
+            assert_eq!(service.snapshot().unwrap().tasks[0].status, TaskStatus::Draft);
+        }
+    }
+
+    #[test]
     fn publish_rejects_objective_exceeding_core_limit_without_durable_changes() {
         let mut service = draft_service();
         service.mutate(|snapshot| {
