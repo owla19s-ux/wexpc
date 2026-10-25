@@ -36,7 +36,7 @@ API Key 保存在 Windows Credential Manager，SQLite 仅存不透明引用。�
 | 普通 API 文本对话 | Rust HTTP 请求/回复、错误、历史持久化已实现；PR #14 可选择流式临时预览。模拟 HTTP 测试与前端构建不等于真实 DeepSeek 或 Windows Host 验收 |
 | 原 Rust Catalog | 正式服务调用其目录恢复、连接启停、模型/会话选择校验，无双写旧 CatalogStore |
 | 原权限/操作生命周期和 Windows 文件后端 | 原样保留，等待本地工具批按接口接入；本批未绕过它们直接给模型文件/命令工具 |
-| Windows 凭证库与 Tauri Host | Windows Host `cargo check`、服务测试与前端构建已通过；凭证真实读写和桌面实机运行尚未验证。Linux 无凭证后端时明确拒绝保存，不降级明文 |
+| Windows 凭证库与 Tauri Host | 较早提交有Windows Host编译证据（见下）；本批正式Linux Host check与严格Clippy通过，当前Windows Host/凭证真实读写和桌面实机仍未验证。Linux 无凭证后端时明确拒绝保存，不降级明文 |
 | 完整 Agent/Dispatcher | 未实现工具循环、范围占用、并发派工、结果集成、自动验证/审查/修复流转 |
 | GitHub、本地文件/Git/终端、Android 模拟器 | 未接通桌面正式路径，继续保留 0.1.1 要求 |
 | API 流式、模型目录/参数细化、追加排队、语音、最终 UI | PR #14 提供可选流式文本临时预览；其余及工具续答未接通，Host/真实服务未验收 |
@@ -53,7 +53,7 @@ npm run build
 cargo check --locked --manifest-path src-tauri/Cargo.toml
 ```
 
-早期源码验证证据（不替代后续提交）：2026-10-24 代码提交 `1b5319a8b605a66f1be55f63da9100c087b77af6`：Linux 全量 Rust 测试 230 项、clippy、格式检查和前端生产构建通过；[Linux/Windows Rust CI](https://github.com/owla19s-ux/wexpc/actions/runs/40023876374) 与 [Windows 桌面 Host/前端检查](https://github.com/owla19s-ux/wexpc/actions/runs/40023876304) 均通过。Host 本地检查受 Linux glib/WebKit/pkg-config 缺失阻挡，Windows 编译证据来自上述 CI。
+早期源码验证证据（不替代后续提交）：2026-10-24 代码提交 `1b5319a8b605a66f1be55f63da9100c087b77af6`：Linux 全量 Rust 测试 230 项、clippy、格式检查和前端生产构建通过；[Linux/Windows Rust CI](https://github.com/owla19s-ux/wexpc/actions/runs/40023876374) 与 [Windows 桌面 Host/前端检查](https://github.com/owla19s-ux/wexpc/actions/runs/40023876304) 均通过。当时Host本地检查受Linux glib/WebKit/pkg-config缺失阻挡，Windows 编译证据来自上述 CI。
 
 这份记录之后的文档提交不改变已验证的源码。未构建安装包，未调用真实 API 服务商，未验证凭证库真实读写或 Windows 窗口体验。桌面 Windows 检查只在相关源码/工作流 PR 或按需手动触发，不在本批构建安装包。
 
@@ -84,8 +84,16 @@ Space/分组可重命名，Context/项目可编辑名称、目标和资料引用
 本工作资料批本地验证：248项Rust回归、fmt/clippy与前端构建通过；4项新增用例覆盖主AI全项目视图、其他角色当前分派、跨项目/历史/凭证隔离、只读与正式请求接线。独立代码审查无阻塞项；Windows CI对应结果见PR，未宣称真实模型或Windows交互验收。
 
 
-双环境施工入口：见[开发操作与分工](../../docs/DEVELOPMENT-WORKFLOW.md)。Work承担当前Linux环境可执行的核心/状态/数据库/前端与集成验证；大肥鱼在手机工具链验通、独立API模块起点交接后承担该模块实现与本地测试。手机证据待实际提交，不把Work测试结果当手机通过。API独立模块尚未创建，Windows缺项按源码提交登记并保留暂停期限制。
+双环境施工入口：见[开发操作与分工](../../docs/DEVELOPMENT-WORKFLOW.md)。Work承担当前Linux环境可执行的核心/状态/数据库/前端与集成验证；大肥鱼在手机工具链验通、独立API模块起点交接后承担该模块实现与本地测试。手机证据待实际提交，不把Work测试结果当手机通过。API独立协议crate现已创建并接入桌面集成分支，旧的未创建状态已失效；Windows缺项仍按源码提交登记并保留暂停期限制。
 
+
+## 当前 Host 编译验证（2026-10-25）
+
+工作区内独立部署pkg-config、GTK 3.24.41和WebKitGTK 2.52.3，使用依赖前缀执行正式Tauri Host检查；没有修改产品平台目标或启用明文凭证。仓库原图标已按Git blob恢复并核对，未替换图标。
+
+本批发现Host Cargo.lock中的libc 0.2.191不满足现有wex-local-resources声明的`=0.2.177`。按源码已有约束重解析后，libc固定0.2.177，mio/tokio/tokio-util相应采用兼容版本1.1.0/1.50.0/0.7.19，并规范锁文件条目顺序。未改变Cargo.toml、版本号、模块选型或功能范围。
+
+已执行：`cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu --locked`与同目标`cargo clippy --all-targets --locked -- -D warnings`通过。另实际执行同目标`cargo test --bin wexpc-desktop --locked`，4项Host审批参数预检测试通过，覆盖非法批次参数、GitHub新建/更新区分、连接启停与字段/SHA校验。Linux Host代码编译包括当前恢复命令、业务调用和IPC注册；这些测试不触发真实工具或窗口交互，不等于Windows Host编译、凭证库操作、桌面点击或真实API/GitHub验收。
 
 ## 工具执行记录恢复（2026-10-25 本批）
 
