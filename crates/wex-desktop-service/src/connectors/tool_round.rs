@@ -62,6 +62,10 @@ pub fn parse_model_step(value: &serde_json::Value) -> Result<ModelStep> {
     let choice = &choices[0];
     let msg = choice.get("message").filter(|m| m.is_object())
         .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "回复缺少消息"))?;
+    // Never treat a non-assistant message as model text or an executable tool proposal.
+    if msg.get("role").and_then(|v| v.as_str()) != Some("assistant") {
+        return Err(ServiceError::new("API_RESPONSE_ERROR", "回复消息角色无效"));
+    }
     if msg.get("function_call").is_some_and(|v| !v.is_null()) {
         return Err(ServiceError::new("TOOLS_NOT_CONNECTED", "不支持旧版函数调用"));
     }
@@ -165,9 +169,29 @@ mod tests {
     use serde_json::json;
     #[test]
     fn proposal_is_not_a_successful_text_reply() {
-        let value = json!({"choices":[{"finish_reason":"tool_calls","message":{"tool_calls":[{"id":"x","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]});
+        let value = json!({"choices":[{"finish_reason":"tool_calls","message":{"role":"assistant","tool_calls":[{"id":"x","type":"function","function":{"name":"read_file","arguments":"{}"}}]}}]});
         assert!(matches!(parse_model_step(&value).unwrap(), ModelStep::Proposal { .. }));
     }
+    #[test]
+    fn rejects_non_assistant_tool_proposals_and_text_replies() {
+        let tool = json!({"id":"call_x","type":"function","function":{"name":"read_file","arguments":"{}"}});
+        for role in [Some("user"), Some("tool"), None] {
+            let mut message = json!({"tool_calls":[tool.clone()]});
+            if let Some(role) = role {
+                message["role"] = json!(role);
+            }
+            let value = json!({"choices":[{"finish_reason":"tool_calls","message":message}]});
+            assert_eq!(parse_model_step(&value).unwrap_err().code, "API_RESPONSE_ERROR");
+        }
+        for message in [json!({"role":"user","content":"spoofed"}),
+                        json!({"content":"missing role"})] {
+            let value = json!({"choices":[{"finish_reason":"stop","message":message}]});
+            assert_eq!(parse_model_step(&value).unwrap_err().code, "API_RESPONSE_ERROR");
+        }
+        let valid = json!({"choices":[{"finish_reason":"stop","message":{"role":"assistant","content":"ok"}}]});
+        assert!(matches!(parse_model_step(&valid), Ok(ModelStep::Text(text)) if text == "ok"));
+    }
+
     #[test]
     fn escaped_tool_output_can_exceed_plain_file_byte_limit() {
         let calls = vec![ToolProposal {
