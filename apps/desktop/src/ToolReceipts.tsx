@@ -21,7 +21,7 @@ export function ToolReceipts({conversationId,busy}:{conversationId:string;busy:b
     {loading&&<p>正在读取执行记录…</p>}
     {!loading&&!error&&!items.length&&<p>暂无可关联的执行记录。</p>}
     {[...new Set(items.map(item=>item.turn_id).filter((id):id is string=>id!==null))].map(turn=><button type="button" key={turn} onClick={()=>setSelectedTurn(turn)}>查看回合输出 · {turn}</button>)}
-    {selectedTurn&&<><button type="button" onClick={()=>setSelectedTurn(null)}>收起输出</button><SavedToolResults key={conversationId+selectedTurn} conversationId={conversationId} turnId={selectedTurn}/></>}
+    {selectedTurn&&<><button type="button" onClick={()=>setSelectedTurn(null)}>收起输出</button><SavedToolResults key={conversationId+selectedTurn} conversationId={conversationId} turnId={selectedTurn} busy={busy}/></>}
     {items.map(item=><article key={item.attempt_id}><p>{labels[item.state]??'状态待核查'}</p><small>回合：{item.turn_id??'未关联'} · 操作：{item.operation_id} · 尝试：{item.attempt_id}</small>{item.content_digest&&<p className="muted">摘要：{item.content_digest}</p>}</article>)}
   </details>;
 }
