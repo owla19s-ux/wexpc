@@ -526,6 +526,29 @@ impl Store {
         })
     }
 
+    /// Read-only validation of a proposed existing-file update under the live
+    /// persistent grant lock. A successful result is NOT an executable token:
+    /// commit must re-open the same root and re-check the version atomically.
+    pub fn prepare_authorized_replace_at(
+        &self, expected_revision: Option<u64>, directory_id: &str, leaf: &str,
+        expected_bytes: &[u8], system_access: bool,
+    ) -> Result<(), RegisteredReadError> {
+        self.with_snapshot(|state, grants| {
+            if expected_revision.is_some_and(|r| r != state.revision) {
+                return Err(wex_local_resources::FileReadError::Changed);
+            }
+            let saved = state.directories.iter().find(|d| d.id == directory_id)
+                .ok_or(wex_local_resources::FileReadError::Resource(
+                    wex_local_resources::ResourceError::UnknownDirectory))?;
+            let roots: Vec<_> = self.internal_roots.iter().map(PathBuf::as_path).collect();
+            let mut registry = wex_local_resources::DirectoryRegistry::new();
+            registry.restore_binding(saved, &roots)
+                .map_err(wex_local_resources::FileReadError::Resource)?;
+            registry.prepare_file_replace_with_exclusions(
+                directory_id, leaf, expected_bytes, system_access, grants, &roots)
+        })
+    }
+
     /// Exclusive creation under current per-conversation write authority.
     /// Authorization, directory identity and file I/O share the store lock.
     /// A failed create can leave a partial file; consumers must not auto-retry.
