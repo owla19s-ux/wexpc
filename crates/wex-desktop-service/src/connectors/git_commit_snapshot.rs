@@ -42,6 +42,25 @@ pub fn verify_live_git_commit_dispatch(
     source: &GitCommitSnapshotSource<'_>,
     prepared: &PreparedCommit,
 ) -> Result<()> {
+    verify_current_git_write_access(source, prepared)?;
+    let current = observe_prepared_git_commit(source, prepared)?;
+    let binding = source
+        .registry
+        .export_binding(source.directory_id)
+        .map_err(|_| ServiceError::new("GIT_SNAPSHOT_UNAVAILABLE", "已授权仓库身份不可用"))?;
+    super::git_commit_binding::verify_git_commit_dispatch(
+        dispatch,
+        resource_id,
+        &binding.path,
+        prepared,
+        &current,
+    )
+}
+
+pub(super) fn verify_current_git_write_access(
+    source: &GitCommitSnapshotSource<'_>,
+    prepared: &PreparedCommit,
+) -> Result<()> {
     for path in prepared.paths() {
         match source.registry.check_with_exclusions(
             source.directory_id,
@@ -66,18 +85,7 @@ pub fn verify_live_git_commit_dispatch(
             }
         }
     }
-    let current = observe_prepared_git_commit(source, prepared)?;
-    let binding = source
-        .registry
-        .export_binding(source.directory_id)
-        .map_err(|_| ServiceError::new("GIT_SNAPSHOT_UNAVAILABLE", "已授权仓库身份不可用"))?;
-    super::git_commit_binding::verify_git_commit_dispatch(
-        dispatch,
-        resource_id,
-        &binding.path,
-        prepared,
-        &current,
-    )
+    Ok(())
 }
 
 fn observe_stable(

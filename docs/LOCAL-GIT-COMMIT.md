@@ -71,3 +71,21 @@ cargo fmt --all -- --check
 新增验证包括：真实嵌套二进制字节、授权优先于缺失路径探测、链接/硬链接/保护边界、internal exclusions/大小限制、Unix 并发 symlink 父目录交换、句柄身份识别被改名的保护/internal 目录、真实 Git 文件/索引/分支变化和 `.git` 目录更换、原生 owner execute 0654→0754 的 Git 模式变化。独立审查指出的保护目录身份遗漏和 execute 位错误均先取得失败回归，再修复。
 
 本批使用正式 Rust/Cargo 1.99.1 工作区执行全量测试、严格 Clippy 与 fmt；对 `wex-local-resources` 增加 `cargo check -p wex-local-resources --all-targets --target x86_64-pc-windows-msvc --locked` 交叉类型检查。该命令编译检查 Windows 后端和测试源码，**没有链接或运行 Windows 测试，不代表 Windows 行为、Tauri Host 或桌面验收通过**。最终测试数量和提交 SHA 见 PR #63。仍待资源锁、独立索引/真实提交/引用条件更新、持久回执/UNKNOWN 恢复以及正式 Host 工具入口；不触发 Actions。
+
+## 后续增量：共享占用与持久准入（2026-10-26）
+
+新增 `git_commit_admission.rs`，复用既有 Core `ResourceLeases` 与 `wex-workspace-store::OperationStore`，没有再建第二套审批账本。桌面服务增加对现有 workspace-store crate 的本地依赖，锁文件仅增加该已存在依赖关系。
+
+`git_commit_resource_id` 按操作系统和注册根的物理对象 stamp 计算稳定资源 ID，不包含会话、Agent 或目录授权 ID；同一物理工作树即使在不同会话中重新注册，也不能得到独立的写入占用。新入口的 Intent 必须使用此物理 ID，不能自动沿用旧任意 resource_id 的审批。
+
+`begin_git_commit` 先检查当前 Write 许可并取得仓库级共享占用，再按预期 revision 读取真实操作账本。相同物理资源若存在任何 Write 的 InFlight/Unknown，拒绝新的派发；随后核对存储的 capability/resource/父版本/摘要及当前文件版本，通过现有 OperationStore.begin 的 revision/批准/authority 校验并持久保存 InFlight，才进入后置复核。后置文件/权限复核失败时不返回许可，尽力保留 Unknown；即使该状态写入失败，既有 InFlight 仍阻止自动重派。最后再次读取账本，要求 generation、意图及 InFlight attempt 一致，拒绝已被恢复流程隔离或服务会话已替换的尝试。
+
+成功返回非 Clone 的 `GitCommitAdmission`，持有共享 lease、已持久化的 CommittedDispatch 和 PreparedCommit。Host 须一直保留它直到外部结果结算。释放内存 guard **不会清除持久 InFlight/Unknown**；重启、新建授权 ID 或新建内存 lease registry 也不能作为重试依据。旧未知结果必须先核对外部事实，再由受信任恢复流程写入结论。本入口本身不调用 Git 写入命令，不生成虚构成功回执。
+
+**Host 并发契约**：从准入到实际派发持有实时授权所有权；所有协作 worker 共用同一资源占用注册表和 OperationStore 会话；结果结算、隔离及恢复流程也须协调同一仓库 lease，不能在新许可返回后随意变更该尝试。最后一次读取不是对后续状态变化的锁。当前协议只协调同一物理工作树的此类准入，不是任意外部应用的 OS 锁，也尚未作为所有文件/终端工具及重叠/嵌套工作树的统一资源锁。
+
+**实际平台缺口**：本批检查发现，现有 OperationStore 所依赖的 OrganizationStore.open_named 明确拒绝非 Unix。因此本批是域协议和 Linux 持久准入链的验证，**不能据此宣布 Windows 持久执行可用**；Windows 的私有存储后端/适配仍必须完成。未弱化旧账本的权限或恢复检查，也未把 Unix 实现定为 Windows 最终存储方案。Windows 上缺少可用账本时不返回准入许可，不回退到仅内存状态。
+
+新增测试覆盖物理根跨授权 ID 共享、InFlight 真实落盘后才返回许可、占用互斥、drop 后持久阻止重派、冷重开后 Unknown 与新授权 ID 仍隔离、旧文件/意图/authority 不消费审批、账本锁拒绝不返回 Dispatch，以及准入最终阶段的 Unknown/会话替换拒绝。独立审查发现的最终持久尝试状态缺检已以实际 OperationStore 阶段回归先失败再修复。初始测试数据目录不符合旧账本私有权限要求，测试改用由账本自行创建的私有子目录，未放宽生产规则。
+
+实际执行 Rust/Cargo1.99.1 的正式 workspace test、严格 all-targets Clippy、fmt 与 diff 检查；具体数量与提交 SHA 记在 PR #63。Windows 持久准入、Tauri Host、真实模型回合和实际 Commit 写入仍未运行/接通。下一步仍需完成 Windows 持久适配、实际 Git 写入与条件更新引用、资源协议向其它写工具接线、可信回执和 UNKNOWN 核查恢复；不向模型暴露未闭环的提交工具，不触发 Actions。
