@@ -209,11 +209,23 @@ fn drive_tool_rounds_with(
 }
 
 fn drive_tool_rounds_recorded_with(
+    next_model_step: impl FnMut(Vec<Message>) -> Result<ModelStep>,
+    settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
+    checkpoint: impl FnMut(&[Message], bool) -> Result<()>,
+) -> Result<String> {
+    drive_tool_rounds_from_history(Vec::new(), next_model_step, settle_approved, checkpoint)
+}
+/// Continue from complete prior receipts. Only proposals returned by a new model
+/// step reach the Host callback; restored history is never dispatched.
+pub fn drive_tool_rounds_from_history(
+    mut transcript: Vec<Message>,
     mut next_model_step: impl FnMut(Vec<Message>) -> Result<ModelStep>,
     mut settle_approved: impl FnMut(&[ToolProposal]) -> Result<Vec<(String, String)>>,
     mut checkpoint: impl FnMut(&[Message], bool) -> Result<()>,
 ) -> Result<String> {
-    let mut transcript = Vec::new();
+    if !transcript.is_empty() {
+        crate::tool_checkpoints::validate_complete_tool_history(&transcript)?;
+    }
     for model_step_index in 0..MAX_MODEL_STEPS {
         match next_model_step(transcript.clone())? {
             ModelStep::Text(text) => return Ok(text),
@@ -229,6 +241,14 @@ fn drive_tool_rounds_recorded_with(
                     return Err(ServiceError::new(
                         "TOOL_BATCH_LIMIT",
                         "一次工具回合最多执行四项操作",
+                    ));
+                }
+                // A recovered transcript must still leave room for this complete
+                // batch under the existing 64-message transport limit.
+                if transcript.len() + 1 + calls.len() > 64 {
+                    return Err(ServiceError::new(
+                        "TOOL_HISTORY_LIMIT",
+                        "工具历史已达传输上限，本轮未派发新工具",
                     ));
                 }
                 // The Host callback is the *only* path to execution.

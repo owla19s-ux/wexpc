@@ -93,7 +93,7 @@ Space/分组可重命名，Context/项目可编辑名称、目标和资料引用
 
 本批发现Host Cargo.lock中的libc 0.2.191不满足现有wex-local-resources声明的`=0.2.177`。按源码已有约束重解析后，libc固定0.2.177，mio/tokio/tokio-util相应采用兼容版本1.1.0/1.50.0/0.7.19，并规范锁文件条目顺序。未改变Cargo.toml、版本号、模块选型或功能范围。
 
-已执行：`cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu --locked`与同目标`cargo clippy --all-targets --locked -- -D warnings`通过。另实际执行同目标`cargo test --bin wexpc-desktop --locked`，4项Host审批参数预检测试通过，覆盖非法批次参数、GitHub新建/更新区分、连接启停与字段/SHA校验。Linux Host代码编译包括当前恢复命令、业务调用和IPC注册；这些测试不触发真实工具或窗口交互，不等于Windows Host编译、凭证库操作、桌面点击或真实API/GitHub验收。
+已执行：`cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --target x86_64-unknown-linux-gnu --locked`与同目标`cargo clippy --all-targets --locked -- -D warnings`通过。另实际执行同目标`cargo test --bin wexpc-desktop --locked`，6项Host预检/派发边界测试通过，覆盖非法批次参数、GitHub新建/更新区分、连接启停与字段/SHA校验、GitHub配置故障不阻塞本地工具，以及派发前撤销API连接不消耗Core批准。Linux Host代码编译包括当前恢复命令、业务调用和IPC注册；这些测试不触发真实工具或窗口交互，不等于Windows Host编译、凭证库操作、桌面点击或真实API/GitHub验收。
 
 ## 工具执行记录恢复（2026-10-25 本批）
 
@@ -107,4 +107,6 @@ Space/分组可重命名，Context/项目可编辑名称、目标和资料引用
 
 最终完整回复另外保存到chat-replies，普通/流式发送和工具回复恢复均在写入SQLite前尝试保存。若SQLite落库失败并重启，对话页优先提供「恢复已取得的回复（不请求 API）」：核对原对话、回合和用户请求后写回原记录，不读取凭证、不执行工具，也不要求API连接启用。已有最终回复时拒绝再次请求模型；损坏备份明确报错，不自动降级成重新生成。备份失败但SQLite成功时保留正常成功结果；两处都失败时保留内存待保存结果并提示保持应用打开。
 
-这是专门的回复恢复操作，普通对话工具能力未改变。若模型请求新工具，本次不执行并明确提示用户在对话中继续；完整自动工具接续、流式reasoning续传、持久授权及自动调度仍未完成。服务层已验证数据库重启后在原回合保存恢复回复且不重复工具回调；Windows Host及桌面点击验收尚未完成，不能称为Windows实机交付。Rust恢复/隔离/冲突测试及前端构建按交付PR报告；Windows Host、凭证库和桌面交互仍需分别验收。
+默认仍是只恢复回复；另可显式选择「恢复后继续工具流程」。该选项复用同一工具循环与现有审批，只把新模型回复提出的新工具请求送入审批，旧assistant/tool历史只回放给模型，不自动派发。新的pending/ready检查点从已校验游标后追加，不覆盖旧记录；未结算历史或旧游标冲突时停止，不退回旧快照重跑。普通与恢复循环在每次模型请求前复核当前连接/模型/凭证引用，新工具在Core派发前再次复核；已经派发的操作不追溯取消。GitHub配置不可用时不声明GitHub工具，实际GitHub请求仍检查其状态并明确报错，本地批次不依赖GitHub配置健康。
+
+本批保留原型已有回合/批次/传输上限，并在历史无法再容纳完整新批次时提前停止派发，防止执行后才发现回执无法回传；这些不是新确认的永久产品限制。恢复后的工具循环已接通，持久授权、自动/询问/拦截执行策略、未知结果核查后恢复、流式reasoning续传与完整自动调度仍未完成。服务层已验证数据库重启后在原回合保存恢复回复且不重复工具回调；Windows Host及桌面点击验收尚未完成，不能称为Windows实机交付。Rust恢复/隔离/冲突测试及前端构建按交付PR报告；Windows Host、凭证库和桌面交互仍需分别验收。

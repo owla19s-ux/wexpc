@@ -243,9 +243,11 @@ async fn send_message(
         .join("chat-replies");
     let request = locked(&shared)?.prepare_chat(&conversation_id, prompt)?;
     let backup_request = request.clone();
+    let guard = shared.clone();
     // The SQLite mutex is released before network I/O. Each conversation can
     // progress independently; only one request at a time is admitted per session.
     let outcome = tauri::async_runtime::spawn_blocking(move || {
+        locked(&guard)?.check_tool_reply_binding(&request)?;
         let key = vault::read(&request.credential_ref)?;
         if stream {
             execute_chat_stream_with_progress(&request, &key, |delta| {
@@ -259,7 +261,9 @@ async fn send_message(
                 );
             })
         } else {
-            tool_approvals::run_non_streaming(&app, &request, &key)
+            tool_approvals::run_non_streaming(&app, &request, &key, || {
+                locked(&guard)?.check_tool_reply_binding(&request)
+            })
         }
     })
     .await
@@ -341,7 +345,7 @@ fn restored_reply(
     shared: &Shared,
     conversation: &str,
     turn: &str,
-) -> Result<(PreparedChat, Vec<wex_api::Message>)> {
+) -> Result<(PreparedChat, Vec<wex_api::Message>, u32)> {
     if saved_reply(app, shared, conversation, turn)?.is_some() {
         return Err(ServiceError::new(
             "SAVED_REPLY_AVAILABLE",
@@ -353,7 +357,7 @@ fn restored_reply(
         .path()
         .app_data_dir()
         .map_err(|_| ServiceError::new("TOOL_CHECKPOINT_ERROR", "无法定位检查点目录"))?;
-    restore_tool_checkpoint(&root.join("tool-checkpoints"), &current)
+    restore_tool_checkpoint_with_cursor(&root.join("tool-checkpoints"), &current)
 }
 #[derive(serde::Serialize)]
 struct ReplyRecovery {
@@ -389,7 +393,7 @@ fn tool_reply_recovery(
         Ok(_) => ReplyRecovery {
             available: true,
             mode: "model".into(),
-            reason: "将原上下文和已保存工具回执发回原连接恢复回复，不重新执行工具".into(),
+            reason: "将原上下文和已保存工具回执发回原连接，可选择继续工具流程；新的工具请求仍按当前审批，历史回执不会自动派发".into(),
         },
         Err(error) => ReplyRecovery {
             available: false,
@@ -404,9 +408,10 @@ async fn resume_tool_reply(
     state: State<'_, Shared>,
     conversation_id: String,
     turn_id: String,
+    continue_tools: bool,
 ) -> Result<()> {
     let shared = state.inner().clone();
-    let (frozen, history) = restored_reply(&app, &shared, &conversation_id, &turn_id)?;
+    let (frozen, history, sequence) = restored_reply(&app, &shared, &conversation_id, &turn_id)?;
     let reply_root = app
         .path()
         .app_data_dir()
@@ -418,6 +423,16 @@ async fn resume_tool_reply(
     let outcome = tauri::async_runtime::spawn_blocking(move || {
         locked(&guard)?.check_tool_reply_binding(&request)?;
         let key = vault::read(&request.credential_ref)?;
+        if continue_tools {
+            return tool_approvals::resume_non_streaming(
+                &app,
+                &request,
+                &key,
+                history,
+                sequence,
+                || locked(&guard)?.check_tool_reply_binding(&request),
+            );
+        }
         match execute_model_step(&request, &key, history, vec![])? {
             ModelStep::Text(text) => Ok(text),
             ModelStep::Proposal { .. } => Err(ServiceError::new(

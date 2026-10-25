@@ -20,8 +20,8 @@ pub use connectors::terminal_dispatch::{
 };
 pub use connectors::tool_proposals::ToolProposal;
 pub use connectors::tool_round::{
-    committed_tool_messages, drive_tool_rounds, drive_tool_rounds_checkpointed, execute_model_step,
-    ModelStep,
+    committed_tool_messages, drive_tool_rounds, drive_tool_rounds_checkpointed,
+    drive_tool_rounds_from_history, execute_model_step, ModelStep,
 };
 pub use domain::*;
 
@@ -32,7 +32,10 @@ mod tool_results;
 pub use tool_results::{read_tool_results, save_tool_result, SavedToolResult};
 
 mod tool_checkpoints;
-pub use tool_checkpoints::{load_tool_checkpoint, restore_tool_checkpoint, save_tool_checkpoint};
+pub use tool_checkpoints::{
+    load_tool_checkpoint, restore_tool_checkpoint, restore_tool_checkpoint_with_cursor,
+    save_tool_checkpoint,
+};
 
 mod saved_chat_reply;
 pub use saved_chat_reply::{read_chat_reply, save_chat_reply};

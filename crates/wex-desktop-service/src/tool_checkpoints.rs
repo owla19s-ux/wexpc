@@ -226,6 +226,9 @@ pub fn save_tool_checkpoint(
 /// Load only the latest complete checkpoint for this exact frozen request.
 /// Current connection/permission checks remain the application's responsibility.
 pub fn load_tool_checkpoint(root: &Path, request: &PreparedChat) -> Result<Vec<Message>> {
+    load_tool_checkpoint_state(root, request).map(|(history, _)| history)
+}
+fn load_tool_checkpoint_state(root: &Path, request: &PreparedChat) -> Result<(Vec<Message>, u32)> {
     let dir = directory(root, request)?;
     let mut paths: Vec<PathBuf> = fs::read_dir(&dir)
         .map_err(|_| error())?
@@ -236,6 +239,7 @@ pub fn load_tool_checkpoint(root: &Path, request: &PreparedChat) -> Result<Vec<M
     if paths.is_empty() {
         return Err(error());
     }
+    let next_sequence = u32::try_from(paths.len()).map_err(|_| error())?;
     let expected = serde_json::to_value(&request.messages).map_err(|_| error())?;
     let mut latest: Option<(Vec<Message>, bool)> = None;
     for (index, path) in paths.into_iter().enumerate() {
@@ -284,7 +288,7 @@ pub fn load_tool_checkpoint(root: &Path, request: &PreparedChat) -> Result<Vec<M
         latest = Some((history, saved.pending));
     }
     match latest {
-        Some((history, false)) => Ok(history),
+        Some((history, false)) => Ok((history, next_sequence)),
         _ => Err(error()),
     }
 }
@@ -295,6 +299,14 @@ pub fn restore_tool_checkpoint(
     root: &Path,
     current: &PreparedChat,
 ) -> Result<(PreparedChat, Vec<Message>)> {
+    restore_tool_checkpoint_with_cursor(root, current)
+        .map(|(request, history, _)| (request, history))
+}
+/// Return the next immutable checkpoint slot together with its validated history.
+pub fn restore_tool_checkpoint_with_cursor(
+    root: &Path,
+    current: &PreparedChat,
+) -> Result<(PreparedChat, Vec<Message>, u32)> {
     let dir = directory(root, current)?;
     let mut paths = fs::read_dir(&dir)
         .map_err(|_| error())?
@@ -324,6 +336,10 @@ pub fn restore_tool_checkpoint(
     if last.role != "user" || original.role != "user" || last.content != original.content {
         return Err(error());
     }
-    let history = load_tool_checkpoint(root, &restored)?;
-    Ok((restored, history))
+    let (history, next_sequence) = load_tool_checkpoint_state(root, &restored)?;
+    Ok((restored, history, next_sequence))
+}
+
+pub(crate) fn validate_complete_tool_history(history: &[Message]) -> Result<()> {
+    validate(history, false)
 }
