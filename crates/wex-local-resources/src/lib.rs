@@ -254,6 +254,30 @@ impl DirectoryRegistry {
     /// Trusted Host deny roots only; never accept them from an AI/Space request.
     /// Authorization denial precedes even exclusion metadata. A matching root
     /// cannot be enabled by a grant or explicit personal consent.
+    /// Non-mutating precondition check for an eventual versioned edit.
+    /// Never treat this as authorization for a later unprotected write.
+    pub fn prepare_file_replace_with_exclusions(
+        &self, directory_id: &str, leaf: &str, expected: &[u8],
+        system_access: bool, grants: &[DirectoryGrant<'_>], internal_roots: &[&Path],
+    ) -> Result<(), FileReadError> {
+        if !platform::valid_leaf(leaf) || expected.len() > 65536 {
+            return Err(FileReadError::Resource(ResourceError::InvalidPath));
+        }
+        match self.check_with_exclusions(directory_id, leaf, system_access,
+            Access::Write, grants, internal_roots) {
+            Ok(Decision::Allowed) => {}
+            Ok(Decision::Denied(reason)) => return Err(FileReadError::Denied(reason)),
+            Err(error) => return Err(FileReadError::Resource(error)),
+        }
+        let binding = self.bindings.iter().find(|b| b.id == directory_id)
+            .ok_or(FileReadError::Resource(ResourceError::UnknownDirectory))?;
+        platform::prepare_replace_leaf(&binding._pin, leaf, expected)?;
+        for registered in &self.bindings {
+            registered.verify().map_err(FileReadError::Resource)?;
+        }
+        Ok(())
+    }
+
     /// Create a new direct regular file only within an explicitly authorized
     /// directory. The caller must hold the live authority-store lock throughout.
     /// On I/O error after exclusive creation the file may exist: never retry.
