@@ -119,8 +119,11 @@ fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
             || attempt.publication_epoch == 0
             || task.status != TaskStatus::Published
             || task.project_id != attempt.project_id
+            || !snapshot.projects.iter().any(|p| p.id == attempt.project_id)
+            || !snapshot.agents.iter().any(|agent| agent.id == attempt.agent_id)
             || task.publication_epoch != attempt.publication_epoch
             || !task.agent_ids.contains(&attempt.agent_id)
+            || !task_member_assigned(snapshot, &attempt.agent_id, &attempt.project_id)
             || !identities.insert(attempt.id.clone())
             || !publications.insert((attempt.task_id.clone(), attempt.publication_epoch))
         {
@@ -493,6 +496,18 @@ impl DesktopService {
             // Temporary fail-closed project-wide fence until the Host can hold
             // canonical, path-overlap-aware leases for entire tool lifetimes.
             // It is safer to serialize a project's attempts than race writes.
+            // A restored OutcomeUnknown in another project may still refer to
+            // a shared filesystem or connector. Without durable scoped leases,
+            // globally refuse another claim until the uncertainty is resolved.
+            if s.dispatch_attempts.iter().any(|other| {
+                other.id != attempt_id
+                    && other.status == DispatchAttemptStatus::OutcomeUnknown
+            }) {
+                return Err(ServiceError::new(
+                    "UNKNOWN_DISPATCH_BLOCKED",
+                    "存在结果未知的历史操作，未核查资源范围前禁止继续领取",
+                ));
+            }
             if s.dispatch_attempts.iter().any(|other| {
                 other.id != attempt_id
                     && other.project_id == prior.project_id
