@@ -70,7 +70,7 @@ impl ResourceLeases {
     }
 
     pub fn is_busy(&self, scope: &str) -> Result<bool, LeaseError> {
-        Ok(self.state.lock().map_err(|_| LeaseError::Poisoned)?.held.contains_key(scope))
+        Ok(self.state.lock().map_err(|_| LeaseError::Poisoned)?.held.keys().any(|held| scopes_overlap(scope, held)))
     }
 }
 
@@ -147,6 +147,7 @@ mod tests {
         let registry = ResourceLeases::default();
         let parent = registry.acquire("agent_a", &scopes(&["src"])).unwrap();
         assert!(matches!(registry.acquire("agent_b", &scopes(&["src/lib.rs"])), Err(LeaseError::Busy)));
+        assert!(registry.is_busy("src/lib.rs").unwrap());
         assert!(registry.acquire("agent_b", &scopes(&["src-other/lib.rs"])).is_ok());
         drop(parent);
         let child = registry.acquire("agent_b", &scopes(&["src/lib.rs"])).unwrap();
