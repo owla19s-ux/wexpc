@@ -315,6 +315,7 @@ impl DesktopService {
                 acceptance: input.acceptance,
                 agent_ids: input.agent_ids,
                 status: TaskStatus::Draft,
+                publication_epoch: 0,
             };
             s.tasks.push(task.clone());
             Ok(task)
@@ -338,6 +339,9 @@ impl DesktopService {
             }
             let task = s.tasks.iter_mut().find(|task| task.id == task_id)
                 .expect("task checked above");
+            task.publication_epoch = s.revision.checked_add(1).ok_or_else(|| {
+                ServiceError::new("STORAGE_ERROR", "任务发布版本无法保存")
+            })?;
             task.status = TaskStatus::Published;
             Ok(task.clone())
         })
@@ -359,6 +363,9 @@ impl DesktopService {
         if task.status != TaskStatus::Published {
             return Err(ServiceError::new("TASK_NOT_PUBLISHED", "任务尚未发布"));
         }
+        if task.publication_epoch == 0 {
+            return Err(ServiceError::new("INVALID_TASK", "任务缺少可信发布版本"));
+        }
         if !task.agent_ids.iter().any(|id| id == agent_id)
             || !task_member_assigned(&state, agent_id, &task.project_id)
         {
@@ -370,11 +377,11 @@ impl DesktopService {
             project_id: task.project_id.clone(),
             objective: task.goal.clone(),
             assigned_agent: Some(agent_id.to_owned()),
-            assignment_epoch: revision,
+            assignment_epoch: task.publication_epoch,
             status: CoreStatus::Queued,
             evidence_refs: vec![],
         }).map_err(|_| ServiceError::new("INVALID_TASK", "任务无法映射到调度核心"))?;
-        wex_core::dispatch::admit(&board, task_id, &task.project_id, agent_id, revision, true)
+        wex_core::dispatch::admit(&board, task_id, &task.project_id, agent_id, task.publication_epoch, true)
             .map_err(|_| ServiceError::new("DISPATCH_REFUSED", "任务未通过调度准入核查"))
     }
 
@@ -584,6 +591,7 @@ mod publication_tests {
                 acceptance: "Tests pass".into(),
                 agent_ids: vec!["a_1".into()],
                 status: TaskStatus::Draft,
+                publication_epoch: 0,
             });
             Ok(())
         }).unwrap();
