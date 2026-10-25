@@ -53,6 +53,15 @@ pub fn verify_arguments(dispatch: &Dispatch, args: &[&[u8]]) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn content_version_is_stable_and_distinct_from_tool_intent() {
+        assert_eq!(file_content_sha256(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+        assert_eq!(file_content_sha256(b"hello"),
+            "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824");
+        assert_ne!(file_content_sha256(b"hello"),
+            digest_arguments("local_file_read", "saved", &[b"hello"]));
+    }
+    #[test]
     fn length_prefix_prevents_ambiguous_tuple_collision() {
         assert_ne!(
             digest_arguments("write", "repo", &[b"ab", b"c"]),
