@@ -101,6 +101,27 @@ pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadErro
     Ok(bytes)
 }
 
+/// Kernel-enforced no-follow, exclusive creation relative to the pinned root.
+/// A failed write may leave a partial file; callers must treat it as unknown.
+pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), FileReadError> {
+    use std::io::Write;
+    if !valid_leaf(leaf) || bytes.len() > 65536 {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let name = CString::new(leaf)
+        .map_err(|_| FileReadError::Resource(ResourceError::InvalidPath))?;
+    // SAFETY: live directory fd; only a single, NUL-terminated component.
+    let fd = unsafe { libc::openat(root.as_raw_fd(), name.as_ptr(),
+        libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+        0o600) };
+    if fd < 0 { return Err(unavailable()); }
+    // SAFETY: openat returned a newly owned fd.
+    let mut file = unsafe { File::from_raw_fd(fd) };
+    file.write_all(bytes).map_err(|_| unavailable())?;
+    file.sync_all().map_err(|_| unavailable())?;
+    Ok(())
+}
+
 fn unavailable() -> FileReadError {
     FileReadError::Resource(ResourceError::Unavailable)
 }
