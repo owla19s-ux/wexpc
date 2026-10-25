@@ -206,17 +206,29 @@ fn capacity_rejected_addition_does_not_quarantine_existing_authority() {
 fn exclusive_authorized_create_is_durable_and_never_overwrites() {
     let s = Sandbox::new();
     let store = s.store();
-    let directory = store.authorize_directory(0, s.0.join("a"), Access::Write).unwrap();
-    assert!(store.create_authorized_at(Some(1), &directory.id, "new.txt", b"created", true).is_ok());
+    let directory = store
+        .authorize_directory(0, s.0.join("a"), Access::Write)
+        .unwrap();
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "new.txt", b"created", true)
+        .is_ok());
     assert_eq!(fs::read(s.0.join("a/new.txt")).unwrap(), b"created");
-    assert!(store.create_authorized_at(Some(1), &directory.id, "new.txt", b"replace", true).is_err());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "new.txt", b"replace", true)
+        .is_err());
     assert_eq!(fs::read(s.0.join("a/new.txt")).unwrap(), b"created");
-    assert!(store.create_authorized_at(Some(0), &directory.id, "other.txt", b"stale", true).is_err());
+    assert!(store
+        .create_authorized_at(Some(0), &directory.id, "other.txt", b"stale", true)
+        .is_err());
     assert!(!s.0.join("a/other.txt").exists());
-    assert!(store.create_authorized_at(Some(1), &directory.id, "../escape", b"bad", true).is_err());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "../escape", b"bad", true)
+        .is_err());
     assert!(!s.0.join("escape").exists());
     store.revoke(1, &directory.id).unwrap();
-    assert!(store.create_authorized_at(Some(2), &directory.id, "after.txt", b"bad", true).is_err());
+    assert!(store
+        .create_authorized_at(Some(2), &directory.id, "after.txt", b"bad", true)
+        .is_err());
     assert!(!s.0.join("a/after.txt").exists());
 }
 
@@ -224,11 +236,17 @@ fn exclusive_authorized_create_is_durable_and_never_overwrites() {
 fn read_only_grant_and_other_conversation_cannot_create_files() {
     let s = Sandbox::new();
     let store = s.store();
-    let directory = store.authorize_directory(0, s.0.join("a"), Access::Read).unwrap();
-    assert!(store.create_authorized_at(Some(1), &directory.id, "denied.txt", b"data", true).is_err());
+    let directory = store
+        .authorize_directory(0, s.0.join("a"), Access::Read)
+        .unwrap();
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "denied.txt", b"data", true)
+        .is_err());
     assert!(!s.0.join("a/denied.txt").exists());
     let different_store = Store::open(s.0.join("other-auth")).unwrap();
-    assert!(different_store.create_authorized_at(None, &directory.id, "foreign.txt", b"data", true).is_err());
+    assert!(different_store
+        .create_authorized_at(None, &directory.id, "foreign.txt", b"data", true)
+        .is_err());
     assert!(!s.0.join("a/foreign.txt").exists());
 }
 
@@ -238,14 +256,28 @@ fn create_denies_internal_roots_and_requires_exact_directory_binding() {
     let store = s.store();
     // An application-managed directory must never become a user-selected
     // write target, even if a model proposes a plausible directory name.
-    assert!(store.authorize_directory(0, s.0.join("private"), Access::Write).is_err());
-    let directory = store.authorize_directory(0, s.0.join("a"), Access::Write).unwrap();
-    assert!(store.create_authorized_at(Some(1), &directory.id, "direct.txt", b"ok", true).is_ok());
-    assert!(store.create_authorized_at(Some(1), &directory.id, "nested/direct.txt", b"bad", true).is_err());
-    assert!(store.create_authorized_at(Some(1), &directory.id, ".", b"bad", true).is_err());
-    assert!(store.create_authorized_at(Some(1), &directory.id, "..", b"bad", true).is_err());
+    assert!(store
+        .authorize_directory(0, s.0.join("private"), Access::Write)
+        .is_err());
+    let directory = store
+        .authorize_directory(0, s.0.join("a"), Access::Write)
+        .unwrap();
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "direct.txt", b"ok", true)
+        .is_ok());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "nested/direct.txt", b"bad", true)
+        .is_err());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, ".", b"bad", true)
+        .is_err());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "..", b"bad", true)
+        .is_err());
     assert!(!s.0.join("a/nested").exists());
-    assert!(store.create_authorized_at(Some(1), &directory.id, "system-off.txt", b"bad", false).is_err());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "system-off.txt", b"bad", false)
+        .is_err());
     assert!(!s.0.join("a/system-off.txt").exists());
 }
 
@@ -255,11 +287,15 @@ fn exclusive_create_rejects_existing_symbolic_link_without_following_it() {
     use std::os::unix::fs::symlink;
     let s = Sandbox::new();
     let store = s.store();
-    let directory = store.authorize_directory(0, s.0.join("a"), Access::Write).unwrap();
+    let directory = store
+        .authorize_directory(0, s.0.join("a"), Access::Write)
+        .unwrap();
     let target = s.0.join("b/file");
     let original = fs::read(&target).unwrap();
     symlink(&target, s.0.join("a/link.txt")).unwrap();
-    assert!(store.create_authorized_at(Some(1), &directory.id, "link.txt", b"overwrite", true).is_err());
+    assert!(store
+        .create_authorized_at(Some(1), &directory.id, "link.txt", b"overwrite", true)
+        .is_err());
     assert_eq!(fs::read(&target).unwrap(), original);
 }
 
@@ -267,15 +303,37 @@ fn exclusive_create_rejects_existing_symbolic_link_without_following_it() {
 fn versioned_replace_preflight_requires_live_write_grant_and_exact_bytes() {
     let s = Sandbox::new();
     let store = s.store();
-    let directory = store.authorize_directory(0, s.0.join("a"), Access::Read).unwrap();
-    assert!(store.prepare_authorized_replace_at(Some(1), &directory.id, "file", b"a", true).is_err());
-    store.set(1, Grant { directory_id: directory.id.clone(),
-        access: Access::ReadWrite, explicit_personal: true }).unwrap();
-    assert!(store.prepare_authorized_replace_at(Some(2), &directory.id, "file", b"a", true).is_ok());
-    assert!(store.prepare_authorized_replace_at(Some(2), &directory.id, "file", b"stale", true).is_err());
-    assert!(store.prepare_authorized_replace_at(Some(1), &directory.id, "file", b"a", true).is_err());
-    assert!(store.prepare_authorized_replace_at(Some(2), &directory.id, "../file", b"a", true).is_err());
+    let directory = store
+        .authorize_directory(0, s.0.join("a"), Access::Read)
+        .unwrap();
+    assert!(store
+        .prepare_authorized_replace_at(Some(1), &directory.id, "file", b"a", true)
+        .is_err());
+    store
+        .set(
+            1,
+            Grant {
+                directory_id: directory.id.clone(),
+                access: Access::ReadWrite,
+                explicit_personal: true,
+            },
+        )
+        .unwrap();
+    assert!(store
+        .prepare_authorized_replace_at(Some(2), &directory.id, "file", b"a", true)
+        .is_ok());
+    assert!(store
+        .prepare_authorized_replace_at(Some(2), &directory.id, "file", b"stale", true)
+        .is_err());
+    assert!(store
+        .prepare_authorized_replace_at(Some(1), &directory.id, "file", b"a", true)
+        .is_err());
+    assert!(store
+        .prepare_authorized_replace_at(Some(2), &directory.id, "../file", b"a", true)
+        .is_err());
     assert_eq!(fs::read(s.0.join("a/file")).unwrap(), b"a");
     store.revoke(2, &directory.id).unwrap();
-    assert!(store.prepare_authorized_replace_at(Some(3), &directory.id, "file", b"a", true).is_err());
+    assert!(store
+        .prepare_authorized_replace_at(Some(3), &directory.id, "file", b"a", true)
+        .is_err());
 }

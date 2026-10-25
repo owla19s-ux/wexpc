@@ -210,10 +210,14 @@ pub(super) fn valid_leaf(leaf: &str) -> bool {
     // Avoid Win32 device names even when the NT relative-name API would
     // interpret them differently. An extension does not make one safe.
     let stem = leaf.split('.').next().unwrap_or(leaf).to_ascii_uppercase();
-    if matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$") {
+    if matches!(
+        stem.as_str(),
+        "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$"
+    ) {
         return false;
     }
-    if stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT"))
+    if stem.len() == 4
+        && (stem.starts_with("COM") || stem.starts_with("LPT"))
         && matches!(stem.as_bytes()[3], b'1'..=b'9')
     {
         return false;
@@ -333,25 +337,42 @@ pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
     if name.is_empty() || name.len() > 255 || name.contains(&0) {
         return Err(FileReadError::Resource(ResourceError::InvalidPath));
     }
-    let object_name = UnicodeString { length: (name.len()*2) as u16,
-        maximum_length: (name.len()*2) as u16, buffer: name.as_ptr() };
+    let object_name = UnicodeString {
+        length: (name.len() * 2) as u16,
+        maximum_length: (name.len() * 2) as u16,
+        buffer: name.as_ptr(),
+    };
     let mut attributes = ObjectAttributes {
         length: std::mem::size_of::<ObjectAttributes>() as u32,
         root_directory: root.as_raw_handle() as isize,
-        object_name: &object_name, attributes: OBJ_CASE_INSENSITIVE,
-        security_descriptor: std::ptr::null(), security_quality_of_service: std::ptr::null(),
+        object_name: &object_name,
+        attributes: OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null(),
+        security_quality_of_service: std::ptr::null(),
     };
-    let mut iosb = IoStatusBlock { status: 0, information: 0 };
+    let mut iosb = IoStatusBlock {
+        status: 0,
+        information: 0,
+    };
     let mut handle = INVALID_HANDLE_VALUE;
     // FILE_CREATE fails if this name already exists; OPEN_REPARSE_POINT never follows links.
     const FILE_WRITE_DATA: u32 = 0x0002;
     const FILE_CREATE: u32 = 0x0000_0002;
-    let status = unsafe { NtCreateFile(&mut handle,
-        FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
-        &mut attributes, &mut iosb, std::ptr::null(), 0,
-        FILE_SHARE_ALL, FILE_CREATE,
-        FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
-        std::ptr::null(), 0) };
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            FILE_WRITE_DATA | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            &mut attributes,
+            &mut iosb,
+            std::ptr::null(),
+            0,
+            FILE_SHARE_ALL,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_SYNCHRONOUS_IO_NONALERT | FILE_OPEN_REPARSE_POINT,
+            std::ptr::null(),
+            0,
+        )
+    };
     if status < 0 || handle == INVALID_HANDLE_VALUE {
         return Err(FileReadError::Resource(ResourceError::Unavailable));
     }
@@ -379,11 +400,17 @@ pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
 
 /// Non-mutating precondition for a future versioned replacement transaction.
 /// This is NOT a write authorization token; the commit must revalidate atomically.
-pub(super) fn prepare_replace_leaf(root: &File, leaf: &str, expected: &[u8]) -> Result<(), FileReadError> {
+pub(super) fn prepare_replace_leaf(
+    root: &File,
+    leaf: &str,
+    expected: &[u8],
+) -> Result<(), FileReadError> {
     if !valid_leaf(leaf) || expected.len() > 65536 {
         return Err(FileReadError::Resource(ResourceError::InvalidPath));
     }
-    if read_leaf(root, leaf)? != expected { return Err(FileReadError::Changed); }
+    if read_leaf(root, leaf)? != expected {
+        return Err(FileReadError::Changed);
+    }
     Ok(())
 }
 
@@ -442,17 +469,38 @@ mod leaf_name_tests {
 
     #[test]
     fn windows_device_names_never_become_file_targets() {
-        for name in ["CON", "con.txt", "PRN", "aux.rs", "NUL", "COM1", "com9.log", "LPT1", "lpt9.txt", "CONIN$", "CONOUT$"] {
+        for name in [
+            "CON", "con.txt", "PRN", "aux.rs", "NUL", "COM1", "com9.log", "LPT1", "lpt9.txt",
+            "CONIN$", "CONOUT$",
+        ] {
             assert!(!valid_leaf(name), "reserved: {name}");
         }
-        for name in ["main.rs", "README.md", ".gitignore", "file name.txt", "com10.rs"] {
+        for name in [
+            "main.rs",
+            "README.md",
+            ".gitignore",
+            "file name.txt",
+            "com10.rs",
+        ] {
             assert!(valid_leaf(name), "ordinary: {name}");
         }
     }
 
     #[test]
     fn windows_paths_and_alternate_streams_are_not_leaf_names() {
-        for name in ["", ".", "..", "../config", r"sub\file", "file:stream", "file.", "file ", "a?b", "a*b", "a\nline"] {
+        for name in [
+            "",
+            ".",
+            "..",
+            "../config",
+            r"sub\file",
+            "file:stream",
+            "file.",
+            "file ",
+            "a?b",
+            "a*b",
+            "a\nline",
+        ] {
             assert!(!valid_leaf(name), "invalid: {name:?}");
         }
     }

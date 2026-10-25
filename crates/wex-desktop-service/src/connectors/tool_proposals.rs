@@ -22,11 +22,19 @@ pub fn parse_tool_proposals(message: &Value) -> Result<Vec<ToolProposal>> {
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         let id = item.get("id").and_then(Value::as_str).ok_or_else(invalid)?;
-        let name = item.pointer("/function/name").and_then(Value::as_str).ok_or_else(invalid)?;
-        let args = item.pointer("/function/arguments").and_then(Value::as_str).ok_or_else(invalid)?;
+        let name = item
+            .pointer("/function/name")
+            .and_then(Value::as_str)
+            .ok_or_else(invalid)?;
+        let args = item
+            .pointer("/function/arguments")
+            .and_then(Value::as_str)
+            .ok_or_else(invalid)?;
         if item.get("type").and_then(Value::as_str) != Some("function")
-            || id.is_empty() || id.len() > 128
-            || name.is_empty() || name.len() > 128
+            || id.is_empty()
+            || id.len() > 128
+            || name.is_empty()
+            || name.len() > 128
             || args.len() > 1024 * 1024
             || !seen.insert(id)
             || !serde_json::from_str::<Value>(args).is_ok_and(|v| v.is_object())
@@ -61,7 +69,8 @@ mod tests {
 
     #[test]
     fn rejects_duplicate_ids_and_invalid_json() {
-        let call = json!({"id":"one","type":"function","function":{"name":"read_file","arguments":"{}"}});
+        let call =
+            json!({"id":"one","type":"function","function":{"name":"read_file","arguments":"{}"}});
         assert!(parse_tool_proposals(&json!({"tool_calls":[call.clone(), call]})).is_err());
         assert!(parse_tool_proposals(&json!({"tool_calls":[{"id":"x","type":"function","function":{"name":"read_file","arguments":"[]"}}]})).is_err());
     }

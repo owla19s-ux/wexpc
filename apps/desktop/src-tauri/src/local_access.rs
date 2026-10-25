@@ -176,15 +176,31 @@ pub fn create(
     if dispatch.intent.action != Action::Write
         || dispatch.intent.capability_id != "local_file_create"
         || dispatch.intent.intent_digest
-            != digest_arguments("local_file_create", &dispatch.intent.resource_id,
-                &[leaf.as_bytes(), content.as_bytes()])
+            != digest_arguments(
+                "local_file_create",
+                &dispatch.intent.resource_id,
+                &[leaf.as_bytes(), content.as_bytes()],
+            )
     {
-        return Err(ServiceError::new("DISPATCH_REJECTED", "新建参数与Core派发不匹配"));
+        return Err(ServiceError::new(
+            "DISPATCH_REJECTED",
+            "新建参数与Core派发不匹配",
+        ));
     }
-    store.create_authorized_at(Some(revision), &dispatch.intent.resource_id,
-        leaf, content.as_bytes(), true)
-        .map_err(|e| ServiceError::new("LOCAL_CREATE_UNKNOWN",
-            format!("文件新建可能已产生副作用，请核对后再决定是否重试：{e:?}")))
+    store
+        .create_authorized_at(
+            Some(revision),
+            &dispatch.intent.resource_id,
+            leaf,
+            content.as_bytes(),
+            true,
+        )
+        .map_err(|e| {
+            ServiceError::new(
+                "LOCAL_CREATE_UNKNOWN",
+                format!("文件新建可能已产生副作用，请核对后再决定是否重试：{e:?}"),
+            )
+        })
 }
 
 fn conversation_exists(shared: &crate::Shared, id: &str) -> Result<()> {
@@ -315,7 +331,10 @@ pub fn set_local_create_policy(
     policy: wex_desktop_service::PolicyChoice,
 ) -> Result<wex_desktop_service::ToolPolicySetting> {
     crate::locked(&state)?.set_tool_policy(
-        &conversation_id, "local_file_create", expected_revision, policy,
+        &conversation_id,
+        "local_file_create",
+        expected_revision,
+        policy,
     )
 }
 
@@ -361,7 +380,9 @@ mod tests {
             attempt_id: "attempt".into(),
         };
         assert_eq!(
-            create(&dispatch, &store, 1, "new.txt", "altered").unwrap_err().code,
+            create(&dispatch, &store, 1, "new.txt", "altered")
+                .unwrap_err()
+                .code,
             "DISPATCH_REJECTED"
         );
         assert!(!docs.join("new.txt").exists());

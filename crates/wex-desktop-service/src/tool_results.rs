@@ -4,13 +4,16 @@ use crate::{Result, ServiceError, ToolProposal};
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    io::{Read, Write},
+    io::Read,
     path::{Path, PathBuf},
 };
 const MAX_RECORD_BYTES: u64 = 16 * 1024 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SavedToolResult {
+    /// Durable publication order within one turn; absent in legacy records.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<u64>,
     pub record_id: String,
     pub conversation_id: String,
     pub turn_id: String,
@@ -45,7 +48,8 @@ fn validate(record: &SavedToolResult) -> Result<()> {
         || record.tool_name.is_empty()
         || record.tool_name.len() > 128
         || record.arguments_json.len() > 1024 * 1024
-        || record.result.len() > 512 * 1024
+        // Bounded process stdout/stderr can expand when JSON escapes controls.
+        || record.result.len() > crate::MAX_TOOL_RESULT_BYTES
         || !serde_json::from_str::<serde_json::Value>(&record.arguments_json)
             .is_ok_and(|v| v.is_object())
     {
@@ -61,7 +65,26 @@ pub fn save_tool_result(
     result: &str,
 ) -> Result<()> {
     let dir = location(root, conversation, turn)?;
+    fs::create_dir_all(&dir).map_err(|_| error())?;
+    let mut options = fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let lock = options.open(dir.join(".write.lock")).map_err(|_| error())?;
+    fs2::FileExt::lock_exclusive(&lock).map_err(|_| error())?;
+    let previous = read_tool_results(root, conversation, turn)?;
+    let sequence = previous
+        .iter()
+        .filter_map(|r| r.sequence)
+        .max()
+        .unwrap_or(0)
+        .checked_add(1)
+        .ok_or_else(error)?;
     let record = SavedToolResult {
+        sequence: Some(sequence),
         record_id: format!("result_{}", uuid::Uuid::new_v4().simple()),
         conversation_id: conversation.into(),
         turn_id: turn.into(),
@@ -75,20 +98,11 @@ pub fn save_tool_result(
     if bytes.len() as u64 > MAX_RECORD_BYTES {
         return Err(error());
     }
-    fs::create_dir_all(&dir).map_err(|_| error())?;
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create_new(true);
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        options.mode(0o600);
-    }
-    let mut file = options
-        .open(dir.join(format!("{}.json", record.record_id)))
-        .map_err(|_| error())?;
-    file.write_all(&bytes)
-        .and_then(|_| file.sync_all())
-        .map_err(|_| error())
+    crate::infrastructure::immutable_file::publish(
+        &dir.join(format!("{}.json", record.record_id)),
+        &bytes,
+    )
+    .map_err(|_| error())
 }
 pub fn read_tool_results(
     root: &Path,
@@ -102,6 +116,7 @@ pub fn read_tool_results(
         Err(_) => return Err(error()),
     };
     let mut results = vec![];
+    let mut sequences = std::collections::HashSet::new();
     for entry in entries {
         let path = entry.map_err(|_| error())?.path();
         if path.extension().is_none_or(|e| e != "json") {
@@ -122,6 +137,12 @@ pub fn read_tool_results(
         }
         let record: SavedToolResult = serde_json::from_slice(&bytes).map_err(|_| error())?;
         validate(&record)?;
+        if record
+            .sequence
+            .is_some_and(|n| n == 0 || !sequences.insert(n))
+        {
+            return Err(error());
+        }
         if record.conversation_id != conversation
             || record.turn_id != turn
             || path.file_stem().and_then(|s| s.to_str()) != Some(record.record_id.as_str())
@@ -130,6 +151,11 @@ pub fn read_tool_results(
         }
         results.push(record);
     }
-    results.sort_by(|a, b| a.record_id.cmp(&b.record_id));
+    // Legacy UUID ordering is only a stable display order, not execution evidence.
+    results.sort_by(|a, b| {
+        a.sequence
+            .cmp(&b.sequence)
+            .then(a.record_id.cmp(&b.record_id))
+    });
     Ok(results)
 }

@@ -169,7 +169,10 @@ pub fn execute_chat_stream_with_progress(
         }
         received = received.saturating_add(size);
         if received > options.max_response_bytes {
-            return Err(ServiceError::new("API_RESPONSE_ERROR", "流式回复超过当前接收上限"));
+            return Err(ServiceError::new(
+                "API_RESPONSE_ERROR",
+                "流式回复超过当前接收上限",
+            ));
         }
         for event in decoder.push(&chunk[..size]).map_err(protocol_error)? {
             if let Event::TextDelta(delta) = event {
@@ -202,16 +205,19 @@ pub fn execute_chat_stream_with_progress(
 /// Only a terminal, unambiguous text completion may become a durable turn.
 /// Tool intent and truncated output must not be reported as a successful reply.
 fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
-    let choices = value["choices"].as_array().ok_or_else(|| {
-        ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少 choices 数组")
-    })?;
+    let choices = value["choices"]
+        .as_array()
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少 choices 数组"))?;
     if choices.len() != 1 {
-        return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商回复的候选数量不符合预期"));
+        return Err(ServiceError::new(
+            "API_RESPONSE_ERROR",
+            "服务商回复的候选数量不符合预期",
+        ));
     }
     let choice = &choices[0];
-    let message = choice["message"].as_object().ok_or_else(|| {
-        ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少消息对象")
-    })?;
+    let message = choice["message"]
+        .as_object()
+        .ok_or_else(|| ServiceError::new("API_RESPONSE_ERROR", "服务商回复缺少消息对象"))?;
     // A text reply must come from the assistant. Do not persist a malformed
     // provider response as if it were the assistant's completed turn.
     if message.get("role").and_then(|value| value.as_str()) != Some("assistant") {
@@ -237,13 +243,22 @@ fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
     }
     match choice.get("finish_reason").and_then(|v| v.as_str()) {
         Some("tool_calls" | "function_call") => {
-            return Err(ServiceError::new("TOOLS_NOT_CONNECTED", "服务商要求工具调用，尚未接入执行"))
+            return Err(ServiceError::new(
+                "TOOLS_NOT_CONNECTED",
+                "服务商要求工具调用，尚未接入执行",
+            ))
         }
         Some("length") => {
-            return Err(ServiceError::new("API_RESPONSE_INCOMPLETE", "服务商回复被截断，未保存为成功回复"))
+            return Err(ServiceError::new(
+                "API_RESPONSE_INCOMPLETE",
+                "服务商回复被截断，未保存为成功回复",
+            ))
         }
         Some("content_filter") => {
-            return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商未完成文本回复"))
+            return Err(ServiceError::new(
+                "API_RESPONSE_ERROR",
+                "服务商未完成文本回复",
+            ))
         }
         Some("stop") => {}
         None => {
@@ -253,10 +268,14 @@ fn parse_text_completion(value: &serde_json::Value) -> Result<String> {
             ))
         }
         Some(_) => {
-            return Err(ServiceError::new("API_RESPONSE_ERROR", "服务商返回不支持的结束状态"))
+            return Err(ServiceError::new(
+                "API_RESPONSE_ERROR",
+                "服务商返回不支持的结束状态",
+            ))
         }
     }
-    message.get("content")
+    message
+        .get("content")
         .and_then(|v| v.as_str())
         .filter(|v| !v.is_empty())
         .map(str::to_owned)
@@ -348,7 +367,8 @@ mod text_completion_tests {
     #[test]
     fn text_completion_requires_terminal_stop() {
         for finish_reason in [None, Some("length"), Some("content_filter")] {
-            let mut response = json!({"choices":[{"message":{"role":"assistant","content":"partial"}}]});
+            let mut response =
+                json!({"choices":[{"message":{"role":"assistant","content":"partial"}}]});
             if let Some(reason) = finish_reason {
                 response["choices"][0]["finish_reason"] = json!(reason);
             }

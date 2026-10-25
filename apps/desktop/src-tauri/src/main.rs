@@ -9,6 +9,23 @@ use tauri::{Emitter, Manager, State};
 use wex_desktop_service::*;
 
 type Shared = Arc<Mutex<DesktopService>>;
+type Processes = Arc<ProcessSupervisor>;
+
+#[tauri::command]
+fn active_processes(
+    processes: State<'_, Processes>,
+    conversation_id: String,
+) -> Result<Vec<ActiveProcess>> {
+    processes.list(&conversation_id)
+}
+#[tauri::command]
+fn cancel_process(
+    processes: State<'_, Processes>,
+    conversation_id: String,
+    attempt_id: String,
+) -> Result<()> {
+    processes.cancel(&conversation_id, &attempt_id)
+}
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ChatDelta {
@@ -518,6 +535,7 @@ fn main() {
             let root = app.path().app_data_dir()?;
             let service = DesktopService::open(&root.join("desktop.sqlite"))?;
             app.manage(Arc::new(Mutex::new(service)));
+            app.manage(Arc::new(ProcessSupervisor::default()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -552,6 +570,8 @@ fn main() {
             append_task_record,
             create_conversation,
             send_message,
+            active_processes,
+            cancel_process,
             tool_receipts,
             tool_results,
             tool_reply_recovery,

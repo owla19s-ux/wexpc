@@ -62,7 +62,9 @@ fn later_pending_batch_blocks_older_complete_checkpoint() {
     let mut h = history();
     save_tool_checkpoint(dir.path(), &request, 0, &h[..1], true).unwrap();
     save_tool_checkpoint(dir.path(), &request, 1, &h, false).unwrap();
-    h.push(h[0].clone());
+    let mut next = h[0].clone();
+    next.tool_calls[0].id = "call_2".into();
+    h.push(next);
     save_tool_checkpoint(dir.path(), &request, 2, &h, true).unwrap();
     assert!(load_tool_checkpoint(dir.path(), &request).is_err());
     assert!(save_tool_checkpoint(dir.path(), &request, 2, &h, true).is_err());

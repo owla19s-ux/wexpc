@@ -4,7 +4,11 @@ mod application;
 mod connectors;
 mod domain;
 mod infrastructure;
+pub(crate) const MAX_TOOL_RESULT_BYTES: usize = 1024 * 1024;
 
+pub use application::process_control::{
+    ActiveProcess, ProcessCancellation, ProcessLease, ProcessSupervisor,
+};
 pub use application::DesktopService;
 pub use connectors::git_dispatch::{approved_git_diff, approved_git_status};
 pub use connectors::github_dispatch::{
@@ -15,8 +19,13 @@ pub use connectors::local_dispatch::read_approved_file;
 pub use connectors::openai_compatible::{
     chat_endpoint, execute_chat, execute_chat_stream, execute_chat_stream_with_progress,
 };
+pub use connectors::process_dispatch::{
+    execute_approved_process_report, execute_approved_process_report_with_control, ProcessReport,
+    ProcessRequest, ProcessTermination,
+};
 pub use connectors::terminal_dispatch::{
-    execute_approved_terminal, execute_approved_terminal_report, TerminalReport, TerminalTask,
+    execute_approved_terminal, execute_approved_terminal_process_report_with_control,
+    execute_approved_terminal_report, TerminalReport, TerminalTask,
 };
 pub use connectors::tool_proposals::ToolProposal;
 pub use connectors::tool_round::{

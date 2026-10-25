@@ -103,7 +103,15 @@ fn revocation_after_tool_completion_prevents_the_next_model_request() {
 }
 #[test]
 fn existing_transport_history_limit_is_checked_before_a_new_dispatch() {
-    let large = (0..32).flat_map(|_| history()).collect();
+    let large = (0..32)
+        .flat_map(|index| {
+            let mut batch = history();
+            let id = format!("history_{index}");
+            batch[0].tool_calls[0].id = id.clone();
+            batch[1].tool_call_id = Some(id);
+            batch
+        })
+        .collect();
     let mut dispatches = 0;
     let mut checkpoints = 0;
     let error = drive_tool_rounds_from_history(
@@ -250,14 +258,16 @@ fn resumed_model_must_not_reuse_any_historical_tool_call_id() {
     let mut checkpointed = 0;
     let error = drive_tool_rounds_from_history(
         history(),
-        |_| Ok(ModelStep::Proposal {
-            assistant_text: None,
-            calls: vec![ToolProposal {
-                id: "old_call".into(),
-                name: "read_file".into(),
-                arguments_json: "{}".into(),
-            }],
-        }),
+        |_| {
+            Ok(ModelStep::Proposal {
+                assistant_text: None,
+                calls: vec![ToolProposal {
+                    id: "old_call".into(),
+                    name: "read_file".into(),
+                    arguments_json: "{}".into(),
+                }],
+            })
+        },
         |_| {
             dispatched += 1;
             Ok(vec![("old_call".into(), "wrong replay".into())])
@@ -283,10 +293,12 @@ fn duplicate_new_id_in_a_single_proposal_is_rejected_before_dispatch() {
     };
     let error = drive_tool_rounds_from_history(
         history(),
-        |_| Ok(ModelStep::Proposal {
-            assistant_text: None,
-            calls: vec![new.clone(), new.clone()],
-        }),
+        |_| {
+            Ok(ModelStep::Proposal {
+                assistant_text: None,
+                calls: vec![new.clone(), new.clone()],
+            })
+        },
         |_| {
             dispatched += 1;
             Ok(Vec::new())
