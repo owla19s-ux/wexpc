@@ -1,6 +1,7 @@
 //! Platform-independent, offline runtime semantics. No JSON or FFI here.
 pub mod access;
 pub mod connection_session;
+pub mod dispatch;
 pub mod operation;
 pub mod task;
 pub mod task_operation;
