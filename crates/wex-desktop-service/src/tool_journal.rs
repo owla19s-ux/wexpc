@@ -13,6 +13,8 @@ pub struct ToolReceiptMarker {
     pub conversation_id: Option<String>,
     #[serde(default)]
     pub turn_id: Option<String>,
+    #[serde(default)]
+    pub policy: Option<crate::ToolPolicySetting>,
 }
 fn error() -> ServiceError {
     ServiceError::new(
@@ -44,6 +46,12 @@ fn validate(marker: &ToolReceiptMarker) -> Result<()> {
             .is_some_and(|s| !valid_id(s))
         || marker.turn_id.as_ref().is_some_and(|s| !valid_id(s))
     {
+        return Err(error());
+    }
+    if marker.policy.as_ref().is_some_and(|p| {
+        Some(p.conversation_id.as_str()) != marker.conversation_id.as_deref()
+            || !valid_id(&p.capability_id)
+    }) {
         return Err(error());
     }
     Ok(())
@@ -99,7 +107,10 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
             continue;
         }
         if let Some(previous) = attempts.get(&marker.attempt_id) {
-            if previous.operation_id != marker.operation_id || previous.turn_id != marker.turn_id {
+            if previous.operation_id != marker.operation_id
+                || previous.turn_id != marker.turn_id
+                || previous.policy != marker.policy
+            {
                 return Err(error());
             }
             if previous.state != "in_flight" && marker.state != "in_flight" && previous != &marker {
