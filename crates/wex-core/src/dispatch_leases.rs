@@ -38,6 +38,8 @@ fn valid(value: &str) -> bool {
 /// The Host must canonicalize paths before calling this process-local guard.
 fn scopes_overlap(a: &str, b: &str) -> bool {
     a == b
+        || (a == "/" && b.starts_with('/'))
+        || (b == "/" && a.starts_with('/'))
         || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
         || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
 }
@@ -161,6 +163,20 @@ mod tests {
         let child = registry.acquire("agent_b", &scopes(&["src/lib.rs"])).unwrap();
         assert!(matches!(registry.acquire("agent_a", &scopes(&["src"])), Err(LeaseError::Busy)));
         drop(child);
+    }
+
+    #[test]
+    fn root_scope_excludes_descendants_but_not_unrelated_keys() {
+        let registry = ResourceLeases::default();
+        let root = registry.acquire("agent_a", &scopes(&["/"])).unwrap();
+        assert!(registry.is_busy("/src/main.rs").unwrap());
+        assert!(matches!(
+            registry.acquire("agent_b", &scopes(&["/src"])),
+            Err(LeaseError::Busy)
+        ));
+        assert!(!registry.is_busy("relative/path").unwrap());
+        drop(root);
+        assert!(registry.acquire("agent_b", &scopes(&["/src"])).is_ok());
     }
 
     #[test]
