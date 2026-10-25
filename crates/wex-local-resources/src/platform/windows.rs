@@ -349,6 +349,15 @@ pub(super) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
     }
     file.write_all(bytes).map_err(|_| FileReadError::Changed)?;
     file.sync_all().map_err(|_| FileReadError::Changed)?;
+    let after = information(&file).map_err(|_| FileReadError::Changed)?;
+    regular(&after)?;
+    if after.volume_serial != new_info.volume_serial
+        || after.index_high != new_info.index_high
+        || after.index_low != new_info.index_low
+        || leaf_size(&after) != bytes.len() as u64
+    {
+        return Err(FileReadError::Changed);
+    }
     Ok(())
 }
 
