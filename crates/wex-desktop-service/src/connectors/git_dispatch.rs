@@ -9,6 +9,9 @@ use std::{
 };
 use wex_core::operation::{Action, Dispatch};
 
+// Include unstaged Agent-created files in the worktree status.
+const GIT_STATUS_ARGS: &[&str] = &["status", "--porcelain=v1", "--untracked-files=all"];
+
 pub fn approved_git_status(
     dispatch: &Dispatch,
     repo_id: &str,
@@ -62,7 +65,7 @@ fn approved_git_read(
     if capability == "git_diff" {
         child.args(["diff", "--no-ext-diff", "--no-textconv", "--"]);
     } else {
-        child.args(["status", "--porcelain=v1", "-uno"]);
+        child.args(GIT_STATUS_ARGS);
     }
     let mut child = child
         .env("GIT_TERMINAL_PROMPT", "0")
@@ -144,6 +147,34 @@ mod tests {
             assert_eq!(output.len(), size);
             assert_eq!(source.position(), size as u64);
         }
+    }
+
+    #[test]
+    fn git_status_includes_new_unstaged_files_but_not_ignored_files() {
+        let root = tempfile::tempdir().unwrap();
+        let init = Command::new("git")
+            .args(["init", "--quiet"])
+            .arg(root.path())
+            .output()
+            .expect("Git CLI must be available to test Git adapter");
+        assert!(init.status.success(), "git init failed: {:?}", init.stderr);
+        std::fs::create_dir(root.path().join("src")).unwrap();
+        std::fs::write(root.path().join("new_module.rs"), "pub fn new() {}").unwrap();
+        std::fs::write(root.path().join("src").join("new_test.rs"), "#[test] fn test() {}").unwrap();
+        std::fs::write(root.path().join(".gitignore"), "ignored.tmp\n").unwrap();
+        std::fs::write(root.path().join("ignored.tmp"), "not part of status").unwrap();
+        // Use the same arguments as the approved production status path.
+        let result = Command::new("git")
+            .args(["--no-optional-locks", "-c", "core.fsmonitor=false", "-C"])
+            .arg(root.path())
+            .args(GIT_STATUS_ARGS)
+            .output()
+            .unwrap();
+        assert!(result.status.success(), "git status failed: {:?}", result.stderr);
+        let status = String::from_utf8(result.stdout).unwrap();
+        assert!(status.contains("?? new_module.rs"), "{status}");
+        assert!(status.contains("?? src/new_test.rs"), "{status}");
+        assert!(!status.contains("ignored.tmp"), "{status}");
     }
 
     use wex_core::operation::OperationIntent;
