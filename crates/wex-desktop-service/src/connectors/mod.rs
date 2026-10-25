@@ -1,4 +1,5 @@
 pub mod git_dispatch;
+pub mod git_commit_policy;
 pub mod github_dispatch;
 pub mod intent_binding;
 pub mod local_dispatch;
