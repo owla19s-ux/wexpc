@@ -17,6 +17,10 @@ pub use connectors::git_commit_evidence::{
 };
 pub use connectors::git_commit_policy::CommitPreflightError;
 pub use connectors::git_commit_reader::read_approved_git_commit_object;
+pub use connectors::git_commit_snapshot::{
+    observe_prepared_git_commit, prepare_git_commit_from_registry, verify_live_git_commit_dispatch,
+    GitCommitSnapshotSource,
+};
 pub use connectors::git_dispatch::{approved_git_diff, approved_git_status};
 pub use connectors::github_dispatch::{
     create_approved_github_file, read_approved_github_file, update_approved_github_file,

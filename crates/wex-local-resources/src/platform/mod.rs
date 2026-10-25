@@ -17,7 +17,7 @@
 use std::fs::{File, Metadata};
 use std::path::Path;
 
-use crate::{FileReadError, Identity, ResourceError};
+use crate::{FileReadError, FileSnapshot, Identity, ResourceError};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 mod unix;
@@ -84,6 +84,14 @@ pub(crate) fn prepare_replace_leaf(
 
 pub(crate) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadError> {
     backend::read_leaf(root, leaf)
+}
+
+pub(crate) fn open_child_directory(root: &File, leaf: &str) -> Result<File, FileReadError> {
+    backend::open_child_directory(root, leaf)
+}
+
+pub(crate) fn read_leaf_snapshot(root: &File, leaf: &str) -> Result<FileSnapshot, FileReadError> {
+    backend::read_leaf_snapshot(root, leaf)
 }
 
 pub(crate) fn hex(bytes: [u8; 32]) -> String {

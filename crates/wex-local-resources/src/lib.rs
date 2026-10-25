@@ -6,6 +6,24 @@ mod platform;
 mod read;
 pub use read::FileReadError;
 
+/// Exact bytes and Unix owner execute bit (Git's mode discriminator) observed
+/// through a pinned file. Windows reports false. This is a version
+/// observation, not permission or an authorization token for later writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileSnapshot {
+    pub bytes: Vec<u8>,
+    pub executable: bool,
+}
+
+/// A relative-file observation plus identities of every pinned directory,
+/// starting with the registered root and ending with the file's parent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelativeFileSnapshot {
+    pub bytes: Vec<u8>,
+    pub executable: bool,
+    pub directory_stamps: Vec<[u64; 4]>,
+}
+
 /// Whether a platform backend exists for this target. Callers that compose
 /// local resources must fail closed instead of assuming Unix.
 pub fn platform_supported() -> bool {

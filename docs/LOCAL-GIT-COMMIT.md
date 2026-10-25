@@ -57,3 +57,17 @@ cargo fmt --all -- --check
 新增 16 项 Core/Reader 测试，包括实际 Core 审批消费、请求篡改/五类版本变化、真实提交对象与 HEAD 推进、替换引用、损坏对象、标签剥离、超大对象、缺失对象、带成功普通取回对照的本地 promisor 仓库、超时后确认子进程不存在。超时终止测试仅在 Unix 执行，Windows 不外推。全量 fmt 首次发现原有 `wex-core/src/dispatch.rs`、`dispatch_leases.rs` 不符合当前格式，只做 rustfmt 整理，不改 Dispatcher 语义。
 
 独立代码审查发现的对象 OID 身份问题已按失败回归→修复→通过处理，补齐其提出的 HEAD 推进、timeout 与 promisor 覆盖建议。Linux Tauri Host、真实模型回合、Windows 构建/运行/安装仍 NOT_RUN；提交使用 skip ci，不触发 Actions。
+
+## 后续增量：句柄目录链及真实版本采集（2026-10-26）
+
+`wex-local-resources::read_relative_file_snapshot` 新增独立入口，保留旧的直接子文件 API。先按现有 Core 目录授权、保护目录及 Host internal roots 检查，再逐层通过 `openat` / `NtCreateFile RootDirectory` 打开目录；不把通过路径预检当成随后普通 path open 的许可。每个目录拒绝 symlink/reparse，限制同 mount/volume，保留完整句柄链；读后重新在同一父句柄下打开各目录名比较身份。保护目录绑定和 Host internal root 的身份也参与句柄检查，防止目录交换后绕过路径保护。返回精确文件字节、Unix owner execute 位及根到父目录的持久身份 stamp；不是后续写入令牌。
+
+`git_commit_snapshot.rs` 提供 `GitCommitSnapshotSource`、`prepare_git_commit_from_registry` 和 `observe_prepared_git_commit`。来源是 Host 持有的注册目录及当前可信 grants；读取 `.git/HEAD`、本地 loose branch ref、真实 index 和请求明确列出的文件，绑定 worktree/Git 目录身份、分支/父版本、索引原始字节以及每个文件的路径/内容/owner execute/父目录身份。两个完整采集结果一致才返回观测。没有使用模型提供的 identity 或内容摘要，也不把双次一致采集称为原子的多文件快照。
+
+`verify_live_git_commit_dispatch` 将采集器接到上一批 Core Commit 绑定器：先检查选中文件当前写入许可，重新采集版本，再从 registry 导出真实根路径并验证 Dispatch 摘要与快照。真实 Core OperationLedger 消费批准后的测试覆盖原样通过、文件变化拒绝、降为只读拒绝、撤权拒绝。Host 调用时仍须持有实时授权/资源占用；函数不执行写入、不自行持久化 InFlight，也不能阻止不合作的外部 Git/文件修改者。
+
+当前采集器的明确支持切片是**普通 `.git` 目录、本地 symbolic branch 的 loose ref、已有 index 和已有选中文件**，每个文件/元数据沿用平台后端 64 KiB 读取上限；索引仅取得真实字节版本，不宣称已完成完整 Git 索引/仓库语义验证。packed refs、unborn/缺失索引、删除项、较大索引/文件、gitfile/linked worktree/子模块、Git 配置及 core.filemode 等执行语义仍需扩展与验收。Windows 没有 Unix owner execute 位，返回 false；最终提交模式须结合 Git 索引/配置处理。以上是当前代码边界，**不缩减 0.1.1 本地开发工具目标**，不向模型暴露尚不可完整执行的 Commit。
+
+新增验证包括：真实嵌套二进制字节、授权优先于缺失路径探测、链接/硬链接/保护边界、internal exclusions/大小限制、Unix 并发 symlink 父目录交换、句柄身份识别被改名的保护/internal 目录、真实 Git 文件/索引/分支变化和 `.git` 目录更换、原生 owner execute 0654→0754 的 Git 模式变化。独立审查指出的保护目录身份遗漏和 execute 位错误均先取得失败回归，再修复。
+
+本批使用正式 Rust/Cargo 1.99.1 工作区执行全量测试、严格 Clippy 与 fmt；对 `wex-local-resources` 增加 `cargo check -p wex-local-resources --all-targets --target x86_64-pc-windows-msvc --locked` 交叉类型检查。该命令编译检查 Windows 后端和测试源码，**没有链接或运行 Windows 测试，不代表 Windows 行为、Tauri Host 或桌面验收通过**。最终测试数量和提交 SHA 见 PR #63。仍待资源锁、独立索引/真实提交/引用条件更新、持久回执/UNKNOWN 恢复以及正式 Host 工具入口；不触发 Actions。

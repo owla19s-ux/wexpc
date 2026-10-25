@@ -130,6 +130,10 @@ impl PreparedCommit {
         self.version.head.as_deref()
     }
 
+    pub fn paths(&self) -> &[String] {
+        &self.paths
+    }
+
     pub fn new(
         message: String,
         paths: Vec<String>,

@@ -71,6 +71,11 @@ pub(super) fn random_id() -> Result<String, ResourceError> {
 }
 
 pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadError> {
+    read_leaf_snapshot(root, leaf).map(|s| s.bytes)
+}
+
+pub(super) fn read_leaf_snapshot(root: &File, leaf: &str) -> Result<FileSnapshot, FileReadError> {
+    use std::os::unix::fs::MetadataExt;
     let pinned = pin_leaf(root, leaf)?;
     let before = pinned.metadata().map_err(|_| unavailable())?;
     regular(&before)?;
@@ -98,7 +103,39 @@ pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadErro
     if stamp(&before) != stamp(&after) || bytes.len() as u64 != after.len() {
         return Err(FileReadError::Changed);
     }
-    Ok(bytes)
+    Ok(FileSnapshot {
+        bytes,
+        executable: before.mode() & 0o100 != 0,
+    })
+}
+
+pub(super) fn open_child_directory(root: &File, leaf: &str) -> Result<File, FileReadError> {
+    if !valid_leaf(leaf) {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let name =
+        CString::new(leaf).map_err(|_| FileReadError::Resource(ResourceError::InvalidPath))?;
+    // SAFETY: a live pinned directory and one validated NUL-terminated name.
+    let fd = unsafe {
+        libc::openat(
+            root.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY
+                | libc::O_DIRECTORY
+                | libc::O_NOFOLLOW
+                | libc::O_CLOEXEC
+                | libc::O_NONBLOCK,
+        )
+    };
+    if fd < 0 {
+        return Err(unavailable());
+    }
+    // SAFETY: openat returned a uniquely owned descriptor.
+    let child = unsafe { File::from_raw_fd(fd) };
+    if mount_id(root)? != mount_id(&child)? {
+        return Err(FileReadError::Resource(ResourceError::OutsideDirectory));
+    }
+    Ok(child)
 }
 
 /// Kernel-enforced no-follow, exclusive creation relative to the pinned root.
