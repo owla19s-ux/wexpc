@@ -73,6 +73,11 @@ pub(crate) fn create_leaf(root: &File, leaf: &str, bytes: &[u8]) -> Result<(), F
     backend::create_leaf(root, leaf, bytes)
 }
 
+/// Read-only edit preflight. This cannot authorize a later write by itself.
+pub(crate) fn prepare_replace_leaf(root: &File, leaf: &str, expected: &[u8]) -> Result<(), FileReadError> {
+    backend::prepare_replace_leaf(root, leaf, expected)
+}
+
 pub(crate) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadError> {
     backend::read_leaf(root, leaf)
 }
