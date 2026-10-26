@@ -50,3 +50,10 @@ it('prioritizes unknown evidence if inconsistent records are returned', () => {
   ]} />);
   expect(screen.getByText('派工结果未知（需核查，不可盲目重试）')).toBeTruthy();
 });
+
+it('marks cached task evidence unverified when the latest snapshot read fails', () => {
+  const view = render(<TaskDispatchStatus task={task} attempts={[attempt('pending')]} fresh={false} />);
+  expect(screen.getByText('状态仅为上次读取结果（当前未核实）')).toBeTruthy();
+  view.rerender(<TaskDispatchStatus task={task} attempts={[attempt('pending')]} fresh={true} />);
+  expect(screen.getByText('已登记待派工（尚未执行）')).toBeTruthy();
+});
