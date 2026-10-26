@@ -30,7 +30,7 @@ export function Settings({ data, snapshotFresh, onChanged, openConversation, ope
     <button type="button" onClick={openConnections}>管理 API 与 GitHub 连接</button>
 
     <h2>对话授权与执行策略</h2>
-    {data && !snapshotFresh && <p className="notice" role="status">对话列表来自上次成功快照；实际目录和工具策略仍需由 Host 分别核实。</p>}
+    {data && !snapshotFresh && <p className="notice" role="status">对话列表来自上次成功快照；授权控件已暂停，等待最新 Host 快照核实。</p>}
     <p className="muted">目录授权和 GitHub 工具策略按对话分别保存；项目、Space、模型或岗位关联不会自动授权。此处没有全局文件或终端授权开关。</p>
     {conversations.length ? <>
       <label>选择授权所属对话
@@ -40,7 +40,7 @@ export function Settings({ data, snapshotFresh, onChanged, openConversation, ope
         </select>
       </label>
       {missingSelection && <p className="notice" role="alert">此前选择的对话已不在当前列表中。请重新选择授权所属对话；不会自动切换到其他对话。</p>}
-      {selected && <>
+      {selected && snapshotFresh && <>
         <p>当前授权范围：{selected.title}（{selected.project_id ? '项目工作对话' : '普通对话'}）</p>
         <LocalDirectories key={'local_' + selected.id} conversationId={selected.id} onChanged={onChanged}/>
         <GithubToolPolicies key={'github_' + selected.id} conversationId={selected.id} onChanged={onChanged}/>
