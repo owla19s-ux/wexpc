@@ -584,3 +584,64 @@ ExternalAdapter:
 本节的**事实分离、需求/产出/验证对应、灵活流程、外部边界**是用户已确认和旧设计可继承的原则。**具体字段、持久化对象个数、方法签名、权限角色和自动验收条件**为本次新增的实现提案，未获冻结批准；施工前应对照实际调用方进行最小化裁剪。
 
 本批仅文档审查，无业务代码、正式接口、SQLite schema、Actions 或 Windows 实机测试变化。
+
+## 17. 第十一批：最小接口裁剪及版本兼容门禁（2026-10-27）
+
+### 17.1 对实际可写路径的复核
+
+本批核对 main：
+- `DesktopService.create_task`：校验项目/成员职责，创建仅有 `Draft` 的用户任务卡；原始 Task ID 在此分配。
+- `DesktopService.update_task`：校验 `DesktopSnapshot.revision`，保留项目归属、修改标题/目标/范围/验收文本及成员；**当前是覆盖式编辑，没有单独的任务要求历史版本**。
+- `DesktopStore.update`：以 SQLite Immediate 事务加载单行 JSON，执行一次变更并递增全局 revision，再完整写回；这能保护同一次 DesktopSnapshot 写入，但**不能保证磁盘工具 marker、外部代码文件和远端交付同时原子提交**。
+- `Core TaskBoard.assign`：维护单执行者及 assignment_epoch；其执行单元不应被混同于 Desktop `Task.agent_ids`（可多成员）。
+- 旧桌面 `Task.status` 只有 Draft，不能直接映射为 Core 的 Queued/Running；未发布任务应保留其真实草案身份。
+
+### 17.2 对第十批 V0 契约的裁剪
+
+**不建议新建五套 manager、六阶段工作流、统一外部运行时。** 第一阶段仅需在可信 Desktop 应用服务中可持久化三类独立工作事实；它们通过 task、要求版本和成果版本形成关联：
+
+| 最小记录 | 核心含义 | 建议的最少关联信息 |
+| --- | --- | --- |
+| `TaskRequirementRevision` | 曾经批准/发布了什么任务要求 | task_id、修订号、目标/验收原文、来源/发布时间（存在时） |
+| `TaskArtifactRecord` | 任务产生/收到了什么版本的东西 | task_id、artifact identity、version evidence 或 unknown、来源与定位 |
+| `TaskCheckRecord` | 对哪个具体要求、成果版本做了什么检查或验收 | task_id、requirement revision、artifact refs、检查条件及范围、检查/验收类型、结论、证据及身份 |
+
+`TaskCheckRecord` 可以以区分 kind 的方式容纳审查、工具验证、人工验收，**但不能把三者的信任层级合并**；若实现中需要分表，可后续再拆。普通 AI 对话工具依旧只产生其自身 ToolReceipt/SavedToolResult，不强行注册 TaskArtifact。
+
+`WorkReference` 先作为可选的现有 operation/attempt 或外部委托引用字段使用；暂不优先建设全局工作流事件引擎。只在有真实任务分工时生成执行关联。
+
+### 17.3 推荐的单一写入口原则
+
+- **业务状态的权威写入口**：由现有 `DesktopService` 这一可信应用服务承担 Task 及新关联事实的受控持久写入；底层 SQLite `DesktopStore.update` 继续处理单快照事务。**这是面向现有源码的实施建议，不预设它必须独占所有未来运行时存储。**
+- **Core TaskBoard**：保留纯规则用于合法状态转换、派工准入与断线恢复；状态变更从可信应用服务受控提交后才对 UI 发布，不建立第二个可独立修改的持久 TaskBoard 快照。
+- **Dispatcher**：只申请派工/提交真实投递与观察事件，不能直接改需求、声称最终验收或越权写原始 SQLite。
+- **AI/第三方**：提出成果与检查声明，来源必须明确；系统读取/核实外部可验证事实后才能写可信结果。用户人工决定允许存在，但不可伪造成已运行的自动测试。
+
+### 17.4 迁移与兼容最小方案（审查提案）
+
+1. 先定义新任务记录的 schema version（必须大于当前 6），同时保持 `Task` 的旧字段、已有 `TaskRecord` 与旧 ToolReceiptMarker 不变；不要将未发布旧草案自动升级为已批准施工卡。
+2. 旧 `Task.goal/scope/acceptance` 可以作为**历史可见原文**读取，但没有可核实的发布版本时不能制造“以前已经批准发布”的证据。
+3. 采用只增加可选新字段/关联集合的方式准备过渡；首次升级前先检查旧负载能被新程序解析并保留，失败则回滚，不覆盖原始 JSON。
+4. 明确要求版本与全局 snapshot revision 相互独立；修改已发布需求时生成新 requirement revision，旧成果/旧验证继续指向旧版，不能隐式转移。
+5. 保存新记录时校验 task、requirement、artifact 引用存在且版本匹配；磁盘或远端证据引用需要允许暂不可访问并明确 `unknown`，不得自动宣称核验通过。
+6. 对新旧程序的打开行为与所有权保护做迁移测试，保证版本超前时拒绝旧版本写入；新增前端类型、Tauri 命令和读取视图只能在实现批次同步落地。
+7. 只在验证真实用例后允许自动验收逻辑；早期可由已授权用户/明确策略作出最终验收，不把 AI 文本自报当可信证明。
+
+### 17.5 建议先写的契约测试，而不是先扩大量接口
+
+- 旧 schema6 快照中的任务草案、人工日志、Agent 绑定和对话都能无损读取与升级；失败时原记录仍在。
+- 创建两个需求版本，V1 产生的成果/测试只对应 V1；V2 编辑后不能继承 V1 的验收。
+- 两个 Agent 在一个 Task 的不同工作范围协作，分别关联产物；不会因为第二个 Agent 施工而冲掉第一个 Agent 的记录。
+- 工具失败可被保存并继续修复；任务是否结束独立决定。
+- 纯普通对话产生 ToolReceipt，不必生成 Task/Artifact/Verification。
+- 外部 Agent 只有委托号/产物地址、没有内部命令日志，依旧能存可核验成果；暂不可核实时明确 unknown。
+- Windows 实机检查未进行：Linux 测试即使通过也不能把 Windows 验收标记通过。
+- 中断或 marker/result/SQLite 写入跨界失败：不制造成功，也不自动重试有副作用操作。
+
+### 17.6 待确认风险与范围提醒
+
+**重要提醒**：提出“DesktopService 作为统一 Task 权威写入口”是基于现有主线架构的具体实现建议；正式冻结前还需检查应用服务调用/持久化冲突、多 Agent 事务和现有测试，且不得把这一局部写入口扩展为 WEX 对全部外部能力的全量管理。
+
+同理，“三类记录”是降低首版实现成本的结构候选，不代表三种验证类型语义完全等价。若出现强制单流程、强制外部 Agent 的 WEX 内部协议或权限自动继承，均视为偏离本轮已确认架构。
+
+本批仅提交审查文档，无 main、Rust/TS、SQLite、Actions 或 Windows 真实验收改动。
