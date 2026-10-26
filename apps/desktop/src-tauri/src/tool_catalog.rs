@@ -5,6 +5,61 @@ use crate::tool_approvals::ToolPolicyAuthority;
 use tauri::AppHandle;
 use wex_api::ToolDefinition;
 
+/// Stable capability declaration. The model-facing name is distinct from the
+/// Core capability ID; exposure is not permission to execute.
+#[derive(Debug, Clone, Copy)]
+struct CapabilityDescriptor {
+    name: &'static str,
+    capability_id: &'static str,
+    description: &'static str,
+    parameters_json: &'static str,
+}
+
+impl CapabilityDescriptor {
+    fn definition(self) -> ToolDefinition {
+        ToolDefinition {
+            name: self.name.into(),
+            description: self.description.into(),
+            parameters_json: self.parameters_json.into(),
+        }
+    }
+}
+
+const NO_ARGUMENTS: &str = r#"{"type":"object","properties":{},"additionalProperties":false}"#;
+const BUILTIN_COMMANDS: &[CapabilityDescriptor] = &[
+    CapabilityDescriptor { name:"git_status",capability_id:"git_status",description:"Read Git status of a repository selected by the user.",parameters_json:NO_ARGUMENTS },
+    CapabilityDescriptor { name:"git_diff",capability_id:"git_diff",description:"Read the current unstaged Git diff without executing external diff helpers.",parameters_json:NO_ARGUMENTS },
+    CapabilityDescriptor { name:"cargo_test",capability_id:"terminal_cargo_test",description:"Run cargo test --workspace --locked only after explicit per-run approval.",parameters_json:NO_ARGUMENTS },
+    CapabilityDescriptor { name:"cargo_fmt_check",capability_id:"terminal_cargo_fmt_check",description:"Run cargo fmt --all -- --check after explicit per-run approval.",parameters_json:NO_ARGUMENTS },
+];
+const GITHUB_CAPABILITIES: &[CapabilityDescriptor] = &[
+    CapabilityDescriptor {
+        name:"github_read_file",capability_id:"github_file_read",
+        description:"Read an existing GitHub UTF-8 file and its current blob SHA under the current connection, conversation execution policy and Core authorization.",
+        parameters_json:r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"}},"required":["owner","repo","path"],"additionalProperties":false}"#,
+    },
+    CapabilityDescriptor {
+        name:"github_create_file",capability_id:"github_file_create",
+        description:"Create a new GitHub UTF-8 text file only when the path does not exist, under current connection and conversation execution policy.",
+        parameters_json:r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","content"],"additionalProperties":false}"#,
+    },
+    CapabilityDescriptor {
+        name:"github_write_file",capability_id:"github_file_write",
+        description:"Update an existing GitHub text file using its exact current blob SHA; the current conversation policy decides automatic execution, user approval or blocking.",
+        parameters_json:r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"sha":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","sha","content"],"additionalProperties":false}"#,
+    },
+];
+fn generic_process_definition() -> ToolDefinition {
+    ToolDefinition {
+        name: "run_command".into(),
+        description: "Run a program with exact arguments in a user-selected working directory after explicit native approval. Returns actual exit status and bounded stdout/stderr. No implicit shell; timeout or interrupted output requires checking side effects before retry.".into(),
+        parameters_json: serde_json::json!({"type":"object","properties":{
+            "program":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},
+            "timeout_ms":{"type":"integer","minimum":1}},
+            "required":["program","arguments","timeout_ms"],"additionalProperties":false}).to_string(),
+    }
+}
+
 pub(crate) fn available_tools(
     app: &AppHandle,
     chat: &wex_desktop_service::PreparedChat,
@@ -75,66 +130,18 @@ pub(crate) fn available_tools(
             }
         }
     }
-    for (name, description) in [
-        (
-            "git_status",
-            "Read Git status of a repository selected by the user.",
-        ),
-        (
-            "git_diff",
-            "Read the current unstaged Git diff without executing external diff helpers.",
-        ),
-        (
-            "cargo_test",
-            "Run cargo test --workspace --locked only after explicit per-run approval.",
-        ),
-        (
-            "cargo_fmt_check",
-            "Run cargo fmt --all -- --check after explicit per-run approval.",
-        ),
-    ] {
-        tools.push(ToolDefinition {
-            name: name.into(),
-            description: description.into(),
-            parameters_json:
-                r#"{"type":"object","properties":{},"additionalProperties":false}"#.into(),
-        });
+    for descriptor in BUILTIN_COMMANDS {
+        tools.push(descriptor.definition());
     }
-    tools.push(ToolDefinition {
-        name:"run_command".into(),
-        description:"Run a program with exact arguments in a user-selected working directory after explicit native approval. Returns actual exit status and bounded stdout/stderr. No implicit shell; timeout or interrupted output requires checking side effects before retry.".into(),
-        parameters_json:serde_json::json!({"type":"object","properties":{
-            "program":{"type":"string"},"arguments":{"type":"array","items":{"type":"string"}},
-            "timeout_ms":{"type":"integer","minimum":1}},
-            "required":["program","arguments","timeout_ms"],"additionalProperties":false}).to_string(),
-    });
+    tools.push(generic_process_definition());
     if crate::github_config::status(app).is_ok_and(|status| status.enabled) {
-        let available = |capability: &str| {
-            policies.policy(capability).is_ok_and(|setting| {
+        for descriptor in GITHUB_CAPABILITIES {
+            if policies.policy(descriptor.capability_id).is_ok_and(|setting| {
                 wex_core::execution_policy::decide(setting.policy.into())
                     != wex_core::execution_policy::PolicyDecision::Blocked
-            })
-        };
-        if available("github_file_read") {
-            tools.push(ToolDefinition {
-        name: "github_read_file".into(),
-        description: "Read an existing GitHub UTF-8 file and its current blob SHA under the current connection, conversation execution policy and Core authorization.".into(),
-        parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"}},"required":["owner","repo","path"],"additionalProperties":false}"#.into(),
-    });
-        }
-        if available("github_file_create") {
-            tools.push(ToolDefinition {
-        name: "github_create_file".into(),
-        description: "Create a new GitHub UTF-8 text file only when the path does not exist, under current connection and conversation execution policy.".into(),
-        parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","content"],"additionalProperties":false}"#.into(),
-    });
-        }
-        if available("github_file_write") {
-            tools.push(ToolDefinition {
-        name: "github_write_file".into(),
-        description: "Update an existing GitHub text file using its exact current blob SHA; the current conversation policy decides automatic execution, user approval or blocking.".into(),
-        parameters_json: r#"{"type":"object","properties":{"owner":{"type":"string"},"repo":{"type":"string"},"path":{"type":"string"},"sha":{"type":"string"},"content":{"type":"string"}},"required":["owner","repo","path","sha","content"],"additionalProperties":false}"#.into(),
-    });
+            }) {
+                tools.push(descriptor.definition());
+            }
         }
     }
     tools
