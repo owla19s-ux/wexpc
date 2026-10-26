@@ -3,15 +3,16 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ProjectDetail } from './Projects';
 import type { Project, Snapshot } from './types';
+import type { Run } from './App';
 
 vi.mock('./ObjectEditor', () => ({
-  ObjectEditor: () => <button type="button">修改项目</button>,
+  ObjectEditor: ({run}:{run:Run}) => <form onSubmit={e=>{e.preventDefault();void run(async()=>{});}}><button type="submit">修改项目</button></form>,
 }));
 vi.mock('./TaskEditor', () => ({
-  TaskEditor: () => <button type="button">保存任务</button>,
+  TaskEditor: ({run}:{run:Run}) => <form onSubmit={e=>{e.preventDefault();void run(async()=>{});}}><button type="submit">保存任务</button></form>,
 }));
 vi.mock('./TaskJournal', () => ({
-  TaskJournal: () => <button type="button">添加进展或交接</button>,
+  TaskJournal: ({run}:{run:Run}) => <form onSubmit={e=>{e.preventDefault();void run(async()=>{});}}><button type="submit">添加进展或交接</button></form>,
 }));
 vi.mock('./TaskDispatchStatus', () => ({
   TaskDispatchStatus: () => <span>尚未派工</span>,
@@ -58,4 +59,23 @@ it('keeps project and task evidence visible but pauses every project mutation on
 
   view.rerender(<ProjectDetail project={project} data={state} snapshotFresh={true} run={run} openChat={vi.fn()}/>);
   assertPaused(false);
+});
+
+// Disabled fieldsets are a visual interaction guard, not an authorization
+// boundary: a synthetic submit can still reach mounted child handlers.
+it('rejects retained editor submit callbacks while the Host snapshot is stale', () => {
+  const run = vi.fn(async () => {});
+  const view = render(<ProjectDetail project={project} data={state} snapshotFresh={true} run={run} openChat={vi.fn()}/>);
+  fireEvent.click(screen.getByRole('button', { name: /任务 A/ }));
+  view.rerender(<ProjectDetail project={project} data={state} snapshotFresh={false} run={run} openChat={vi.fn()}/>);
+  for (const label of ['修改项目', '保存任务', '添加进展或交接']) {
+    fireEvent.submit(screen.getByText(label).closest('form')!);
+  }
+  expect(run).not.toHaveBeenCalled();
+
+  view.rerender(<ProjectDetail project={project} data={state} snapshotFresh={true} run={run} openChat={vi.fn()}/>);
+  for (const label of ['修改项目', '保存任务', '添加进展或交接']) {
+    fireEvent.submit(screen.getByText(label).closest('form')!);
+  }
+  expect(run).toHaveBeenCalledTimes(3);
 });
