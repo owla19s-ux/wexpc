@@ -133,7 +133,7 @@ mod publication_schema_tests {
     #[test]
     fn previous_schemas_upgrade_without_replacing_desktop_snapshot() {
         for old_version in [6, 7] {
-            let mut db = Connection::open_in_memory().unwrap();
+            let db = Connection::open_in_memory().unwrap();
             db.execute_batch(&format!(
                 "CREATE TABLE desktop_state (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL); PRAGMA user_version={old_version};"
             )).unwrap();
