@@ -34,18 +34,39 @@ fn valid(value: &str) -> bool {
     !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
 }
 
+fn valid_scope(value: &str) -> bool {
+    valid(value)
+        && !value.contains('\\')
+        && !value.contains("//")
+        && !value
+            .split('/')
+            .any(|segment| segment == "." || segment == "..")
+        && (value == "/" || !value.ends_with('/'))
+}
+
+fn scopes_overlap(a: &str, b: &str) -> bool {
+    a == b
+        || (a == "/" && b.starts_with('/'))
+        || (b == "/" && a.starts_with('/'))
+        || a.strip_prefix(b).is_some_and(|rest| rest.starts_with('/'))
+        || b.strip_prefix(a).is_some_and(|rest| rest.starts_with('/'))
+}
+
 impl ResourceLeases {
     /// Acquire all resource scopes atomically or none. Sorted, deduplicated
     /// scopes avoid order-dependent acquisition and self-conflicts.
     pub fn acquire(&self, owner: &str, scopes: &[String]) -> Result<ResourceLease, LeaseError> {
-        if !valid(owner) || scopes.is_empty() || scopes.iter().any(|s| !valid(s)) {
+        if !valid(owner) || scopes.is_empty() || scopes.iter().any(|s| !valid_scope(s)) {
             return Err(LeaseError::InvalidScope);
         }
         let mut unique = scopes.to_vec();
         unique.sort();
         unique.dedup();
         let mut state = self.state.lock().map_err(|_| LeaseError::Poisoned)?;
-        if unique.iter().any(|scope| state.held.contains_key(scope)) {
+        if unique
+            .iter()
+            .any(|scope| state.held.keys().any(|held| scopes_overlap(scope, held)))
+        {
             return Err(LeaseError::Busy);
         }
         state.next_generation = state
@@ -67,12 +88,16 @@ impl ResourceLeases {
     }
 
     pub fn is_busy(&self, scope: &str) -> Result<bool, LeaseError> {
+        if !valid_scope(scope) {
+            return Err(LeaseError::InvalidScope);
+        }
         Ok(self
             .state
             .lock()
             .map_err(|_| LeaseError::Poisoned)?
             .held
-            .contains_key(scope))
+            .keys()
+            .any(|held| scopes_overlap(scope, held)))
     }
 }
 
@@ -150,6 +175,44 @@ mod tests {
             registry.acquire("agent", &scopes(&["bad\npath"])),
             Err(LeaseError::InvalidScope)
         ));
+    }
+
+    #[test]
+    fn ancestor_and_descendant_conflict_at_segment_boundaries() {
+        let registry = ResourceLeases::default();
+        let parent = registry.acquire("a", &scopes(&["src"])).unwrap();
+        assert_eq!(registry.is_busy("src/main.rs"), Ok(true));
+        assert!(matches!(
+            registry.acquire("b", &scopes(&["src/main.rs"])),
+            Err(LeaseError::Busy)
+        ));
+        assert_eq!(registry.is_busy("src-other/main.rs"), Ok(false));
+        drop(parent);
+        let root = registry.acquire("a", &scopes(&["/"])).unwrap();
+        assert_eq!(registry.is_busy("/src/main.rs"), Ok(true));
+        assert_eq!(registry.is_busy("relative/path"), Ok(false));
+        drop(root);
+        assert!(registry.acquire("b", &scopes(&["/src"])).is_ok());
+    }
+
+    #[test]
+    fn alias_scopes_fail_closed_for_acquire_and_probe() {
+        let registry = ResourceLeases::default();
+        for alias in [
+            "",
+            "src/../src",
+            "./src",
+            "src/./file",
+            "src//file",
+            "src/",
+            "src\\file",
+        ] {
+            assert!(matches!(
+                registry.acquire("a", &scopes(&[alias])),
+                Err(LeaseError::InvalidScope)
+            ));
+            assert_eq!(registry.is_busy(alias), Err(LeaseError::InvalidScope));
+        }
     }
     #[test]
     fn duplicate_scope_names_do_not_self_conflict() {
