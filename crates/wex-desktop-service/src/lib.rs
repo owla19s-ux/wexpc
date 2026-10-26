@@ -10,6 +10,9 @@ pub use application::process_control::{
     ActiveProcess, ProcessCancellation, ProcessLease, ProcessSupervisor,
 };
 pub use application::DesktopService;
+pub use connectors::git_candidate_journal::{
+    GitCandidateEvidence, GitCandidateJournal, SavedGitCandidate,
+};
 pub use connectors::git_commit_admission::{
     begin_git_commit, git_commit_resource_id, read_and_settle_git_commit,
     read_and_settle_planned_git_commit, settle_verified_git_commit, GitCommitAdmission,

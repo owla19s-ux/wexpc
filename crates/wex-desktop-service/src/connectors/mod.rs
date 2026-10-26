@@ -1,3 +1,4 @@
+pub mod git_candidate_journal;
 pub mod git_commit_admission;
 pub mod git_commit_binding;
 pub mod git_commit_candidate;

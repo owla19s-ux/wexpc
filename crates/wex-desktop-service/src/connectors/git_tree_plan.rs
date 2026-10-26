@@ -794,4 +794,124 @@ mod tests {
             });
         }
     }
+    #[cfg(unix)]
+    #[test]
+    fn original_candidate_is_durable_before_git_write_and_remains_evidence_after_unknown() {
+        use std::os::unix::fs::DirBuilderExt;
+        for format in ["sha1", "sha256"] {
+            with_fixture(format, true, |store, admission, source, root| {
+                let data = tempfile::tempdir().unwrap();
+                let journal_root = data.path().join("journal");
+                std::fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(&journal_root)
+                    .unwrap();
+                let metadata = crate::GitCommitMetadata {
+                    author: crate::GitCommitIdentity {
+                        name: "WEX",
+                        email: "wex@example.invalid",
+                        unix_seconds: 1,
+                        utc_offset_minutes: 0,
+                    },
+                    committer: crate::GitCommitIdentity {
+                        name: "WEX",
+                        email: "wex@example.invalid",
+                        unix_seconds: 2,
+                        utc_offset_minutes: 0,
+                    },
+                };
+                let candidate = crate::prepare_admitted_git_commit(
+                    store,
+                    admission,
+                    source,
+                    &git_program(),
+                    &metadata,
+                )
+                .unwrap();
+                let before = object_files(root);
+                let revision = store.load().unwrap().revision;
+                let journal = crate::GitCandidateJournal::open(&journal_root).unwrap();
+                let saved = journal.persist(store, admission, &candidate).unwrap();
+                assert_eq!(saved.candidate_oid(), candidate.oid());
+                assert_eq!(
+                    journal
+                        .persist(store, admission, &candidate)
+                        .unwrap()
+                        .reference(),
+                    saved.reference()
+                );
+                assert_eq!(object_files(root), before);
+                assert_eq!(store.load().unwrap().revision, revision);
+                drop(journal);
+                let reopened = crate::GitCandidateJournal::open(&journal_root).unwrap();
+                let evidence = reopened
+                    .read_attempt(
+                        "op",
+                        "attempt",
+                        &admission.committed().dispatch.intent.resource_id,
+                    )
+                    .unwrap();
+                assert_eq!(evidence.candidate_oid(), candidate.oid());
+                assert_eq!(evidence.commit_bytes(), candidate.commit().bytes());
+                assert_eq!(
+                    evidence.intent_digest(),
+                    admission.committed().dispatch.intent.intent_digest
+                );
+                store
+                    .apply(
+                        revision,
+                        wex_workspace_store::operations::OperationChange::Finish {
+                            id: "op".into(),
+                            attempt_id: "attempt".into(),
+                            outcome: wex_core::operation::Outcome::Unknown,
+                        },
+                    )
+                    .unwrap();
+                let bytes = std::fs::read(journal_root.join(format!("{}.json", saved.reference())))
+                    .unwrap();
+                assert!(reopened.persist(store, admission, &candidate).is_err());
+                assert_eq!(
+                    std::fs::read(journal_root.join(format!("{}.json", saved.reference())))
+                        .unwrap(),
+                    bytes
+                );
+                // Recovery can read the ORIGINAL candidate, never restore approval.
+                assert_eq!(
+                    reopened.read(saved.reference()).unwrap().candidate_oid(),
+                    candidate.oid()
+                );
+                assert!(matches!(
+                    store.load().unwrap().ledger.records[0].state,
+                    wex_core::operation::OperationState::OutcomeUnknown { .. }
+                ));
+                assert_eq!(
+                    reopened
+                        .read_unresolved_operation(store, "op")
+                        .unwrap()
+                        .candidate_oid(),
+                    candidate.oid()
+                );
+                let revision = store.load().unwrap().revision;
+                // No Git write was issued in this fixture. Only the trusted test,
+                // never the read-only journal query, records that conclusive fact.
+                store
+                    .apply(
+                        revision,
+                        wex_workspace_store::operations::OperationChange::Finish {
+                            id: "op".into(),
+                            attempt_id: "attempt".into(),
+                            outcome: wex_core::operation::Outcome::Failed {
+                                evidence_ref: "test_not_issued".into(),
+                            },
+                        },
+                    )
+                    .unwrap();
+                assert!(reopened.read_unresolved_operation(store, "op").is_err());
+                assert_eq!(
+                    reopened.read(saved.reference()).unwrap().candidate_oid(),
+                    candidate.oid()
+                );
+            });
+        }
+    }
 }

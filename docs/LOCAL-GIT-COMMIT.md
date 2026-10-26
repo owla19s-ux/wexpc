@@ -137,3 +137,15 @@ Windows 原生私有权限、替换/同步语义和持久后端仍是阻塞；�
 `GitCommitCandidate` 私有持有 attempt 绑定的 tree plan 和 commit 对象，提供只读 bytes/OID 及待保存对象迭代器。`read_and_settle_candidate_git_commit` 不再接收调用方临时给定的候选 OID，固定以预先计算的 OID 接入既有真实 HEAD、对象/tree/范围/身份及持久账本结算。即使另一对象的树、父提交和消息相同，只要作者/时间等字节不同，也不能替代这份候选。该候选仍是内存数据，不是派发许可或持久恢复日志；重启后不能从新时间重造候选并自动重派 Unknown 写入。
 
 新增 3 项纯编码/元数据测试，初始编码与注入回归 RED→GREEN；新增 Unix 真实 SHA-1/SHA-256 测试：候选 raw commit hash 与 Git 一致，准备后对象库未变；仅测试夹具保存计划对象并将分支指向“同树同消息、作者被替换”的提交，严格候选结算拒绝且保留 InFlight；分支改为精确候选才经真实回读持久成功，原索引与未批准暂存隔离仍保留。该测试持久化命令不是产品 writer。完整证据保存、对象/ref 生产写入、身份政策接线、Windows 持久后端、Host/模型入口和对话续答仍未完成；保持 Draft 与 skip ci，实际全量结果登记 PR #63。
+
+## 后续增量：原候选持久证据与只读恢复查询（2026-10-26）
+
+新增 `GitCandidateJournal`，保存原操作/尝试、generation、物理 resource、批准 intent digest、父/目标 tree、精确 commit bytes/OID、批准路径和计划对象**引用清单**。它是候选证据，不是第二套审批账本或执行状态源；OperationStore 继续裁决准入和状态。只保存 commit 原始载荷，不保存 blob/tree 原始载荷，不能据此重新补写对象或重建原文件，也尚非完整工具回执/验证载荷。
+
+入口只接受 Host 在既有内部数据根下**已经持久创建好的应用私有目录**，不能来自模型参数、用户项目目录或 Space；目录仍须纳入 Host internal exclusions。当前非 Unix 拒绝。Unix 实现固定打开目录句柄、核验 root 当前名称与句柄为同一设备/inode、有效用户所有和私有 POSIX mode。后续叶文件通过 openat/no-follow/nonblocking 操作，临时文件 0600 完整写入并 sync 后，以同目录 linkat 不覆盖发布，移除临时名并同步目录。沿用已有 immutable_file 的完整写入/不覆盖发布原则，但此处专用描述符版本不重新解析 root 路径。目录祖先及原 root 的创建持久性由 Host 建立；不宣称已验证所有 Unix ACL/文件系统或 Windows 命名空间持久性。
+
+`persist` 要求候选 tree plan 与当前 admission 绑定，前后复核持久 InFlight/intent/attempt/generation，记录落盘后回读核验才返回 `SavedGitCandidate`。键由原 operation/attempt/resource 长度分隔摘要产生，不含新 generation，重启或换 generation 不能覆盖同一次原记录。完全相同的内部保存允许重新确认文件/目录同步；内容冲突、链接、非私有/非普通文件、目录被替换、异常/超大载荷均拒绝。若在 linkat 成功而临时名尚未移除时进程中断，可能留下双链接记录；当前读取和再次保存均拒绝，保留现场，不自动清理或修复。这是审查确认并测试登记的可用性限制，不是已完成的中断恢复。未来 writer 必须等保存明确返回成功才开始外部写入。**幂等保存不能证明 Git 尚未执行，SavedGitCandidate 不是执行或重派许可**；未来 writer 仍须实现单次派发状态与实时权限/仓库核验。
+
+读取上限 256 KiB，严格 JSON/schema，最多 193 个对象引用；重新认证原始 commit SHA-1/SHA-256、tree/parent、路径和对象清单一致性，并复核叶身份/长度/时间戳/权限/单链接及目录绑定。记录位于受信任应用数据内，哈希检验是内部一致性校验，不是对任意同用户恶意进程的来源签名。`read`/`read_attempt` 只返回历史证据；`read_unresolved_operation` 另外匹配当前账本 Write/git_commit、InFlight/Unknown 原 attempt/resource/digest/父版本及稳定 revision/generation，拒绝终态/不匹配记录。查询不运行 Git、不将 Unknown 改成成功，也不恢复批准、lease 或候选执行对象。
+
+新增测试覆盖编码校验 RED→GREEN、重开保留原字节、不可覆盖/同内容保存、目录替换/公开 mode/软硬链接/超大或非法载荷拒绝、并发冲突只有一个原记录获胜。真实候选测试在任何 Git 写入前完成保存且对象库/操作 revision 不变，日志重开能读出原候选；转 Unknown 后不能再次取得保存确认，只读查询仍返回原证据且不改变状态，确证未派发的测试流程将状态结成 Failed 后 unresolved 查询拒绝而历史记录保留。另有实际 OperationStore 冷重开测试：原 InFlight 变 Unknown，新 generation 仍能只读查到原候选，查询不改变账本；相同 operation/attempt/resource 但意图摘要不同的账本拒绝匹配。双链接中断窗口以真实硬链接夹具验证持续拒绝、不自动修复。测试没有模拟断电/fsync 故障；Windows、生产 writer、完整外部事实恢复核查、Host/模型/对话续答仍待接线。具体全量命令和数量登记 PR #63，不触发 Actions。
