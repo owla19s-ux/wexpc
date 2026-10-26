@@ -1,8 +1,13 @@
-# WEXPC 0.1.1 gated validation. Intentionally manual-only:
-# do not enable push/pull_request/schedule triggers during branch consolidation.
+# WEXPC 0.1.1 gated validation.
+# Normal code pushes and pull requests never trigger tests. Only explicit
+# requests committed under .github/ci-requests/linux/ on main trigger Linux.
 name: WEXPC 0.1.1 validation
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ci-requests/linux/**'
   workflow_dispatch:
     inputs:
       suite:
@@ -22,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: wexpc-validation-${{ github.ref }}-${{ inputs.suite }}
+  group: wexpc-validation-${{ github.ref }}-${{ github.event_name }}-${{ inputs.suite || 'linux' }}
   cancel-in-progress: false
 
 jobs:
@@ -57,7 +62,7 @@ jobs:
           git push origin HEAD:main
 
   linux:
-    if: ${{ inputs.suite == 'linux' || inputs.suite == 'all' }}
+    if: ${{ github.event_name == 'push' || inputs.suite == 'linux' || inputs.suite == 'all' }}
     name: Rust Linux / fmt + Clippy + workspace tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
