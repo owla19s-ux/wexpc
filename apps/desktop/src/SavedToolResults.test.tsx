@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import {afterEach,expect,it,vi} from 'vitest';
-import {cleanup,render,screen} from '@testing-library/react';
+import {cleanup,render,screen,waitFor} from '@testing-library/react';
 import {SavedToolResults} from './SavedToolResults';
 const {ipc}=vi.hoisted(()=>({ipc:vi.fn()}));
 vi.mock('./client',()=>({command:ipc,errorMessage:String}));
@@ -67,4 +67,18 @@ it('distinguishes incomplete capture from byte-limit truncation in a saved recei
   expect(await screen.findByText('标准输出未完整收集')).toBeTruthy();
   expect(screen.getByText('标准错误已收集至管道关闭')).toBeTruthy();
   expect(screen.queryByText('标准输出已截断')).toBeNull();
+});
+
+it('never displays saved evidence from the previous conversation while the next query is pending',async()=>{
+  let resolveNext:((rows:unknown[])=>void)|undefined;
+  ipc.mockImplementation((_name:string,args:{conversationId:string})=>args.conversationId==='conv_A'
+    ?Promise.resolve([{record_id:'old',call_id:'call_old',tool_name:'read_file',result:'private previous conversation',sequence:1}])
+    :new Promise(resolve=>{resolveNext=resolve;}));
+  const view=render(<SavedToolResults conversationId="conv_A" turnId="turn_1" busy={false}/>);
+  expect(await screen.findByText('private previous conversation')).toBeTruthy();
+  view.rerender(<SavedToolResults conversationId="conv_B" turnId="turn_2" busy={false}/>);
+  expect(screen.queryByText('private previous conversation')).toBeNull();
+  resolveNext?.([{record_id:'new',call_id:'call_new',tool_name:'read_file',result:'current conversation evidence',sequence:1}]);
+  expect(await screen.findByText('current conversation evidence')).toBeTruthy();
+  await waitFor(()=>expect(screen.queryByText('private previous conversation')).toBeNull());
 });

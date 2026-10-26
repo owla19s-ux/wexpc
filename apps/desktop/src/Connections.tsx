@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { command, errorMessage } from './client';
 import type { AiConnection } from './types';
 import type { Run } from './App';
@@ -25,8 +25,29 @@ type GithubStatus = {configured:boolean;enabled:boolean};
 export function GithubConnection({run}:{run:Run}) {
   const [status,setStatus]=useState<GithubStatus|null>(null);
   const [failure,setFailure]=useState('');
-  const refresh=()=>command<GithubStatus>('github_status').then(next=>{setStatus(next);setFailure('');}).catch(e=>{setStatus(null);setFailure(errorMessage(e));throw e;});
-  useEffect(()=>{void refresh().catch(()=>{});},[]);
+  const [checking,setChecking]=useState(true);
+  const querySequence=useRef(0);
+  const refresh=async()=>{
+    const sequence=++querySequence.current;
+    setChecking(true);
+    try {
+      const next=await command<GithubStatus>('github_status');
+      if(sequence===querySequence.current){setStatus(next);setFailure('');}
+    }catch(e){
+      if(sequence===querySequence.current)setFailure(errorMessage(e));
+      throw e;
+    }finally{
+      if(sequence===querySequence.current)setChecking(false);
+    }
+  };
+  useEffect(()=>{
+    void refresh().catch(()=>{});
+    return ()=>{querySequence.current++;};
+  },[]);
+  const verified=status!==null&&!checking&&!failure;
+  const description=status?.configured
+    ? status.enabled?'GitHub 已启用（按各对话执行策略）':'GitHub 已配置，尚未启用'
+    : '尚未配置 GitHub 凭证';
   const save=(form:HTMLFormElement)=>{
     const token=String(new FormData(form).get('token')||'');
     const input=form.elements.namedItem('token') as HTMLInputElement;
@@ -34,18 +55,20 @@ export function GithubConnection({run}:{run:Run}) {
     void run(async()=>{await command('configure_github',{token});await refresh();});
   };
   return <div>
-    <p>{status?.configured?(status.enabled?'GitHub 已启用（按各对话执行策略）':'GitHub 已配置，尚未启用'):'尚未配置 GitHub 凭证'}</p>
-    {failure&&<p className="error">{failure}</p>}
+    <p>{verified?description:status?`上次核对：${description}；当前状态尚未核实。`:'GitHub 状态尚未核实，不能判断是否配置凭证。'}</p>
+    {checking&&<p className="muted">正在核对 GitHub 连接状态…</p>}
+    {failure&&<p className="error" role="alert">GitHub 状态查询失败：{failure}。请重新查询后再调整访问开关或撤销凭证。</p>}
+    <button type="button" disabled={checking} onClick={()=>void refresh().catch(()=>{})}>重新查询 GitHub 状态</button>
     <form onSubmit={e=>{e.preventDefault();save(e.currentTarget);}}>
       <label>GitHub Personal Access Token<input name="token" type="password" autoComplete="off" required/></label>
       <p className="muted">凭证仅保存到 Windows 凭证管理器。更换凭证会关闭全局开关；不会从项目关联推断授权。</p>
       <button type="submit">保存 GitHub 凭证</button>
     </form>
-    {status?.configured&&<button type="button" onClick={()=>void run(async()=>{
+    {status?.configured&&<button type="button" disabled={!verified} onClick={()=>void run(async()=>{
       await command('set_github_enabled',{enabled:!status.enabled});
       await refresh();
     })}>{status.enabled?'关闭 GitHub 全局访问':'启用 GitHub 全局访问'}</button>}
-    {status?.configured&&<button type="button" onClick={()=>{
+    {status?.configured&&<button type="button" disabled={!verified} onClick={()=>{
       if(!window.confirm('删除本机 GitHub 凭证并关闭 WEXPC 后续访问？已派发操作不会自动撤销；此操作不会使 GitHub 服务端的 Token 失效。'))return;
       void run(async()=>{await command('revoke_github');await refresh();});
     }}>删除本机 GitHub 凭证并关闭访问</button>}
