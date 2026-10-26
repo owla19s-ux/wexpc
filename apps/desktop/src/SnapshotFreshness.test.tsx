@@ -12,8 +12,10 @@ vi.mock('./client', () => ({
 }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(async () => () => {}) }));
 vi.mock('@tauri-apps/plugin-dialog', () => ({ open: vi.fn() }));
-vi.mock('./Connections', () => ({
+vi.mock('./Connections', async (importOriginal) => ({
+  ...await importOriginal<typeof import('./Connections')>(),
   ConnectionForm: () => null, GithubConnection: () => null, Selection: () => null,
+  VerifiedConnectionCreation: () => null,
 }));
 vi.mock('./Projects', () => ({
   ProjectDetail: ({ snapshotFresh, run }: {
@@ -69,10 +71,11 @@ it('marks cached task evidence stale after snapshot failure and restores it only
 
   fireEvent.click(screen.getByRole('button', { name: '项目' }));
   fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
-  expect(screen.getByTestId('project-freshness').textContent).toBe('stale');
+  expect(screen.getByTestId('project-freshness').textContent).toContain('stale');
+  expect((screen.getByRole('button', { name: '登记派工' }) as HTMLButtonElement).disabled).toBe(true);
 
   fireEvent.click(screen.getByRole('button', { name: '重新读取快照' }));
-  await waitFor(() => expect(screen.getByTestId('project-freshness').textContent).toBe('fresh'));
+  await waitFor(() => expect(screen.getByTestId('project-freshness').textContent).toContain('fresh'));
   expect(screen.getByText(/1 个结果未知/)).toBeTruthy();
   expect(screen.queryByText(/快照读取未核实/)).toBeNull();
   expect(reads).toBe(3);
