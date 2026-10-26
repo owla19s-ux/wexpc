@@ -18,13 +18,14 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
   const evidenceLoaded=Array.isArray(attempts) && epoch !== undefined && epoch > 0;
   const taskAttempts=(attempts??[]).filter(a=>a.project_id===task.project_id&&a.task_id===task.id);
   const alreadyQueued=taskAttempts.some(a=>a.publication_epoch===epoch);
+  const previewEnabled=selected && evidenceLoaded && !alreadyQueued;
   const statusText:Record<DispatchAttempt['status'],string>={
     pending:'待领取（尚未执行）',
     in_flight:'已领取（不代表执行完成）',
     outcome_unknown:'结果未知（须核查，禁止自动重试）',
   };
   const currentPreview=preview&&preview.taskId===task.id&&preview.agentId===agentId
-    &&preview.revision===revision&&preview.publicationEpoch===epoch?preview:null;
+    &&preview.revision===revision&&preview.publicationEpoch===epoch&&previewEnabled?preview:null;
 
   useEffect(()=>{
     generation.current++;
@@ -33,7 +34,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
   useEffect(()=>{setAgentId('');},[task.id,epoch]);
 
   const previewAdmission=()=>{
-    if(!selected)return;
+    if(!previewEnabled)return;
     const request=++generation.current;
     setPreview(null);
     const chosen=agentId;
@@ -49,7 +50,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     });
   };
   const queue=()=>{
-    if(!selected||!evidenceLoaded||alreadyQueued||queueing)return;
+    if(!previewEnabled||queueing)return;
     generation.current++;
     setPreview(null);
     setQueueing(true);
@@ -77,7 +78,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
         })}
       </select>
     </label>
-    <button type="button" disabled={!selected||queueing} onClick={previewAdmission}>核对调度准入（不执行）</button>
+    <button type="button" disabled={!previewEnabled||queueing} onClick={previewAdmission}>核对调度准入（不执行）</button>
     {currentPreview&&<p role="status">仅通过准入预检：{currentPreview.agentId}（分配版本 {currentPreview.assignmentEpoch}，读取修订 {currentPreview.revision}），未占用资源或启动工具。</p>}
     <button type="button" disabled={!selected||!evidenceLoaded||alreadyQueued||queueing} onClick={queue}>登记待派工尝试（不启动工具）</button>
     {!evidenceLoaded&&<p className="muted">派工记录或发布版本尚未核实，暂不可登记；请重新读取任务状态。</p>}
