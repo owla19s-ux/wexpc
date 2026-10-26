@@ -16,7 +16,9 @@ type SettingsProps = {
 export function Settings({ data, snapshotFresh, onChanged, openConversation, openConnections }: SettingsProps) {
   const [selectedId, setSelectedId] = useState('');
   const conversations = data?.conversations ?? [];
-  const selected = conversations.find(c => c.id === selectedId) ?? conversations[0];
+  const selected = selectedId ? conversations.find(c => c.id === selectedId) : conversations[0];
+  // A deleted conversation must not silently redirect permission controls to another scope.
+  const missingSelection = Boolean(selectedId && !selected);
   const enabled = data?.connections.filter(c => c.enabled).length ?? 0;
 
   return <section>
@@ -31,9 +33,11 @@ export function Settings({ data, snapshotFresh, onChanged, openConversation, ope
     {conversations.length ? <>
       <label>选择授权所属对话
         <select aria-label="选择授权所属对话" value={selected?.id ?? ''} onChange={event => setSelectedId(event.target.value)}>
+          {missingSelection && <option value="" disabled>请重新选择对话</option>}
           {conversations.map(conversation => <option key={conversation.id} value={conversation.id}>{conversation.title}</option>)}
         </select>
       </label>
+      {missingSelection && <p className="notice" role="alert">此前选择的对话已不在当前列表中。请重新选择授权所属对话；不会自动切换到其他对话。</p>}
       {selected && <>
         <p>当前授权范围：{selected.title}（{selected.project_id ? '项目工作对话' : '普通对话'}）</p>
         <LocalDirectories key={'local_' + selected.id} conversationId={selected.id} onChanged={onChanged}/>
