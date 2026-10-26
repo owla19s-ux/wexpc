@@ -13,6 +13,9 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
   const [preview,setPreview]=useState<Preview|null>(null);
   const [queueing,setQueueing]=useState(false);
   const generation=useRef(0);
+  // A rejected IPC response can still mean the Host persisted the attempt.
+  // Keep the guard until run() finishes its authoritative snapshot recheck.
+  const queueInFlight=useRef(false);
   const epoch=task.publication_epoch;
   const selected=Boolean(agentId&&task.agent_ids.includes(agentId));
   const evidenceLoaded=Array.isArray(attempts) && epoch !== undefined && epoch > 0;
@@ -50,16 +53,16 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     });
   };
   const queue=()=>{
-    if(!previewEnabled||queueing)return;
+    if(!previewEnabled||queueInFlight.current)return;
+    queueInFlight.current=true;
     generation.current++;
     setPreview(null);
     setQueueing(true);
     void run(async()=>{
-      try {
-        await command('queue_dispatch_attempt',{revision,taskId:task.id,agentId});
-      } finally {
-        setQueueing(false);
-      }
+      await command('queue_dispatch_attempt',{revision,taskId:task.id,agentId});
+    }).finally(()=>{
+      queueInFlight.current=false;
+      setQueueing(false);
     });
   };
 
