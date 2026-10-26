@@ -8,6 +8,8 @@ on:
     branches: [main]
     paths:
       - '.github/ci-requests/linux/**'
+      - '.github/ci-requests/frontend/**'
+      - '.github/ci-requests/windows/**'
   workflow_dispatch:
     inputs:
       suite:
@@ -62,7 +64,7 @@ jobs:
           git push origin HEAD:main
 
   linux:
-    if: ${{ github.event_name == 'push' || inputs.suite == 'linux' || inputs.suite == 'all' }}
+    if: ${{ (github.event_name == 'push' && contains(join(github.event.commits.*.modified, ','), '.github/ci-requests/linux/')) || (github.event_name == 'push' && contains(join(github.event.commits.*.added, ','), '.github/ci-requests/linux/')) || inputs.suite == 'linux' || inputs.suite == 'all' }}
     name: Rust Linux / fmt + Clippy + workspace tests
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -80,7 +82,7 @@ jobs:
         run: cargo test --workspace --locked
 
   frontend:
-    if: ${{ inputs.suite == 'frontend' || inputs.suite == 'all' }}
+    if: ${{ (github.event_name == 'push' && contains(join(github.event.commits.*.added, ','), '.github/ci-requests/frontend/')) || inputs.suite == 'frontend' || inputs.suite == 'all' }}
     name: Desktop UI / TypeScript + Vitest + build
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -102,7 +104,7 @@ jobs:
         run: npm run build
 
   windows:
-    if: ${{ inputs.suite == 'windows' || inputs.suite == 'all' }}
+    if: ${{ (github.event_name == 'push' && contains(join(github.event.commits.*.added, ','), '.github/ci-requests/windows/')) || inputs.suite == 'windows' || inputs.suite == 'all' }}
     name: Windows Rust + backend contracts + Tauri compile check
     runs-on: windows-latest
     timeout-minutes: 40
