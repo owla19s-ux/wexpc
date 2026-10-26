@@ -16,7 +16,9 @@ type SettingsProps = {
 export function Settings({ data, snapshotFresh, onChanged, openConversation, openConnections }: SettingsProps) {
   const [selectedId, setSelectedId] = useState('');
   const conversations = data?.conversations ?? [];
-  const selected = selectedId ? conversations.find(c => c.id === selectedId) : conversations[0];
+  // Permission controls require an explicit conversation selection. A changed
+  // snapshot order must never silently move their effective authorization scope.
+  const selected = selectedId ? conversations.find(c => c.id === selectedId) : undefined;
   // A deleted conversation must not silently redirect permission controls to another scope.
   const missingSelection = Boolean(selectedId && !selected);
   const enabled = data?.connections.filter(c => c.enabled).length ?? 0;
@@ -33,7 +35,7 @@ export function Settings({ data, snapshotFresh, onChanged, openConversation, ope
     {conversations.length ? <>
       <label>选择授权所属对话
         <select aria-label="选择授权所属对话" value={selected?.id ?? ''} onChange={event => setSelectedId(event.target.value)}>
-          {missingSelection && <option value="" disabled>请重新选择对话</option>}
+          {!selected && <option value="" disabled>{missingSelection ? "请重新选择对话" : "请先选择对话"}</option>}
           {conversations.map(conversation => <option key={conversation.id} value={conversation.id}>{conversation.title}</option>)}
         </select>
       </label>
