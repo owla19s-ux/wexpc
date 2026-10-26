@@ -369,3 +369,48 @@ Core `Task` 是较小的执行状态和分配事实；Desktop Service `Task` 是
 ### 12.6 本批审查状态
 
 已核对 Desktop Task/TaskRecord、Tauri 前端类型及命令、DesktopSnapshot/SQLite schema 6 的静态实现。未执行真实 Windows 验证、迁移测试、Rust/TS 测试或 Actions；未修改 main、源代码或正式接口。
+
+## 13. 第七批：APS → WEX → WEXPC 历史设计回收与差异矩阵（2026-10-26）
+
+本批依据旧 WEX 仓库 **main** 的实际文档，而非重新假定用户尚未作出决策：
+
+- [WEX 顶层基线（2026-10-17）](https://github.com/owla19s-ux/WEX/blob/main/docs/WEX-DESIGN-BASELINE-2026-10-17.md)，尤其 §1.2、§1.3、§2、§7。
+- [主 AI、施工/审查 AI 与 Dispatcher 协作架构（2026-10-18）](https://github.com/owla19s-ux/WEX/blob/main/docs/architecture/CONTEXT-LEAD-AI-DISPATCHER-BASELINE-2026-10-18.md)，尤其 §1–6。
+- [最小交接/审查/唤醒协议草案 V0.1](https://github.com/owla19s-ux/WEX/blob/main/docs/architecture/CONTEXT-AI-DISPATCHER-MINIMAL-HANDOFF-PROTOCOL-DRAFT-V0.1.md)，尤其 §2–4、§10–12；**其字段和状态枚举仍是旧候选，不视为已批准实现**。
+- [PTAL 架构审查](https://github.com/owla19s-ux/WEX/blob/main/docs/architecture/PLATFORM-TOOL-ACCESS-LAYER.md)；接入与运行机制是候选，不继承旧 Android 技术限制。
+
+### 13.1 已存在的历史设计，不再重复当作新决策
+
+| 设计原则 | 历史依据 | 在 WEXPC 的继承方式 |
+| --- | --- | --- |
+| WEX 联通实际工作，不要求每件工作都有固定 Task 或固定软件开发流程 | 顶层基线 §1、§1.3、§7 | 任务关联按场景可选；不建设全量执行平台 |
+| Execution / Result / Evidence / Verification 分离 | 顶层基线 §2；协作架构 §2 | 区分已执行、已有产物、已有证据和已通过的真实验证 |
+| 验证结果可统一记录，验证方式不强制统一 | 顶层基线 §1.3 | 适配开发、研究、创作、外部委派各自验收条件 |
+| 提交完成、审查通过、Verify 通过、真机验收通过各不相等 | 协作架构 §2 | 产物、审查、技术验证和最终验收分别保留依据 |
+| Dispatcher 非 AI，仅机械性交接、记录和恢复 | 协作架构 §1、§5 | 不用 Dispatcher 替代主 AI 的判断，也不管理外部 Agent 内部执行 |
+| 施工 AI 报告不是最终成功，审查/验证需有可核对证据 | 协作架构 §1–2；PTAL §5 | 操作或工具成功不自动关闭 Task |
+| 施工卡/成果版本与失败历史必须可追溯 | 协作架构 §3；交接协议草案 §4、§10 | 新结果不覆盖旧失败；旧 Commit 的验证不继承给新 Commit |
+| 多人/多 AI 的概念不能被单 Agent 首期样例写死 | 协作架构 §6.2；交接协议草案 §11 | 多 Agent 分工允许多实体；单个派发票据仍只关联明确执行者 |
+
+**精确状态说明**：旧基线已经确认“职责分离、证据、审查/验证边界”；旧交接协议中的具体事件名、字段、细分状态仍是研究草案。不能引用旧草案就宣布具体数据格式已经冻结。
+
+### 13.2 旧版本排期不得反向覆盖 PC 当前目标
+
+旧 Android WEX 的 2026-10-20 冻结范围曾将完整主/施工/审查 AI 工作模式推迟到后续；这属于**当时 Android 版本的实施排期**，不撤销其已确认的长期架构原则。当前 WEXPC 0.1.1 产品基线已明确要求轻项目管理、Dispatcher、多 Agent 施工、Review/Verify 和中断接续。后续施工应以 **WEXPC PC 基线 §5** 的版本目标为准，不能据历史 Android 排期将这些要求删去或后置。
+
+旧技术实现（APS Kotlin、Android Flutter 运行时和安卓工具权限）不作为 PC 必须迁移的源码/平台模型。继承的是语义、已验证规则和行为要求。
+
+### 13.3 真正需要继续设计、而非重新讨论的工程缺口
+
+1. **业务 Task 与 Core TaskBoard 的状态权威映射**：桌面仍存 `Draft` 任务，Core 具备运行状态。要确定统一写入口、任务版本与多成员派发身份。
+2. **需求—成果版本—验证—验收的最小持久关联**：早期资料讲清了关系和信任层级，但没有为 PC 冻结具体可编码结构、前端协议和迁移版本。
+3. **部分操作失败后的继续修复**：历史已明确正常修复可继续；现有 `TaskOperationIndex` 可能在单操作失败时置 Task `Failed`，须细化映射策略及调用链，不能让某次测试失败被认为用户任务终结。
+4. **真实 Dispatcher 到 Host 的派发接线**：Core 含 admission/lease/链接纯规则；尚需证明桌面业务任务、执行回执、审查和恢复都已接通。
+5. **跨系统交接的事实格式**：原生内部操作与外部 Agent 不同深度；只统一 WEX 可核对的引用、接收、成果和验证，绝不要求外部强行使用 WEX Operation 内部状态机。
+6. **持久化安全**：SQLite DesktopSnapshot 当前 user_version=6，人工 TaskRecord 不是可信回执；应在明确归属后设计增量兼容与崩溃一致性，不能擅自改 schema。
+
+### 13.4 后续审查执行原则
+
+今后每项条目先标注为 **历史已确认 / PC 新确认 / 历史候选 / 代码事实 / 真正待裁决**。先利用现有历史设计与 Core 逻辑，再提出最小接口。只有发现新冲突、扩大权限、改变业务验收决策或不可逆迁移，才提交用户选择；未发现则在独立文档分支继续审查。未经确认不更改正式基线、Task 状态机或数据库。
+
+本批为旧文档和当前 main 静态对照，未改业务代码、正式文档或 CI；未宣称 Windows 真实验证成功。
