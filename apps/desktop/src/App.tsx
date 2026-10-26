@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { command, desktopAvailable, errorMessage } from './client';
@@ -12,7 +12,9 @@ import { Organization } from './Organization';
 type Page = 'projects'|'new'|'connections'|'conversation'|'organization';
 type ChatDelta = {turnId:string;conversationId:string;delta:string};
 export function App() {
-  const [data,setData]=useState<Snapshot|null>(null);
+  const [snapshot,setSnapshot]=useState<{data:Snapshot|null;fresh:boolean}>({data:null,fresh:false});
+  const data=snapshot.data;
+  const refreshGeneration=useRef(0);
   const [error,setError]=useState('');
   const [page,setPage]=useState<Page>('projects');
   const [projectId,setProjectId]=useState('');
@@ -34,9 +36,20 @@ export function App() {
     return ()=>{active=false;unlisten?.();};
   },[]);
   const refresh=useCallback(async()=>{
-    const incoming=await command<Snapshot>('snapshot');
-    setData(current=>current&&current.revision>incoming.revision?current:incoming);
-    return incoming;
+    const request=++refreshGeneration.current;
+    try {
+      const incoming=await command<Snapshot>('snapshot');
+      if(request===refreshGeneration.current){
+        setSnapshot(current=>current.data&&current.data.revision>incoming.revision
+          ? {...current,fresh:false} : {data:incoming,fresh:true});
+      }
+      return incoming;
+    } catch(e) {
+      // A failed snapshot read invalidates the displayed evidence, not the stored facts.
+      // Ignore failures from older overlapping reads after a newer read has started.
+      if(request===refreshGeneration.current)setSnapshot(current=>({...current,fresh:false}));
+      throw e;
+    }
   },[]);
   useEffect(()=>{
     if(!data)return;
@@ -102,6 +115,7 @@ export function App() {
     </nav><main>
       {!desktopAvailable&&<p className="notice">浏览器预览未连接桌面服务。请运行桌面程序后管理项目和调用 API。</p>}
       {error&&<p className="error" role="alert">{error}<button onClick={()=>setError('')} aria-label="关闭错误提示">×</button></p>}
+      {data&&!snapshot.fresh&&<p className="notice" role="status">快照读取未核实：页面保留上次成功读取的资料，任务和派工状态不是当前事实。<button type="button" onClick={()=>{setError('');void refresh().catch(e=>setError(errorMessage(e)));}}>重新读取快照</button></p>}
       {desktopAvailable&&!data&&!error&&<p>正在加载本地项目…</p>}
       {page==='organization'&&data&&<Organization data={data} run={run}/>}
       {page==='new'&&<section><h1>新建项目</h1><p>记录目标，关联已有代码与资料，再配置参与工作的 AI。</p><form onSubmit={e=>{e.preventDefault();void run(()=>createProject(e.currentTarget));}}>
@@ -112,12 +126,12 @@ export function App() {
         <p className="muted">资源关联只用于项目组织，不自动授予 AI 文件或进程权限。</p><button className="primary" disabled={!desktopAvailable}>保存项目</button>
       </form></section>}
       {page==='projects'&&!project&&<section><h1>项目</h1>{data?.projects.length?data.projects.map(p=><button className="item" key={p.id} onClick={()=>setProjectId(p.id)}><strong>{p.name}</strong><span>{p.goal||'尚未填写目标'}</span></button>):<p>从一个真实项目开始，保存目标、资料、AI 分工与任务。</p>}<button className="primary" onClick={()=>setPage('new')}>新建项目</button></section>}
-      {page==='projects'&&project&&data&&<ProjectDetail project={project} data={data} run={run} openChat={showConversation} />}
+      {page==='projects'&&project&&data&&<ProjectDetail project={project} data={data} snapshotFresh={snapshot.fresh} run={run} openChat={showConversation} />}
       {page==='connections'&&<section><h1>连接与服务</h1><h2>AI API</h2>{data?.connections.map(c=><div className="item" key={c.id}><strong>{c.name}</strong><span>{c.base_url}</span><span>{c.models.join(' · ')}</span><button onClick={()=>void run(async()=>{await command('set_connection_enabled',{connectionId:c.id,enabled:!c.enabled});})}>{c.enabled?'停用':'启用'}</button></div>)}<ConnectionForm run={run}/><hr/><h2>GitHub</h2><GithubConnection run={run}/><hr/><h2>后续接入项</h2><p>本地程序执行及会话取消已有接线，持续终端授权、环境选择、完整文件修改、Git 提交与 Android 模拟器仍未完成 Windows 桌面验收。</p></section>}
       {page==='conversation'&&!conversation&&data&&<section><h1>新建普通对话</h1><form onSubmit={e=>{e.preventDefault();const fields=new FormData(e.currentTarget);void run(async()=>{const c=await command<Conversation>('create_conversation',{projectId:null,title:fields.get('title'),connectionId:fields.get('connection'),modelId:fields.get('model')});showConversation(c);});}}><label>对话名称<input name="title" required maxLength={128} defaultValue="普通对话"/></label><Selection connections={data.connections}/><button className="primary" disabled={!data.connections.some(c=>c.enabled)}>创建对话</button></form></section>}
       {page==='conversation'&&conversation&&data&&<label>关联上下文<select value={conversation.context_id||''} onChange={e=>{const contextId=e.target.value||null;void run(async()=>{await command('bind_conversation_context',{conversationId:conversation.id,contextId});});}}><option value="">独立对话，不关联上下文</option>{data.contexts.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
       {page==='conversation'&&conversation&&data&&<Chat key={conversation.id} conversation={conversation} turns={data.turns.filter(t=>t.conversation_id===conversation.id)} previews={previews} unsaved={data.unsaved_turn_ids} retrySave={id=>void run(async()=>{await command('retry_chat_result',{turnId:id});})} resume={resumeReply} recovering={recovering} onPolicyChanged={async()=>{await refresh();}} busy={pending.has(conversation.id)} draft={drafts[conversation.id]||''} setDraft={text=>setDrafts(prev=>({...prev,[conversation.id]:text}))} send={send} goProject={()=>{setProjectId(conversation.project_id||'');setPage('projects');}}/>}
-    </main></div><footer>{pending.size?`${pending.size} 个对话正在处理`:'本地项目数据由桌面服务保存'} · {taskFooterSummary(data)}；文件工具按对话策略执行；Git/本地命令暂逐次审批，自动多 Agent 施工尚未完成</footer>
+    </main></div><footer>{pending.size?`${pending.size} 个对话正在处理`:'本地项目数据由桌面服务保存'} · {snapshot.fresh?taskFooterSummary(data):data?'任务/派工状态当前未核实（上次成功快照，仅供参考）':taskFooterSummary(null)}；文件工具按对话策略执行；Git/本地命令暂逐次审批，自动多 Agent 施工尚未完成</footer>
   </div>;
 }
 
