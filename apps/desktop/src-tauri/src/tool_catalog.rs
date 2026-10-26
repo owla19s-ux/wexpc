@@ -139,18 +139,41 @@ fn append_host_commands(tools: &mut Vec<ToolDefinition>) {
     tools.push(generic_process_definition());
 }
 
-/// GitHub discovery is conditional on global connection and per-conversation policy.
-fn append_github_capabilities(app: &AppHandle, policies: &impl ToolPolicyAuthority, tools: &mut Vec<ToolDefinition>) {
-    if crate::github_config::status(app).is_ok_and(|status| status.enabled) {
-        for descriptor in GITHUB_CAPABILITIES {
-            if policies.policy(descriptor.capability_id).is_ok_and(|setting| {
-                wex_core::execution_policy::decide(setting.policy.into())
-                    != wex_core::execution_policy::PolicyDecision::Blocked
-            }) {
-                tools.push(descriptor.definition());
-            }
+/// Testable discovery gate: the global connection must be enabled before
+/// any per-conversation policy is consulted. Discovery never authorizes dispatch.
+fn append_github_for_status(
+    enabled: bool,
+    mut capability_available: impl FnMut(&str) -> bool,
+    tools: &mut Vec<ToolDefinition>,
+) {
+    if !enabled {
+        return;
+    }
+    for descriptor in GITHUB_CAPABILITIES {
+        if capability_available(descriptor.capability_id) {
+            tools.push(descriptor.definition());
         }
     }
+}
+
+/// GitHub discovery is conditional on global connection and per-conversation policy.
+/// A failed status read is treated as disabled, not as permission to advertise tools.
+fn append_github_capabilities(
+    app: &AppHandle,
+    policies: &impl ToolPolicyAuthority,
+    tools: &mut Vec<ToolDefinition>,
+) {
+    let enabled = crate::github_config::status(app).is_ok_and(|status| status.enabled);
+    append_github_for_status(
+        enabled,
+        |capability| {
+            policies.policy(capability).is_ok_and(|setting| {
+                wex_core::execution_policy::decide(setting.policy.into())
+                    != wex_core::execution_policy::PolicyDecision::Blocked
+            })
+        },
+        tools,
+    );
 }
 
 pub(crate) fn available_tools(
@@ -200,6 +223,61 @@ mod tests {
             names,
             vec!["git_status", "git_diff", "cargo_test", "cargo_fmt_check", "run_command"]
         );
+    }
+
+    #[test]
+    fn disabled_github_connection_never_checks_policies_or_advertises_tools() {
+        let mut tools = Vec::new();
+        let mut policy_reads = 0;
+        append_github_for_status(
+            false,
+            |_| {
+                policy_reads += 1;
+                true
+            },
+            &mut tools,
+        );
+        assert!(tools.is_empty());
+        assert_eq!(policy_reads, 0);
+    }
+
+    #[test]
+    fn enabled_github_connection_exposes_only_allowed_capabilities_in_stable_order() {
+        let mut tools = Vec::new();
+        let mut checked = Vec::new();
+        append_github_for_status(
+            true,
+            |id| {
+                checked.push(id.to_owned());
+                id != "github_file_create"
+            },
+            &mut tools,
+        );
+        assert_eq!(
+            checked,
+            vec![
+                "github_file_read".to_owned(),
+                "github_file_create".to_owned(),
+                "github_file_write".to_owned(),
+            ]
+        );
+        assert_eq!(
+            tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(),
+            vec!["github_read_file", "github_write_file"]
+        );
+        for tool in &tools {
+            let schema: serde_json::Value =
+                serde_json::from_str(&tool.parameters_json).expect("valid advertised schema");
+            assert_eq!(schema["type"], "object");
+            assert_eq!(schema["additionalProperties"], false);
+        }
+    }
+
+    #[test]
+    fn enabled_github_connection_with_all_policies_blocked_exposes_nothing() {
+        let mut tools = Vec::new();
+        append_github_for_status(true, |_| false, &mut tools);
+        assert!(tools.is_empty());
     }
 
     #[test]
