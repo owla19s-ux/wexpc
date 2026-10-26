@@ -152,3 +152,9 @@
 **须先完成专项核对或另行确认再改**：通用化 `OperationIntent` 的结构、旧 Snapshot 数据格式、GitHub 连接身份落盘、外部进程隔离方式、任何授权默认放宽及正式 Product Baseline 条款。
 
 本批没有修改 Rust、Tauri、React、SQLite、权限策略或正式产品基线；未运行 Actions / 编译 / 测试。
+
+### 8.6 追加核对：Core InFlight 与持久 marker 并不是同一个状态容器
+
+在 `tool_approvals.rs` 的通用进程路径中，`begin_approved_dispatch` 先通过权限回调与内存 `OperationLedger.begin`，随后 `journal(..., "in_flight", ...)` 写入 `tool-receipts`，然后才调用进程 Supervisor / 实际进程执行。就此片段的**调用顺序**而言，已安排持久 marker 早于进程外部副作用，不能将“使用临时 Ledger”误判为没有 durable InFlight 防护。但记录的原子性、各类文件/GitHub 路径是否同样遵守、失败回收、旧 marker 兼容，以及 marker 与未来持久 Task/Dispatcher 的一致性仍需逐路径核实。
+
+**建议**：未来薄执行协调层应复用当前 marker/receipt 写入能力与已验证的故障处理；先描述它们的现行权威范围，再统一引用，不要直接把 `OperationLedger` 的纯内存记录宣布为新的唯一持久操作数据库。
