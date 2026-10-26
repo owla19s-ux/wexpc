@@ -5,6 +5,7 @@ import type { Conversation, Snapshot } from './types';
 
 type SettingsProps = {
   data: Snapshot | null;
+  snapshotFresh: boolean;
   onChanged: () => Promise<void>;
   openConversation: (conversation: Conversation) => void;
   openConnections: () => void;
@@ -12,7 +13,7 @@ type SettingsProps = {
 
 // Permission truth remains in the Host. This page only selects a conversation
 // scope and reuses its existing revision-checked authorization controls.
-export function Settings({ data, onChanged, openConversation, openConnections }: SettingsProps) {
+export function Settings({ data, snapshotFresh, onChanged, openConversation, openConnections }: SettingsProps) {
   const [selectedId, setSelectedId] = useState('');
   const conversations = data?.conversations ?? [];
   const selected = conversations.find(c => c.id === selectedId) ?? conversations[0];
@@ -21,10 +22,11 @@ export function Settings({ data, onChanged, openConversation, openConnections }:
   return <section>
     <h1>设置与权限</h1>
     <h2>连接与凭证</h2>
-    <p>当前 {data?.connections.length ?? 0} 个 API 连接，{enabled} 个已启用。API Key 与 GitHub Token 不在此页展示。</p>
+    <p>{data ? `${snapshotFresh ? '最近一次核实' : '上次读取（尚未核实）'}：${data.connections.length} 个 API 连接，${enabled} 个已启用。` : '连接状态尚未核实。'} API Key 与 GitHub Token 不在此页展示。</p>
     <button type="button" onClick={openConnections}>管理 API 与 GitHub 连接</button>
 
     <h2>对话授权与执行策略</h2>
+    {data && !snapshotFresh && <p className="notice" role="status">对话列表来自上次成功快照；实际目录和工具策略仍需由 Host 分别核实。</p>}
     <p className="muted">目录授权和 GitHub 工具策略按对话分别保存；项目、Space、模型或岗位关联不会自动授权。此处没有全局文件或终端授权开关。</p>
     {conversations.length ? <>
       <label>选择授权所属对话
