@@ -15,8 +15,9 @@ export function App() {
   const [snapshot,setSnapshot]=useState<{data:Snapshot|null;fresh:boolean}>({data:null,fresh:false});
   const data=snapshot.data;
   const refreshGeneration=useRef(0);
-  // An older read must not release a mutation fence while a newer read is pending.
-  const latestRefresh=useRef<Promise<Snapshot>|null>(null);
+  // Superseded reads must settle through the newest authoritative read, even
+  // when their own IPC call never returns. A mutation fence awaits completion.
+  const latestRefresh=useRef<{completion:Promise<Snapshot>;supersede:(next:Promise<Snapshot>)=>void}|null>(null);
   const [error,setError]=useState('');
   const [page,setPage]=useState<Page>('projects');
   const [projectId,setProjectId]=useState('');
@@ -39,24 +40,29 @@ export function App() {
   },[]);
   const refresh=useCallback(()=>{
     const request=++refreshGeneration.current;
-    // A superseded read resolves only when the latest read has settled.
-    // Returning its ignored payload would let App.run() unlock dispatch early.
-    const settled=Promise.resolve().then(()=>command<Snapshot>('snapshot')).then(
+    // The superseded signal lets an older caller finish via the newest read
+    // without waiting for its own possibly hung IPC response.
+    let supersede!: (next:Promise<Snapshot>)=>void;
+    const superseded=new Promise<Snapshot>(resolve=>{supersede=resolve;});
+    const read=Promise.resolve().then(()=>command<Snapshot>('snapshot')).then(
       incoming=>{
-        if(request!==refreshGeneration.current)return latestRefresh.current!;
+        if(request!==refreshGeneration.current)return latestRefresh.current!.completion;
         setSnapshot(current=>current.data&&current.data.revision>incoming.revision
           ? {...current,fresh:false} : {data:incoming,fresh:true});
         return incoming;
       },
       error=>{
-        if(request!==refreshGeneration.current)return latestRefresh.current!;
+        if(request!==refreshGeneration.current)return latestRefresh.current!.completion;
         // A failed current read invalidates the evidence, not the stored facts.
         setSnapshot(current=>({...current,fresh:false}));
         throw error;
       },
     );
-    latestRefresh.current=settled;
-    return settled;
+    const completion=Promise.race([read,superseded]);
+    const previous=latestRefresh.current;
+    latestRefresh.current={completion,supersede};
+    previous?.supersede(completion);
+    return completion;
   },[]);
   useEffect(()=>{
     if(!data)return;
