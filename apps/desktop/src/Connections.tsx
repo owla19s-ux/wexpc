@@ -10,6 +10,23 @@ export function Selection({connections}:{connections:AiConnection[]}) {
   return <div className="fields"><label>API 连接<select name="connection" required value={active?.id||''} onChange={e=>setSelected(e.target.value)}><option value="" disabled>请先配置连接</option>{available.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>模型<select key={active?.id} name="model" required><option value="" disabled>选择模型</option>{active?.models.map(m=><option key={m} value={m}>{m}</option>)}</select></label></div>;
 }
 
+// Both ordinary conversations and project Agent creation require a verified
+// Host connection snapshot. Cached enabled flags remain visible for reference,
+// but cannot be used to submit a new connection-bound object.
+export function VerifiedConnectionCreation({connections, snapshotFresh, label}:{
+  connections: AiConnection[];
+  snapshotFresh: boolean;
+  label: string;
+}) {
+  const available=snapshotFresh && connections.some(connection=>connection.enabled);
+  return <>
+    <Selection connections={snapshotFresh ? connections : []}/>
+    {!snapshotFresh && <p className="notice" role="status">API 连接状态尚未核实：请重新读取桌面服务快照后再创建。</p>}
+    <button type="submit" className="primary" disabled={!available}>{label}</button>
+    {snapshotFresh && !available && <p>请先在连接与服务中配置并启用 API。</p>}
+  </>;
+}
+
 // A cached Snapshot may no longer reflect the Host's enabled state. Never
 // invert a stale value; the next verified snapshot is required before toggling.
 // The Host remains the authority for the actual connection state.
