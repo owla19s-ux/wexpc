@@ -16,8 +16,15 @@ vi.mock('./Connections', () => ({
   ConnectionForm: () => null, GithubConnection: () => null, Selection: () => null,
 }));
 vi.mock('./Projects', () => ({
-  ProjectDetail: ({ snapshotFresh }: { snapshotFresh: boolean }) =>
-    <div data-testid="project-freshness">{snapshotFresh ? 'fresh' : 'stale'}</div>,
+  ProjectDetail: ({ snapshotFresh, run }: {
+    snapshotFresh: boolean; run: (action: () => Promise<void>) => Promise<void>;
+  }) =>
+    <div data-testid="project-freshness">
+      {snapshotFresh ? 'fresh' : 'stale'}
+      <button disabled={!snapshotFresh} onClick={() => void run(() => ipc('queue_dispatch_attempt'))}>
+        登记派工
+      </button>
+    </div>,
 }));
 vi.mock('./Chat', () => ({ Chat: () => null }));
 vi.mock('./Organization', () => ({ Organization: () => null }));
@@ -70,9 +77,10 @@ it('marks cached task evidence stale after snapshot failure and restores it only
   expect(reads).toBe(3);
 });
 
-it('does not invalidate a verified snapshot when the action fails before refresh', async () => {
+it('reconciles even a rejected action and keeps a verified snapshot when read succeeds', async () => {
+  let reads = 0;
   ipc.mockImplementation(async (name: string) => {
-    if (name === 'snapshot') return snapshot('pending');
+    if (name === 'snapshot') { reads++; return snapshot('pending'); }
     if (name === 'set_connection_enabled') throw new Error('operation denied');
     throw new Error(name);
   });
@@ -81,6 +89,57 @@ it('does not invalidate a verified snapshot when the action fails before refresh
   fireEvent.click(screen.getByRole('button', { name: '连接与服务' }));
   fireEvent.click(screen.getByRole('button', { name: '停用' }));
   await screen.findByText(/operation denied/);
+  expect(reads).toBe(2);
   expect(screen.getByText(/1 个待领取/)).toBeTruthy();
   expect(screen.queryByText(/快照读取未核实/)).toBeNull();
+});
+
+it('fences retry after dispatch persists but IPC response and reconciliation both fail', async () => {
+  let reads = 0;
+  let dispatches = 0;
+  ipc.mockImplementation(async (name: string) => {
+    if (name === 'snapshot') {
+      reads++;
+      if (reads === 1) return snapshot('pending');
+      if (reads === 2) throw new Error('snapshot offline');
+      return snapshot('outcome_unknown');
+    }
+    if (name === 'queue_dispatch_attempt') {
+      dispatches++;
+      throw new Error('IPC response lost after durable dispatch');
+    }
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await screen.findByText(/IPC response lost after durable dispatch/);
+  await screen.findByText(/快照读取未核实/);
+  expect((screen.getByRole('button', { name: '登记派工' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.queryByText(/1 个待领取/)).toBeNull();
+  expect(dispatches).toBe(1);
+
+  fireEvent.click(screen.getByRole('button', { name: '重新读取快照' }));
+  await screen.findByText(/1 个结果未知/);
+  expect(screen.queryByText(/快照读取未核实/)).toBeNull();
+  expect(dispatches).toBe(1);
+  expect(reads).toBe(3);
+});
+
+it('preserves the original IPC error while showing the Host state after a successful recheck', async () => {
+  let reads = 0;
+  ipc.mockImplementation(async (name: string) => {
+    if (name === 'snapshot') { reads++; return snapshot(reads === 1 ? 'pending' : 'outcome_unknown'); }
+    if (name === 'queue_dispatch_attempt') throw new Error('dispatch response lost');
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await screen.findByText(/dispatch response lost/);
+  await screen.findByText(/1 个结果未知/);
+  expect(screen.queryByText(/快照读取未核实/)).toBeNull();
+  expect(reads).toBe(2);
 });
