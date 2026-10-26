@@ -72,7 +72,7 @@ impl DesktopStore {
             })?;
             // Defaulted fields are read additively. Keep the exact old payload,
             // but fence out older binaries before any write can erase records.
-            tx.pragma_update(None, "user_version", 6).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 8).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
         Ok(Self {
