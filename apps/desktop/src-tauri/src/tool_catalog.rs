@@ -60,11 +60,8 @@ fn generic_process_definition() -> ToolDefinition {
     }
 }
 
-pub(crate) fn available_tools(
-    app: &AppHandle,
-    chat: &wex_desktop_service::PreparedChat,
-    policies: &impl ToolPolicyAuthority,
-) -> Vec<ToolDefinition> {
+/// Local file capabilities are scoped to this conversation's configured directories.
+fn append_local_capabilities(app: &AppHandle, chat: &wex_desktop_service::PreparedChat, policies: &impl ToolPolicyAuthority, tools: &mut Vec<ToolDefinition>) {
     let tool = ToolDefinition {
     name: "read_file".into(),
     description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
@@ -73,7 +70,7 @@ pub(crate) fn available_tools(
     let readable = policies
         .policy("local_file_read")
         .is_ok_and(|s| s.policy != wex_desktop_service::PolicyChoice::Block);
-    let mut tools = if readable { vec![tool] } else { Vec::new() };
+    if readable { tools.push(tool); }
     if readable {
         if let Ok(status) = crate::local_access::open(app, &chat.conversation_id)
             .and_then(|store| crate::local_access::status(&store))
@@ -130,10 +127,18 @@ pub(crate) fn available_tools(
             }
         }
     }
+}
+
+/// Built-in git and process capabilities use existing per-run Host checks.
+fn append_host_commands(tools: &mut Vec<ToolDefinition>) {
     for descriptor in BUILTIN_COMMANDS {
         tools.push(descriptor.definition());
     }
     tools.push(generic_process_definition());
+}
+
+/// GitHub discovery is conditional on global connection and per-conversation policy.
+fn append_github_capabilities(app: &AppHandle, policies: &impl ToolPolicyAuthority, tools: &mut Vec<ToolDefinition>) {
     if crate::github_config::status(app).is_ok_and(|status| status.enabled) {
         for descriptor in GITHUB_CAPABILITIES {
             if policies.policy(descriptor.capability_id).is_ok_and(|setting| {
@@ -144,8 +149,20 @@ pub(crate) fn available_tools(
             }
         }
     }
+}
+
+pub(crate) fn available_tools(
+    app: &AppHandle,
+    chat: &wex_desktop_service::PreparedChat,
+    policies: &impl ToolPolicyAuthority,
+) -> Vec<ToolDefinition> {
+    let mut tools = Vec::new();
+    append_local_capabilities(app, chat, policies, &mut tools);
+    append_host_commands(&mut tools);
+    append_github_capabilities(app, policies, &mut tools);
     tools
 }
+
 
 #[cfg(test)]
 mod tests {
