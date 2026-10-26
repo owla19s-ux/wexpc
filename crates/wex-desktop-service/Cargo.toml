@@ -17,6 +17,7 @@ fs2 = "0.4"
 wex-core = { path = "../wex-core" }
 wex-local-resources = { path = "../wex-local-resources" }
 wex-api = { path = "../wex-api" }
+wex-workspace-store = { path = "../wex-workspace-store" }
 
 [dev-dependencies]
 tempfile = "3"

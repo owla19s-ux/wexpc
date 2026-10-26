@@ -242,6 +242,10 @@ pub(super) fn random_id() -> Result<String, ResourceError> {
 }
 
 pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadError> {
+    read_leaf_snapshot(root, leaf).map(|s| s.bytes)
+}
+
+pub(super) fn read_leaf_snapshot(root: &File, leaf: &str) -> Result<FileSnapshot, FileReadError> {
     if leaf.is_empty()
         || leaf == "."
         || leaf == ".."
@@ -323,7 +327,73 @@ pub(super) fn read_leaf(root: &File, leaf: &str) -> Result<Vec<u8>, FileReadErro
     if stamp(&before) != stamp(&after) || bytes.len() as u64 != leaf_size(&after) {
         return Err(FileReadError::Changed);
     }
-    Ok(bytes)
+    Ok(FileSnapshot {
+        bytes,
+        executable: false,
+    })
+}
+
+pub(super) fn open_child_directory(root: &File, leaf: &str) -> Result<File, FileReadError> {
+    if !valid_leaf(leaf) {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let name: Vec<u16> = OsStr::new(leaf).encode_wide().collect();
+    if name.len() > 255 || name.contains(&0) {
+        return Err(FileReadError::Resource(ResourceError::InvalidPath));
+    }
+    let object_name = UnicodeString {
+        length: (name.len() * 2) as u16,
+        maximum_length: (name.len() * 2) as u16,
+        buffer: name.as_ptr(),
+    };
+    let mut attributes = ObjectAttributes {
+        length: std::mem::size_of::<ObjectAttributes>() as u32,
+        root_directory: root.as_raw_handle() as isize,
+        object_name: &object_name,
+        attributes: OBJ_CASE_INSENSITIVE,
+        security_descriptor: std::ptr::null(),
+        security_quality_of_service: std::ptr::null(),
+    };
+    let mut iosb = IoStatusBlock {
+        status: 0,
+        information: 0,
+    };
+    let mut handle = INVALID_HANDLE_VALUE;
+    const FILE_DIRECTORY_FILE: u32 = 1;
+    // SAFETY: all structures and UTF-16 name remain alive for this synchronous
+    // call. Resolve only one component relative to the trusted parent handle.
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE,
+            &mut attributes,
+            &mut iosb,
+            std::ptr::null(),
+            0,
+            FILE_SHARE_ALL,
+            FILE_OPEN,
+            FILE_DIRECTORY_FILE
+                | FILE_SYNCHRONOUS_IO_NONALERT
+                | FILE_OPEN_REPARSE_POINT
+                | FILE_OPEN_FOR_BACKUP_INTENT,
+            std::ptr::null(),
+            0,
+        )
+    };
+    if status < 0 || handle == INVALID_HANDLE_VALUE || handle == 0 {
+        return Err(FileReadError::Resource(ResourceError::Unavailable));
+    }
+    // SAFETY: successful NtCreateFile returned a uniquely owned handle.
+    let child = unsafe { File::from_raw_handle(handle as RawHandle) };
+    let info = information(&child).map_err(FileReadError::Resource)?;
+    let parent = information(root).map_err(FileReadError::Resource)?;
+    if info.attributes & FILE_ATTRIBUTE_DIRECTORY == 0
+        || info.attributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+        || info.volume_serial != parent.volume_serial
+    {
+        return Err(FileReadError::Resource(ResourceError::OutsideDirectory));
+    }
+    Ok(child)
 }
 
 /// Exclusive create beneath the trusted directory handle. Never overwrite.

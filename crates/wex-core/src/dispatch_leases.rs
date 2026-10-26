@@ -48,10 +48,15 @@ impl ResourceLeases {
         if unique.iter().any(|scope| state.held.contains_key(scope)) {
             return Err(LeaseError::Busy);
         }
-        state.next_generation = state.next_generation.checked_add(1).ok_or(LeaseError::Busy)?;
+        state.next_generation = state
+            .next_generation
+            .checked_add(1)
+            .ok_or(LeaseError::Busy)?;
         let generation = state.next_generation;
         for scope in &unique {
-            state.held.insert(scope.clone(), (owner.to_owned(), generation));
+            state
+                .held
+                .insert(scope.clone(), (owner.to_owned(), generation));
         }
         Ok(ResourceLease {
             state: Arc::clone(&self.state),
@@ -62,7 +67,12 @@ impl ResourceLeases {
     }
 
     pub fn is_busy(&self, scope: &str) -> Result<bool, LeaseError> {
-        Ok(self.state.lock().map_err(|_| LeaseError::Poisoned)?.held.contains_key(scope))
+        Ok(self
+            .state
+            .lock()
+            .map_err(|_| LeaseError::Poisoned)?
+            .held
+            .contains_key(scope))
     }
 }
 
@@ -89,9 +99,17 @@ mod tests {
     #[test]
     fn overlapping_resources_are_exclusive_even_for_same_owner() {
         let registry = ResourceLeases::default();
-        let first = registry.acquire("agent_a", &scopes(&["file_b", "file_a"])).unwrap();
-        assert!(matches!(registry.acquire("agent_b", &scopes(&["file_a"])), Err(LeaseError::Busy)));
-        assert!(matches!(registry.acquire("agent_a", &scopes(&["file_b"])), Err(LeaseError::Busy)));
+        let first = registry
+            .acquire("agent_a", &scopes(&["file_b", "file_a"]))
+            .unwrap();
+        assert!(matches!(
+            registry.acquire("agent_b", &scopes(&["file_a"])),
+            Err(LeaseError::Busy)
+        ));
+        assert!(matches!(
+            registry.acquire("agent_a", &scopes(&["file_b"])),
+            Err(LeaseError::Busy)
+        ));
         assert!(!registry.is_busy("file_c").unwrap());
         drop(first);
         assert!(registry.acquire("agent_b", &scopes(&["file_a"])).is_ok());
@@ -101,7 +119,10 @@ mod tests {
     fn failed_multi_scope_acquisition_does_not_reserve_partial_resources() {
         let registry = ResourceLeases::default();
         let _first = registry.acquire("agent_a", &scopes(&["b"])).unwrap();
-        assert!(matches!(registry.acquire("agent_b", &scopes(&["a", "b"])), Err(LeaseError::Busy)));
+        assert!(matches!(
+            registry.acquire("agent_b", &scopes(&["a", "b"])),
+            Err(LeaseError::Busy)
+        ));
         assert!(!registry.is_busy("a").unwrap());
     }
 
@@ -121,13 +142,21 @@ mod tests {
     #[test]
     fn empty_and_control_character_scopes_are_rejected() {
         let registry = ResourceLeases::default();
-        assert!(matches!(registry.acquire("agent", &[]), Err(LeaseError::InvalidScope)));
-        assert!(matches!(registry.acquire("agent", &scopes(&["bad\npath"])), Err(LeaseError::InvalidScope)));
+        assert!(matches!(
+            registry.acquire("agent", &[]),
+            Err(LeaseError::InvalidScope)
+        ));
+        assert!(matches!(
+            registry.acquire("agent", &scopes(&["bad\npath"])),
+            Err(LeaseError::InvalidScope)
+        ));
     }
     #[test]
     fn duplicate_scope_names_do_not_self_conflict() {
         let registry = ResourceLeases::default();
-        let lease = registry.acquire("agent", &scopes(&["a", "a", "b"])).unwrap();
+        let lease = registry
+            .acquire("agent", &scopes(&["a", "a", "b"]))
+            .unwrap();
         assert!(registry.is_busy("a").unwrap());
         assert!(registry.is_busy("b").unwrap());
         drop(lease);
@@ -139,9 +168,11 @@ mod tests {
         let registry = ResourceLeases::default();
         let other = registry.clone();
         let lease = registry.acquire("agent_a", &scopes(&["shared"])).unwrap();
-        assert!(matches!(other.acquire("agent_b", &scopes(&["shared"])), Err(LeaseError::Busy)));
+        assert!(matches!(
+            other.acquire("agent_b", &scopes(&["shared"])),
+            Err(LeaseError::Busy)
+        ));
         drop(lease);
         assert!(other.acquire("agent_b", &scopes(&["shared"])).is_ok());
     }
-
 }

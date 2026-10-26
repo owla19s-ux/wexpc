@@ -1265,6 +1265,7 @@ dependencies = [
  "wex-api",
  "wex-core",
  "wex-local-resources",
+ "wex-workspace-store",
 ]
 
 [[package]]
