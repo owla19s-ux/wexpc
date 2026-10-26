@@ -213,3 +213,41 @@
 原先 `TaskBoard`、`DispatchTicket`、`TaskOperationIndex` 和 `OperationLedger` 的职责边界具有可复用价值。主要工作是核实真实桌面调用与持久化交汇点，再少量补足跨边界关联，**不新建第二套任务状态机或全量执行平台**。
 
 本批为静态源码/文档审查；无代码、正式产品基线、存储迁移或 CI 修改。
+
+## 10. 第四批：桌面 Task 与 Core 派工的真实接线核对（2026-10-26）
+
+### 10.1 源码证据与限制
+
+本批读取 main 的下列文件：`crates/wex-core/src/task.rs`、`dispatch.rs`、`dispatch_leases.rs`、`task_operation.rs`、`crates/wex-desktop-service/src/application/mod.rs`、`domain/mod.rs`、`application/task_records.rs`、`apps/desktop/src-tauri/src/main.rs`。目前未通过源码全文索引确定所有跨 crate 调用点，以下只对已读取文件定性。
+
+| 边界 | 当前可证明的事实 | 审查判断 |
+| --- | --- | --- |
+| Core 任务领域 | `TaskBoard` 有 Queued/Running/Blocked/Completed/Failed、单 Agent 分派版本和可信证据引用 | 可复用的纯规则；不代表桌面业务已接入 |
+| Core Dispatcher | `admit`、`reserve`、`validate_ticket` 使用分派票据和进程内 lease，明确不进行最终执行授权 | 不能将这些纯函数直接宣称为持久队列或外部隔离 |
+| Core Operation 投影 | `TaskOperationIndex` 接受任务/操作关联，阻止旧分派回执修改当前任务，结果成功只增加证据 | 投影不承担审批、工具执行或事务持久化 |
+| Desktop 任务资料 | Desktop Service `Task` 含 title/goal/scope/acceptance/agent_ids 等字段；桌面 `create_task` 初始为 Draft，`update_task` 修改草案业务内容 | 业务任务资料与 Core 任务执行视图目前形态不同 |
+| 桌面人工记录 | `TaskRecord` 明示“用户手工记录，不是可信执行/验收回执” | 不得把人工进度当成 Operation 证据 |
+| Tauri 命令入口 | `main.rs` 注册了 `append_task_record` 等人工任务操作 | 不能据此推出真实自动派工已接通 |
+
+### 10.2 发现的关键缝隙：两种 Task 形态的权威关系未证明
+
+Core `Task` 是较小的执行状态和分配事实；Desktop Service `Task` 是包含多成员、目标、范围、验收的工作资料。二者**可以通过明确映射共同存在**，不应看到两个同名 Task 就立即合并，也不能保持两份可独立写入的“最终任务真相”。
+
+**本批提出但不实施的最小做法**：维持 Desktop 面向用户的完整任务资料与 Core 的纯状态规则，先定义稳定 task identity、版本/分配代次、单一正式状态写入路径以及从领域资料到执行 ticket 的只读投影。具体单 Agent 执行票据如何对应多成员协作、何处保存进度，仍需接口核对；不在本稿选定数据库归属或修改状态枚举。
+
+### 10.3 不做“全量执行标准化”的交接方案
+
+- **WEX 自己执行**：Task/Dispatcher 可关联 operation/attempt 与本地可信回执；最终权限和文件/进程/Git 执行仍交专门 Host/Adapter。
+- **外部 Agent 委托**：WEX 只需记录可观察到的委托、外部 session/job 定位、批次、产物地址、接收情况及独立核验；不强迫外部 Agent 实现 Core 的每个 `OperationState`、过程内部步骤或 Task 结构。
+- **只做连接使用或普通聊天**：不要求存在 Task 或 Dispatcher ticket。不要用伪造 Task 填满通用调用字段。
+- **多 Agent 协作**：允许 Task 的业务参与成员多于单次执行票据的 Agent；先核对现有分派/会话关联，再决定是否需要 Assignment 或 WorkItem 中间概念。不得将整个系统约束成永久“一个任务只允许一个 Agent”。
+
+### 10.4 暂缓修改、需要重点裁决的三项语义
+
+1. **正式任务事实由谁持有**：建议保留一个权威任务状态写入路径，Core 纯规则可用于校验，不另立并行权威。具体由 Desktop Service 还是其他应用服务持有，须先完成调用者与持久化审计。
+2. **操作失败的影响**：现有 `TaskOperationIndex.reconcile` 可把 Running Task 标成 Failed；对持续开发，编译/测试失败常是下一轮修复的输入。应先区分“单操作失败”“任务暂时阻塞”“任务最终失败”，不能未经确认改写既有状态转换。
+3. **多成员 Task 与单 Agent 派工票据**：一张任务卡可以分配多个成员，但一次实际派发应具明确执行 Agent 和版本。需要核对是否已存在分工实体，避免把多个成员简化成单一 `assigned_agent`。
+
+**状态**：发现真实结构差异，尚不能断言发生了双写状态冲突。仅记录审查问题，待用户确认实施取舍后再动正式契约、核心代码与持久化。未修改安全边界，不新增全量执行平台要求。
+
+本批无测试/构建/Actions 运行，源码与正式基线均未改。
