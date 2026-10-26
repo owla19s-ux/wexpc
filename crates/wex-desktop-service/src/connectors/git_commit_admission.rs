@@ -327,7 +327,28 @@ pub fn read_and_settle_git_commit(
     )
 }
 
-fn verify_durable_admission(
+/// Prefer the attempt-bound independent plan over an arbitrary expected-tree
+/// string. The Host still owns actual writing and current authority checks.
+pub fn read_and_settle_planned_git_commit(
+    operations: &OperationStore,
+    admission: &GitCommitAdmission,
+    source: &GitCommitSnapshotSource<'_>,
+    trusted_git_program: &std::path::Path,
+    plan: &super::git_tree_plan::GitCommitTreePlan,
+    oid: &str,
+) -> Result<GitCommitReceipt> {
+    plan.verify_binding(admission)?;
+    read_and_settle_git_commit(
+        operations,
+        admission,
+        source,
+        trusted_git_program,
+        plan.tree(),
+        oid,
+    )
+}
+
+pub(super) fn verify_durable_admission(
     operations: &OperationStore,
     committed: &CommittedDispatch,
 ) -> Result<wex_workspace_store::operations::OperationStoreView> {

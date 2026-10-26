@@ -107,6 +107,34 @@ fn observe_once(
     source: &GitCommitSnapshotSource<'_>,
     paths: &[String],
 ) -> Result<RepositoryVersion> {
+    observe_once_with_files(source, paths).map(|(version, _)| version)
+}
+
+// The version digest and returned bytes must be derived from the SAME reads;
+// sandwich observations alone could approve transient, different staged bytes.
+pub(super) fn read_prepared_files(
+    source: &GitCommitSnapshotSource<'_>,
+    prepared: &PreparedCommit,
+) -> Result<Vec<wex_local_resources::RelativeFileSnapshot>> {
+    verify_current_git_write_access(source, prepared)?;
+    let (version, files) = observe_once_with_files(source, prepared.paths())?;
+    prepared
+        .recheck(&version)
+        .map_err(|_| ServiceError::new("VERSION_CONFLICT", "准备树时批准的文件版本已变化"))?;
+    let current = observe_prepared_git_commit(source, prepared)?;
+    prepared
+        .recheck(&current)
+        .map_err(|_| ServiceError::new("VERSION_CONFLICT", "准备树期间仓库版本发生变化"))?;
+    Ok(files)
+}
+
+fn observe_once_with_files(
+    source: &GitCommitSnapshotSource<'_>,
+    paths: &[String],
+) -> Result<(
+    RepositoryVersion,
+    Vec<wex_local_resources::RelativeFileSnapshot>,
+)> {
     use super::intent_binding::{digest_arguments, file_content_sha256};
     let read = |path: &str| {
         source
@@ -193,6 +221,7 @@ fn observe_once(
         &[std::env::consts::OS.as_bytes(), &identity_bytes],
     );
     let mut encoded = Vec::new();
+    let mut files = Vec::new();
     for path in paths {
         let file = read(path)?;
         if file.directory_stamps.first() != head.directory_stamps.first() {
@@ -211,19 +240,23 @@ fn observe_once(
         encoded.push(vec![u8::from(file.executable)]);
         encoded.push(parents);
         encoded.push(file_content_sha256(&file.bytes).into_bytes());
+        files.push(file);
     }
     let parts: Vec<_> = encoded.iter().map(Vec::as_slice).collect();
-    Ok(RepositoryVersion {
-        identity,
-        head: Some(oid.into()),
-        branch: branch.into(),
-        index_sha256: file_content_sha256(&index.bytes),
-        selected_sha256: digest_arguments(
-            "git_selected_files_version",
-            source.directory_id,
-            &parts,
-        ),
-    })
+    Ok((
+        RepositoryVersion {
+            identity,
+            head: Some(oid.into()),
+            branch: branch.into(),
+            index_sha256: file_content_sha256(&index.bytes),
+            selected_sha256: digest_arguments(
+                "git_selected_files_version",
+                source.directory_id,
+                &parts,
+            ),
+        },
+        files,
+    ))
 }
 
 #[cfg(test)]

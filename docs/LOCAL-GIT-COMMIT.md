@@ -113,3 +113,17 @@ Windows 原生私有权限、替换/同步语义和持久后端仍是阻塞；�
 新增 `read_and_settle_git_commit`，把真实读取器接到既有准入和持久成功终态：确认当前持久尝试，核对授权源物理 resource，从 registry 导出真实根，采集当前仓库/文件版本并要求 HEAD 指向候选 OID，读取认证对象和全量变更，再次采集并要求前后观察一致，最后构造回读交给既有树/消息/范围/身份校验与 revision CAS 结算。Host 只需提供程序配置、候选 OID 和**写入前独立取得的 expected_tree**，不再手工拼装消息、parents、变更列表与当前仓库身份。前后观察不是原子快照或 OS 锁，继续遵守共享 lease/实时授权和外部修改者限制。
 
 本批测试包含二进制 parser 的 RED→GREEN、真实 SHA-1/SHA-256 tree、重命名两端、仅执行位变化、替换引用、损坏 loose tree、两侧共享遍历预算。另有 Unix 真实仓库夹具：测试代码先用独立 index 取得 expected_tree，再创建 commit 对象、条件更新分支；验证 HEAD 未指向候选时拒绝、预期 tree 不符时拒绝且保留 InFlight、正确结果经真实对象/tree/registry 回读后持久成功，真实工作索引未改动。**写入命令仅在测试夹具中，不是产品 Git writer**；候选产生、独立索引执行约束、完整证据载荷、Windows 后端、正式 Host/模型工具与对话续答仍待接线。实际全量命令和数量登记 PR #63，不触发 Actions。
+
+## 后续增量：批准字节的独立树规划（2026-10-26）
+
+新增 `git_tree_plan.rs`，将测试中外部提供的 expected_tree 推进为可复用的生产准备步骤。`prepare_admitted_git_tree` 要求现有持久准入和实时 Host 授权/仓库占用，认证父提交全部 tree，从父清单仅覆盖批准文件的原始字节和 Unix owner execute 模式，按 Git 目录名带 `/` 的排序规则编码 blob/tree 并计算 SHA-1/SHA-256。构造完全在内存中进行，**不写对象库、真实 index 或 ref**，不把未批准的暂存变化并入目标树。无变化返回 GIT_NOTHING_TO_COMMIT，不伪造一次成功提交。
+
+采集器新增内部 `read_prepared_files`：由**同一次原生读取**同时返回文件 bytes/mode/父目录 stamp 和版本摘要，要求该摘要与 PreparedCommit 一致，再做稳定版本复核。避免只在前后采样，却将中间未批准字节送入 blob。规划前后复核当前 Write 许可、真实仓库版本和持久 generation/intent/attempt；检查失败不返回计划，不释放持久 InFlight。由于准入已先落盘，无变化或规划失败也不会自动改成“未执行成功”或清除隔离；后续 Host 必须按确证的未派发事实处理，不得盲目重派。
+
+父清单先重新编码并要求根 OID 与认证父树完全一致，拒绝清单不能表达的空子目录、非规范结构等，不能默默丢弃。继承既有 4096 文件、1024 字节路径、32 层目录、每 tree 64 KiB 上限，并限制父/目标两侧合计 64 次 tree 访问及计划对象总量 16 MiB；文件/目录前缀冲突和大小写别名拒绝。此规划不读取或证明未变化 blob 的可用性，不是 fsck。
+
+`GitCommitTreePlan` 私有字段绑定原操作/attempt/generation/intent digest/父提交，并提供只读树 OID 和待持久化对象数据。`read_and_settle_planned_git_commit` 先核对计划属于当前准入，再用计划里的独立预期树完成既有真实回读/持久结算，减少任意字符串当作 expected_tree 的调用机会。计划是数据，不是写入许可；未来对象写入、提交对象创建、条件更新 ref 和完整证据保存仍需受同一派发协议约束。
+
+**执行语义边界**：这批明确为 Unix 原始文件规划切片，不运行 Git clean/smudge filters、attributes、编码或行尾转换，也不实现 core.filemode 等完整 Git 配置语义；不能把它直接当作普通 git add 的替代品或已批准的最终 writer 策略。Windows 的模式和私有持久后端仍未支持，本入口非 Unix 拒绝。unborn、删除、gitfile/linked worktree、symlink/gitlink 等旧缺口仍保留，尚不对模型开放。
+
+新增测试包括纯树排序/模式、前缀/别名/非法 OID、深度/访问次数/对象大小拒绝，以及真实 SHA-1/SHA-256 准入：已存在未批准暂存变化且选中文件配置必定失败的 required clean filter 时，原生规划不运行该过滤器，原始二进制/CRLF 字节与 Git hash-object --no-filters 结果一致；规划后 index、HEAD、对象库逐字不变。随后只有测试夹具持久化计划对象、创建提交和条件更新 ref，再通过计划绑定的真实读取器结算成功；提交不带入未批准暂存内容，真实 index 仍原样。无变化、批准后文件变化和降为只读均不产生可用计划。初始夹具曾在配置失败过滤器后执行 git add 导致索引刷新触发 filter，已调整夹具顺序，未改变生产实现以绕过失败。具体全量结果登记 PR #63，生产 writer/Windows/Host/模型及对话续答仍待完成，不触发 Actions。

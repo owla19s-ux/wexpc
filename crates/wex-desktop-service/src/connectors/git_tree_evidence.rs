@@ -100,7 +100,32 @@ pub fn read_approved_git_commit_changes(
     })
 }
 
-type Files = BTreeMap<String, (String, String)>;
+// Authenticated parent manifest for independent in-memory tree planning.
+pub(super) fn read_approved_parent_files(
+    dispatch: &Dispatch,
+    resource_id: &str,
+    root: &Path,
+    prepared: &PreparedCommit,
+    program: &Path,
+) -> Result<(String, Files, usize)> {
+    verify_git_commit_approval(dispatch, resource_id, root, prepared)?;
+    let parent = prepared.expected_head().ok_or_else(unavailable)?;
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let object = parse_commit_object(&read_authenticated_object(
+        root, program, parent, "commit", deadline,
+    )?)
+    .map_err(|_| unavailable())?;
+    let mut reader = TreeReader {
+        root,
+        program,
+        deadline,
+        visits: 0,
+    };
+    let files = reader.snapshot(&object.tree)?;
+    Ok((object.tree, files, reader.visits))
+}
+
+pub(super) type Files = BTreeMap<String, (String, String)>;
 fn changed_paths(before: &Files, after: &Files) -> Vec<String> {
     before
         .keys()

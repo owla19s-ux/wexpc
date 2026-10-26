@@ -12,7 +12,8 @@ pub use application::process_control::{
 pub use application::DesktopService;
 pub use connectors::git_commit_admission::{
     begin_git_commit, git_commit_resource_id, read_and_settle_git_commit,
-    settle_verified_git_commit, GitCommitAdmission, GitCommitBegin, GitCommitReceipt,
+    read_and_settle_planned_git_commit, settle_verified_git_commit, GitCommitAdmission,
+    GitCommitBegin, GitCommitReceipt,
 };
 pub use connectors::git_commit_binding::{git_commit_intent_digest, verify_git_commit_dispatch};
 pub use connectors::git_commit_evidence::{
@@ -27,6 +28,9 @@ pub use connectors::git_commit_snapshot::{
 };
 pub use connectors::git_dispatch::{approved_git_diff, approved_git_status};
 pub use connectors::git_tree_evidence::{read_approved_git_commit_changes, GitCommitChanges};
+pub use connectors::git_tree_plan::{
+    prepare_admitted_git_tree, GitCommitTreePlan, PlannedGitObject,
+};
 pub use connectors::github_dispatch::{
     create_approved_github_file, read_approved_github_file, update_approved_github_file,
 };
