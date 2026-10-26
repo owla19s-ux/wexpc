@@ -7,7 +7,7 @@ import { roleNames } from './types';
 type Preview = {taskId:string;agentId:string;revision:number;publicationEpoch:number;assignmentEpoch:number};
 
 export function TaskDispatchControls({task,agents,revision,attempts,run}:{
-  task:Task;agents:Agent[];revision:number;attempts:DispatchAttempt[];run:Run;
+  task:Task;agents:Agent[];revision:number;attempts?:DispatchAttempt[];run:Run;
 }) {
   const [agentId,setAgentId]=useState('');
   const [preview,setPreview]=useState<Preview|null>(null);
@@ -15,7 +15,8 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
   const generation=useRef(0);
   const epoch=task.publication_epoch;
   const selected=Boolean(agentId&&task.agent_ids.includes(agentId));
-  const taskAttempts=attempts.filter(a=>a.task_id===task.id);
+  const evidenceLoaded=Array.isArray(attempts) && epoch !== undefined && epoch > 0;
+  const taskAttempts=(attempts??[]).filter(a=>a.project_id===task.project_id&&a.task_id===task.id);
   const alreadyQueued=taskAttempts.some(a=>a.publication_epoch===epoch);
   const statusText:Record<DispatchAttempt['status'],string>={
     pending:'待领取（尚未执行）',
@@ -48,7 +49,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     });
   };
   const queue=()=>{
-    if(!selected||alreadyQueued||queueing)return;
+    if(!selected||!evidenceLoaded||alreadyQueued||queueing)return;
     generation.current++;
     setPreview(null);
     setQueueing(true);
@@ -78,7 +79,8 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     </label>
     <button type="button" disabled={!selected||queueing} onClick={previewAdmission}>核对调度准入（不执行）</button>
     {currentPreview&&<p role="status">仅通过准入预检：{currentPreview.agentId}（分配版本 {currentPreview.assignmentEpoch}，读取修订 {currentPreview.revision}），未占用资源或启动工具。</p>}
-    <button type="button" disabled={!selected||alreadyQueued||queueing} onClick={queue}>登记待派工尝试（不启动工具）</button>
+    <button type="button" disabled={!selected||!evidenceLoaded||alreadyQueued||queueing} onClick={queue}>登记待派工尝试（不启动工具）</button>
+    {!evidenceLoaded&&<p className="muted">派工记录或发布版本尚未核实，暂不可登记；请重新读取任务状态。</p>}
     {alreadyQueued&&<p className="muted">当前发布版本已登记派工尝试，不能重复登记；如结果未知，必须先核查实际执行事实。</p>}
     {taskAttempts.map(a=>{
       const assignee=agents.find(agent=>agent.id===a.agent_id);
