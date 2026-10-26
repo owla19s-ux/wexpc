@@ -146,3 +146,37 @@ pub(crate) fn available_tools(
     }
     tools
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn declared_capabilities_have_distinct_names_and_valid_schemas() {
+        let mut names = HashSet::new();
+        for descriptor in BUILTIN_COMMANDS.iter().chain(GITHUB_CAPABILITIES.iter()) {
+            assert!(!descriptor.capability_id.is_empty());
+            assert!(names.insert(descriptor.name), "duplicate tool: {}", descriptor.name);
+            let schema: serde_json::Value =
+                serde_json::from_str(descriptor.parameters_json).expect("valid schema JSON");
+            assert_eq!(schema["type"], "object");
+            let definition = descriptor.definition();
+            assert_eq!(definition.name, descriptor.name);
+            assert_eq!(definition.parameters_json, descriptor.parameters_json);
+        }
+        let process = generic_process_definition();
+        assert!(names.insert(process.name.as_str()));
+        let schema: serde_json::Value =
+            serde_json::from_str(&process.parameters_json).expect("valid process schema");
+        assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn github_capabilities_have_explicit_core_ids() {
+        assert_eq!(
+            GITHUB_CAPABILITIES.iter().map(|d| d.capability_id).collect::<Vec<_>>(),
+            vec!["github_file_read", "github_file_create", "github_file_write"]
+        );
+    }
+}
