@@ -27,10 +27,30 @@ impl CapabilityDescriptor {
 
 const NO_ARGUMENTS: &str = r#"{"type":"object","properties":{},"additionalProperties":false}"#;
 const BUILTIN_COMMANDS: &[CapabilityDescriptor] = &[
-    CapabilityDescriptor { name:"git_status",capability_id:"git_status",description:"Read Git status of a repository selected by the user.",parameters_json:NO_ARGUMENTS },
-    CapabilityDescriptor { name:"git_diff",capability_id:"git_diff",description:"Read the current unstaged Git diff without executing external diff helpers.",parameters_json:NO_ARGUMENTS },
-    CapabilityDescriptor { name:"cargo_test",capability_id:"terminal_cargo_test",description:"Run cargo test --workspace --locked only after explicit per-run approval.",parameters_json:NO_ARGUMENTS },
-    CapabilityDescriptor { name:"cargo_fmt_check",capability_id:"terminal_cargo_fmt_check",description:"Run cargo fmt --all -- --check after explicit per-run approval.",parameters_json:NO_ARGUMENTS },
+    CapabilityDescriptor {
+        name: "git_status",
+        capability_id: "git_status",
+        description: "Read Git status of a repository selected by the user.",
+        parameters_json: NO_ARGUMENTS,
+    },
+    CapabilityDescriptor {
+        name: "git_diff",
+        capability_id: "git_diff",
+        description: "Read the current unstaged Git diff without executing external diff helpers.",
+        parameters_json: NO_ARGUMENTS,
+    },
+    CapabilityDescriptor {
+        name: "cargo_test",
+        capability_id: "terminal_cargo_test",
+        description: "Run cargo test --workspace --locked only after explicit per-run approval.",
+        parameters_json: NO_ARGUMENTS,
+    },
+    CapabilityDescriptor {
+        name: "cargo_fmt_check",
+        capability_id: "terminal_cargo_fmt_check",
+        description: "Run cargo fmt --all -- --check after explicit per-run approval.",
+        parameters_json: NO_ARGUMENTS,
+    },
 ];
 const GITHUB_CAPABILITIES: &[CapabilityDescriptor] = &[
     CapabilityDescriptor {
@@ -61,7 +81,12 @@ fn generic_process_definition() -> ToolDefinition {
 }
 
 /// Local file capabilities are scoped to this conversation's configured directories.
-fn append_local_capabilities(app: &AppHandle, chat: &wex_desktop_service::PreparedChat, policies: &impl ToolPolicyAuthority, tools: &mut Vec<ToolDefinition>) {
+fn append_local_capabilities(
+    app: &AppHandle,
+    chat: &wex_desktop_service::PreparedChat,
+    policies: &impl ToolPolicyAuthority,
+    tools: &mut Vec<ToolDefinition>,
+) {
     let tool = ToolDefinition {
         name: "read_file".into(),
         description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
@@ -188,7 +213,6 @@ pub(crate) fn available_tools(
     tools
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,7 +223,11 @@ mod tests {
         let mut names = HashSet::new();
         for descriptor in BUILTIN_COMMANDS.iter().chain(GITHUB_CAPABILITIES.iter()) {
             assert!(!descriptor.capability_id.is_empty());
-            assert!(names.insert(descriptor.name), "duplicate tool: {}", descriptor.name);
+            assert!(
+                names.insert(descriptor.name),
+                "duplicate tool: {}",
+                descriptor.name
+            );
             let schema: serde_json::Value =
                 serde_json::from_str(descriptor.parameters_json).expect("valid schema JSON");
             assert_eq!(schema["type"], "object");
@@ -221,7 +249,13 @@ mod tests {
         let names: Vec<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
         assert_eq!(
             names,
-            vec!["git_status", "git_diff", "cargo_test", "cargo_fmt_check", "run_command"]
+            vec![
+                "git_status",
+                "git_diff",
+                "cargo_test",
+                "cargo_fmt_check",
+                "run_command"
+            ]
         );
     }
 
@@ -262,7 +296,10 @@ mod tests {
             ]
         );
         assert_eq!(
-            tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(),
+            tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>(),
             vec!["github_read_file", "github_write_file"]
         );
         for tool in &tools {
@@ -283,8 +320,15 @@ mod tests {
     #[test]
     fn github_capabilities_have_explicit_core_ids() {
         assert_eq!(
-            GITHUB_CAPABILITIES.iter().map(|d| d.capability_id).collect::<Vec<_>>(),
-            vec!["github_file_read", "github_file_create", "github_file_write"]
+            GITHUB_CAPABILITIES
+                .iter()
+                .map(|d| d.capability_id)
+                .collect::<Vec<_>>(),
+            vec![
+                "github_file_read",
+                "github_file_create",
+                "github_file_write"
+            ]
         );
     }
 }
