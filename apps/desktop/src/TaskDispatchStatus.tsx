@@ -1,6 +1,7 @@
 import type { DispatchAttempt, Task } from './types';
 
-export function taskDispatchLabel(task: Task, attempts?: DispatchAttempt[]): string {
+export function taskDispatchLabel(task: Task, attempts?: DispatchAttempt[], fresh = true): string {
+  if (!fresh) return '状态仅为上次读取结果（当前未核实）';
   if (task.status === 'draft') return '草案';
   // Old snapshots and interrupted reads must not be presented as "not dispatched".
   if (task.publication_epoch == null) return '已发布（发布版本未知，需核查）';
@@ -22,9 +23,10 @@ export function taskDispatchLabel(task: Task, attempts?: DispatchAttempt[]): str
   return '已发布（尚未登记派工）';
 }
 
-export function TaskDispatchStatus({ task, attempts }: {
+export function TaskDispatchStatus({ task, attempts, fresh = true }: {
   task: Task;
   attempts?: DispatchAttempt[];
+  fresh?: boolean;
 }) {
-  return <>{taskDispatchLabel(task, attempts)}</>;
+  return <>{taskDispatchLabel(task, attempts, fresh)}</>;
 }
