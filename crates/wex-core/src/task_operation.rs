@@ -55,6 +55,18 @@ impl TaskOperationIndex {
         self.links.values().cloned().collect()
     }
 
+    /// Look up a task's linked operation using trusted, validated link facts.
+    /// This index contains references only, not execution or approval rights.
+    pub fn task_for_operation(&self, operation_id: &str) -> Option<&TaskOperationLink> {
+        self.links.get(operation_id)
+    }
+
+    /// A stable ordering for the task detail/evidence view. Callers still
+    /// resolve the operation receipt from the authoritative ledger.
+    pub fn operations_for_task(&self, task_id: &str) -> Vec<&TaskOperationLink> {
+        self.links.values().filter(|link| link.task_id == task_id).collect()
+    }
+
     /// A link never grants authority to execute an operation.
     pub fn attach(
         &mut self,
@@ -364,6 +376,20 @@ mod tests {
                 .snapshot(),
             vec![link()]
         );
+    }
+
+    #[test]
+    fn linked_operations_can_be_queried_both_ways_without_granting_execution() {
+        let (tasks, ledger) = setup();
+        let mut index = TaskOperationIndex::default();
+        assert!(index.task_for_operation("op_1").is_none());
+        assert!(index.operations_for_task("task_1").is_empty());
+        index.attach(link(), &tasks, &ledger).unwrap();
+        assert_eq!(index.task_for_operation("op_1"), Some(&link()));
+        assert_eq!(index.operations_for_task("task_1"), vec![&link()]);
+        assert!(index.operations_for_task("another_task").is_empty());
+        let restored = TaskOperationIndex::restore(index.snapshot(), &tasks, &ledger).unwrap();
+        assert_eq!(restored.operations_for_task("task_1"), vec![&link()]);
     }
 
     #[test]
