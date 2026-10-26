@@ -699,3 +699,62 @@ ExternalAdapter:
 **待核对后改**：`TaskOperationIndex.reconcile` 失败映射；Core `Task` 与 Desktop `Task` 投影责任；多 Agent 每次派工标识和数据原子性；真正需要的外部工作隔离。
 
 **本批限制**：本表是架构/测试实施建议，尚未创建代码施工任务、测试运行、Windows 验收或正式基线变更。
+
+## 19. 第十三批：对照正式 0.1.1 施工计划，确定第一批安全实施边界（2026-10-27）
+
+### 19.1 先纠正施工编号的潜在歧义
+
+已核对 main 的 `docs/WEXPC-0.1.1-IMPLEMENTATION-PLAN.md`、`docs/INTERFACE-CONTRACTS.md`、`docs/PC-PRODUCT-AND-TECH-BASELINE.md`。正式施工计划已有 **P1–P6 / W1–W6**：其中 P2/W2 明确规定任务卡版本、任务—Operation—回执—产物—Review/Verify 可追溯关联；P3/W3 是 Dispatcher 真实派工；P4 是多 Agent；P5 是独立审查验证及恢复。
+
+前一节使用的“P0–P3”只是分析性依赖顺序，**不是新增工程批次，更不能覆盖 P1–P6 的编号、目标或验收门槛**。后续任务清单一律引用正式计划的 W/P 编号。本草案不改变 WEXPC **0.1.1** 已批准范围，也不将外部 DSH/Hermes 作为第一版必装。
+
+### 19.2 现有正式基线已覆盖的内容
+
+| 项目 | 正式文件现有约束 | 本审查增加的具体工作 |
+| --- | --- | --- |
+| Task 权威 | 任务正式状态属于 Rust 领域/应用服务；Tauri/React 不维护第二套真相 | 明确 Desktop Task 草稿与 Core TaskBoard 的映射、统一写入和发布版本 |
+| Task ↔ 执行 | W2 链路已列 `project_id → task_id/revision → agent/session → dispatch/attempt → operation → receipt/evidence → file version/commit → review/verify` | 避免隐式伪关联，提供已存在的操作/产物引用及检查来源 |
+| Dispatcher | W3 要求真实派发、资源占用、权限复检、恢复 | 先复用 Core admission/lease，明确其不代表外部进程锁 |
+| 失败修复 | W5 明确原任务有效范围内修复再验证 | 核对并调整 `TaskOperationIndex` 的“单操作失败直接令任务 Failed”映射 |
+| 证据与验证 | 基线已明确执行成功不等于技术 Verify、审查和真机验收 | 加入成果版本与需求版本的对应测试，未实测标 NOT_RUN |
+| 普通对话与外部 Agent | 普通对话无需 Task；外部只要求交接证据，不镜像内部执行 | 通用关联保持可选，不把外部 SDK 标准化成 WEX 内部执行器 |
+
+### 19.3 第一批建议施工切片（归属正式 W2；不替代 W1 工具主线）
+
+**目的**：先让一张已存在的 Task 草稿能发布成可核查的要求版本，保存“成果/检查事实”的可追溯引用；不假装 Dispatcher 已派工，也不把人工报告直接标记为真实工具结果。
+
+- **改动入口候选**：`crates/wex-desktop-service/src/domain/mod.rs`（受控新关联记录/视图）、`application/mod.rs` 或较小子模块（读写/引用校验）、`infrastructure/sqlite.rs`（版本迁移及回滚）、桌面 Tauri 命令、`apps/desktop/src/types.ts`（同步 DTO）；界面仅在数据事实真实存在后显示。
+- **优先复用而不改语义**：现有 Task ID、`TaskRecord.source=User`、`DesktopStore.update` 事务、现有 `ToolReceiptMarker` / `SavedToolResult`、Core `OperationLedger`、任务状态校验和权限检查。
+- **最小变更范围**：新需求快照引用与版本、成果身份及版本证据、核验记录的条件/对象/来源/结果。检查记录可含 review/verify/acceptance kind，但必须严格区分三者信任意义；具体 Rust DTO 和存储字段落地前仍须审查。
+- **不在此切片施工**：新执行引擎、万能适配层、外部 Agent 的逐命令事件同步、自动关闭 Task、直接启用双 Agent 共享写目录、自动授予权限、Windows 未运行的验收成功。
+- **进入条件**：实现者拿到可核对的旧 schema6 载荷及版本升级测试样例，明确新增记录是否需要独立不可变文件或只在 SQLite 保存引用，先演示旧资料的无损读取。
+- **离开条件**：旧任务/人工日志不丢；新旧需求版本隔离；成果改版不继承旧核验；普通对话工具不强制 Task；系统能显示部分检查与未检查，不把施工 AI 自述升级为实际执行成功。
+
+### 19.4 第二批实际接线切片（归属 W2 + W3）
+
+只在第一批的身份与版本契约被测试后，选择一个现有真实本地受控工具：
+
+```text
+已发布任务及有效分工
+  → Core DispatchTicket / Scope lease
+  → Host 复核真实权限与资源状态
+  → 记录已派发/in_flight
+  → 现有受控执行器
+  → 原始 Operation / Attempt / Receipt
+  → WEX Task 工作关联 + 具体 ArtifactRevision（确有成果时）
+  → 独立检查/验收记录（按任务要求，可异步）
+```
+
+操作失败先保留为**操作级事实**；任务是否继续、阻塞或最终未达成由现有可信任务状态边界决定，不由单个执行器自行结案。不能因为画出了这条链就宣称已通过工具/Windows 验证。
+
+### 19.5 与 P1 工具施工的并行关系
+
+正式计划明言 P1/P2/P3 可按依赖并行，工具操作一开始就应为可选 task 关联留接口。因此：W1 的文件/Git/进程能力可以继续独立施工，W2 的任务事实切片不应阻挡普通工具能力；两条线汇合时才要求统一 ID、权限、回执和 UNKNOWN 处理，不应通过第二执行器快速绕线。
+
+### 19.6 本批审查门禁和状态
+
+- **已知事实**：正式计划已覆盖绝大多数 Task/Dispatcher/Verification 原则；本轮主要发现具体结构与接线缺口，避免新建重复施工文档体系。
+- **仍待实施裁剪确认**：新增 DTO 形态、Schema 7 的正式迁移方法、Task 状态单一写入口与 Core 投影细节。审查工作稿不能取代正式施工审批。
+- **保障**：不更改 main、不更新正式基线、不修改既有权限或 TaskStatus、不运行 CI。所有场景仍分别标记源码已存在、本地测试通过、Windows 实机 NOT_RUN。
+
+本批仅提交文档审查，不代表第一批切片已编码。
