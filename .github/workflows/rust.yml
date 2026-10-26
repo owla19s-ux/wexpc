@@ -1,51 +1,98 @@
-# Temporary pause: no automatic Actions through 2026-10-31 (Asia/Shanghai).
-# Restore automatic triggers only after budget review.
-name: rust
+# WEXPC 0.1.1 gated validation. Intentionally manual-only:
+# do not enable push/pull_request/schedule triggers during branch consolidation.
+name: WEXPC 0.1.1 validation
 
 on:
   workflow_dispatch:
+    inputs:
+      suite:
+        description: "Choose one validation suite; all includes Linux, frontend and Windows"
+        type: choice
+        required: true
+        default: linux
+        options:
+          - linux
+          - frontend
+          - windows
+          - flutter-reference
+          - all
 
 permissions:
   contents: read
 
 concurrency:
-  group: rust-${{ github.ref }}
-  cancel-in-progress: true
+  group: wexpc-validation-${{ github.ref }}-${{ inputs.suite }}
+  cancel-in-progress: false
 
 jobs:
   linux:
-    name: linux (fmt, clippy, test)
+    if: ${{ inputs.suite == 'linux' || inputs.suite == 'all' }}
+    name: Rust Linux / fmt + Clippy + workspace tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --workspace --all-targets -- -D warnings
-      - run: cargo test --workspace
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Strict Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Workspace tests
+        run: cargo test --workspace --locked
+
+  frontend:
+    if: ${{ inputs.suite == 'frontend' || inputs.suite == 'all' }}
+    name: Desktop UI / TypeScript + Vitest + build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - name: Install exact dependencies
+        run: npm ci
+      - name: Frontend tests
+        run: npm test
+      - name: TypeScript and production frontend build
+        run: npm run build
 
   windows:
-    name: windows (test)
+    if: ${{ inputs.suite == 'windows' || inputs.suite == 'all' }}
+    name: Windows Rust + backend contracts + Tauri compile check
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test --workspace
-      - name: Platform backend contract tests
-        run: cargo test -p wex-local-resources --test windows_contract -- --nocapture
-      - name: Storage backend contract tests
-        run: cargo test -p wex-access-store --test windows_store -- --nocapture
+      - name: Windows workspace tests
+        run: cargo test --workspace --locked
+      - name: Windows local resource contracts
+        run: cargo test -p wex-local-resources --test windows_contract --locked -- --nocapture
+      - name: Windows storage contracts
+        run: cargo test -p wex-access-store --test windows_store --locked -- --nocapture
+      - name: Tauri backend compilation check
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
 
-  flutter:
-    if: github.event_name == 'workflow_dispatch'
-    name: flutter reference (manual analyze)
+  flutter-reference:
+    if: ${{ inputs.suite == 'flutter-reference' }}
+    name: Archived Flutter reference (optional)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: reference/flutter-android
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -53,12 +100,6 @@ jobs:
           flutter-version: '3.35.7'
           channel: stable
           cache: true
-      - name: Resolve packages
-        working-directory: reference/flutter-android
-        run: flutter pub get
-      - name: Analyze
-        working-directory: reference/flutter-android
-        run: flutter analyze --no-pub
-      - name: Pure Dart widget tests
-        working-directory: reference/flutter-android
-        run: flutter test --no-pub test/extensions test/platform test/shell_test.dart
+      - run: flutter pub get
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub test/extensions test/platform test/shell_test.dart
