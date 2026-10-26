@@ -14,6 +14,7 @@
 - 再用 `fetch_workflow_run_jobs` 获取 Job ID，通过 `fetch_workflow_job_steps`、`fetch_workflow_job_logs` 定位根因。**不应因专用工具没有运行列表就要求用户提供链接**。
 - 现在 WEXPC 公开，用户允许合理运行 Actions；2026-10-24～10-31 旧暂停额度规则不再适用。未来可能重新转私有，必须持续控制运行数量与成本。
 - `.github/workflows/rust.yml` 有手动套件：linux、frontend、windows、all、flutter-reference、format-fix。连接器无 workflow_dispatch 写接口时，可新增 `.github/ci-requests/linux/<unique>.md`，经受限路径 push 触发 Linux fmt、严格 Clippy、workspace test；此方法已由 Actions #57 验证。
+- 前端使用独立 `.github/workflows/frontend-validation.yml`，在 `.github/ci-requests/frontend/<unique>.md` 新增文件触发。不要尝试用单工作流中按 push 文件路径推断输入套件的条件路由，曾出现运行整体 skipped。Windows 当前仍走手动 suite，未有连接器自动发起通道。
 - 每次发请求前检查近期运行/HEAD 与重复请求；修复后再触发受影响套件，最终集成批次做全量回归。禁止无节制自动推送、循环重试、每个历史分支各跑一轮 CI。
 - 验证报告必须包含实际提交 SHA、Run/Job、平台、测试结果；格式修复成功不等于测试通过，Windows CI 不等于 Windows 实机交互验收。
 
