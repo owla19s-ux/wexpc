@@ -109,6 +109,8 @@ pub struct NewTask {
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
     Draft,
+    /// Published for dispatch consideration; not an execution approval.
+    Published,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +123,31 @@ pub struct Task {
     pub acceptance: String,
     pub agent_ids: Vec<String>,
     pub status: TaskStatus,
+    /// Stable task publication generation. Zero marks legacy/unpublished snapshots.
+    #[serde(default)]
+    pub publication_epoch: u64,
+}
+
+/// Durable admission intent only. No operation is launched by storing this fact.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchAttemptStatus {
+    Pending,
+    /// Host started an execution lifecycle; restart must not replay it.
+    InFlight,
+    /// Execution result or persistence is uncertain; needs manual reconciliation.
+    OutcomeUnknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DispatchAttempt {
+    pub id: String,
+    pub task_id: String,
+    pub project_id: String,
+    pub agent_id: String,
+    pub publication_epoch: u64,
+    pub status: DispatchAttemptStatus,
+    pub recorded_revision: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -171,6 +198,8 @@ pub struct DesktopSnapshot {
     #[serde(default)]
     pub agent_duties: Vec<AgentDutyAssignment>,
     pub tasks: Vec<Task>,
+    #[serde(default)]
+    pub dispatch_attempts: Vec<DispatchAttempt>,
     #[serde(default)]
     pub task_records: Vec<TaskRecord>,
     pub conversations: Vec<Conversation>,

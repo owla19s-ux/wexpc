@@ -131,7 +131,7 @@ fn version_four_snapshot_upgrades_and_retains_existing_state() {
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
     assert_eq!(
-        version, 6,
+        version, 8,
         "older binaries must not silently drop assignment data"
     );
 }

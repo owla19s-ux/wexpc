@@ -214,6 +214,50 @@ fn create_task(state: State<'_, Shared>, input: NewTask) -> Result<Task> {
     locked(&state)?.create_task(input)
 }
 
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskAdmissionPreview {
+    task_id: String,
+    project_id: String,
+    agent_id: String,
+    assignment_epoch: u64,
+}
+
+#[tauri::command]
+fn queue_dispatch_attempt(
+    state: State<'_, Shared>,
+    revision: u64,
+    task_id: String,
+    agent_id: String,
+) -> Result<DispatchAttempt> {
+    locked(&state)?.queue_dispatch_attempt(revision, &task_id, &agent_id)
+}
+
+#[tauri::command]
+fn preview_task_dispatch(
+    state: State<'_, Shared>,
+    revision: u64,
+    task_id: String,
+    agent_id: String,
+) -> Result<TaskAdmissionPreview> {
+    let ticket = locked(&state)?.task_dispatch_candidate(revision, &task_id, &agent_id)?;
+    Ok(TaskAdmissionPreview {
+        task_id: ticket.task_id,
+        project_id: ticket.project_id,
+        agent_id: ticket.agent_id,
+        assignment_epoch: ticket.assignment_epoch,
+    })
+}
+
+#[tauri::command]
+fn publish_task(
+    state: State<'_, Shared>,
+    revision: u64,
+    task_id: String,
+) -> Result<Task> {
+    locked(&state)?.publish_task(revision, &task_id)
+}
+
 #[tauri::command]
 fn update_task(
     state: State<'_, Shared>,
@@ -568,6 +612,9 @@ fn main() {
             create_task,
             update_task,
             append_task_record,
+            publish_task,
+            preview_task_dispatch,
+            queue_dispatch_attempt,
             create_conversation,
             send_message,
             active_processes,

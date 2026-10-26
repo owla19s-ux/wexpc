@@ -39,7 +39,7 @@ impl DesktopStore {
         let version: u32 = db
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .map_err(storage)?;
-        if version > 6 {
+        if version > 8 {
             return Err(ServiceError::new(
                 "UNSUPPORTED_VERSION",
                 "数据由更新版本创建，请使用相应版本打开",
@@ -55,10 +55,10 @@ impl DesktopStore {
                 [serde_json::to_string(&DesktopSnapshot::default()).map_err(storage)?],
             )
             .map_err(storage)?;
-            tx.pragma_update(None, "user_version", 6).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 8).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
-        if (1..=5).contains(&version) {
+        if (1..=7).contains(&version) {
             let tx = db
                 .transaction_with_behavior(TransactionBehavior::Immediate)
                 .map_err(storage)?;
@@ -72,7 +72,7 @@ impl DesktopStore {
             })?;
             // Defaulted fields are read additively. Keep the exact old payload,
             // but fence out older binaries before any write can erase records.
-            tx.pragma_update(None, "user_version", 6).map_err(storage)?;
+            tx.pragma_update(None, "user_version", 8).map_err(storage)?;
             tx.commit().map_err(storage)?;
         }
         Ok(Self {
@@ -117,4 +117,45 @@ impl DesktopStore {
         tx.commit().map_err(storage)?;
         Ok(result)
     }
+}
+
+#[cfg(test)]
+mod publication_schema_tests {
+    use super::*;
+
+    #[test]
+    fn newly_created_store_uses_schema_eight() {
+        let store = DesktopStore::memory().unwrap();
+        let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        assert_eq!(version, 8);
+    }
+
+    #[test]
+    fn previous_schemas_upgrade_without_replacing_desktop_snapshot() {
+        for old_version in [6, 7] {
+            let db = Connection::open_in_memory().unwrap();
+            db.execute_batch(&format!(
+                "CREATE TABLE desktop_state (id INTEGER PRIMARY KEY CHECK(id=1), body TEXT NOT NULL); PRAGMA user_version={old_version};"
+            )).unwrap();
+            let prior = serde_json::json!({
+                "revision": 42,
+                "connections": [],
+                "projects": [],
+                "agents": [],
+                "tasks": [],
+                "conversations": [],
+                "turns": []
+            }).to_string();
+            db.execute("INSERT INTO desktop_state(id,body) VALUES (1,?1)", [&prior]).unwrap();
+            let store = DesktopStore::init(db, None).unwrap();
+            let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+            assert_eq!(version, 8);
+            assert_eq!(store.load().unwrap().revision, 42);
+            let preserved: String = store.db.query_row(
+                "SELECT body FROM desktop_state WHERE id=1", [], |row| row.get(0)
+            ).unwrap();
+            assert_eq!(preserved, prior);
+        }
+    }
+
 }
