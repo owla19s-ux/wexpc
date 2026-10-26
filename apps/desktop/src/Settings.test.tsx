@@ -19,7 +19,7 @@ afterEach(cleanup);
 it('uses existing Host-backed controls only for the selected conversation', () => {
   const openConversation = vi.fn();
   const openConnections = vi.fn();
-  render(<Settings data={state} onChanged={async () => {}} openConversation={openConversation} openConnections={openConnections}/>);
+  render(<Settings data={state} snapshotFresh={true} onChanged={async () => {}} openConversation={openConversation} openConnections={openConnections}/>);
   expect(screen.getByTestId('local-scope').textContent).toBe('conv-A');
   expect(screen.getByTestId('github-scope').textContent).toBe('conv-A');
   fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-B' } });
@@ -32,14 +32,20 @@ it('uses existing Host-backed controls only for the selected conversation', () =
 });
 
 it('does not imply permissions exist before the authoritative snapshot loads', () => {
-  render(<Settings data={null} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
+  render(<Settings data={null} snapshotFresh={false} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
   expect(screen.getByText(/尚未读取桌面服务的权威数据/)).toBeTruthy();
   expect(screen.queryByTestId('local-scope')).toBeNull();
   expect(screen.queryByTestId('github-scope')).toBeNull();
 });
 
 it('does not invent global permissions when no conversation exists', () => {
-  render(<Settings data={{ ...state, conversations: [] }} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
+  render(<Settings data={{ ...state, conversations: [] }} snapshotFresh={true} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
   expect(screen.getByText(/尚无对话/)).toBeTruthy();
   expect(screen.queryByRole('combobox', { name: '选择授权所属对话' })).toBeNull();
+});
+
+it('labels cached connection counts as unverified instead of current truth', () => {
+  render(<Settings data={state} snapshotFresh={false} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
+  expect(screen.getByText(/上次读取（尚未核实）/)).toBeTruthy();
+  expect(screen.getByRole('status').textContent).toMatch(/Host 分别核实/);
 });
