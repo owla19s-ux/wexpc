@@ -63,7 +63,19 @@ export function App() {
     });
   },[data]);
   useEffect(()=>{if(desktopAvailable) void refresh().catch(e=>setError(errorMessage(e)));},[refresh]);
-  async function run(action:()=>Promise<void>) {setError('');try {await action();await refresh();}catch(e){setError(errorMessage(e));}}
+  async function run(action:()=>Promise<void>) {
+    setError('');
+    let failure:unknown;
+    let failed=false;
+    try { await action(); }
+    catch(e) { failure=e;failed=true; }
+    // An IPC error does not prove the Host rejected a mutation. Reconcile
+    // against its authoritative snapshot before allowing another dispatch.
+    // If the read fails, refresh() marks the cached task evidence stale.
+    try { await refresh(); }
+    catch(e) { if(!failed){failure=e;failed=true;} }
+    if(failed)setError(errorMessage(failure));
+  }
   const project=data?.projects.find(p=>p.id===projectId);
   const conversation=data?.conversations.find(c=>c.id===conversationId);
   function showConversation(c:Conversation) {setProjectId(c.project_id||'');setConversationId(c.id);setPage('conversation');}
