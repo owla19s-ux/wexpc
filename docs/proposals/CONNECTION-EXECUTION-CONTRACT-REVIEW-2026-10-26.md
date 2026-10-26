@@ -311,3 +311,61 @@ Core `Task` 是较小的执行状态和分配事实；Desktop Service `Task` 是
 6. 任务记录与真实操作证据来源明确分离，撤权和不确定副作用保护仍有效。
 
 **实施状态**：本节原则已获用户确认；表内字段/对象拆分、状态枚举和数据库布局仍属候选。无业务代码或正式接口改动，无测试/Actions。
+
+## 12. 第六批：任务资料、持久化与前端契约审查（2026-10-26）
+
+### 12.1 已核查的实际存储事实
+
+- Desktop Service 的用户任务对象包含 `id/project_id/title/goal/scope/acceptance/agent_ids/status`，其中本阶段桌面任务状态只有 `Draft`；前端 `Task.status` 同样只允许 `draft`。这是任务卡草案视图，而非 Core `TaskBoard` 的五种运行状态。
+- `append_task_record` 验证任务存在和 Snapshot revision，追加 `source: User` 的 `progress/blocker/handoff` 文本与引用，并保存 `task_snapshot`、`recorded_revision`。**该版本号属于桌面快照写入序号，不证明引用对象内容的版本**；人工记录不能自动充当真实产出、测试或验收的可信回执。
+- `apps/desktop/src-tauri/src/main.rs` 提供 `create_task/update_task/append_task_record` 等命令。就这些入口可证实的是任务草案和人工记录编辑，不是自动派工闭环。
+- `DesktopStore` 当前用 SQLite `desktop_state` 单行 JSON 保存 DesktopSnapshot；`PRAGMA user_version` 为 **6**。高于 6 拒绝读取；1–5 向 6 迁移时先反序列化校验、只更新版本并保留原 payload。不能把此机制误写成已支持未来结构的无损自动升级。
+- 现有 `Snapshot.revision` 提供并发修改时的版本检查，却不是任务验收条件、成果文件或测试环境的版本标识。后续至少须区分这几类版本。
+
+### 12.2 最小关联契约建议：不固定工作流程
+
+建议先用**引用关系 + 版本身份 + 来源类别**收口，不强制新增独立的任务引擎/全部流程节点。
+
+| 逻辑记录 | 必须可核对的最小内容 | 不承担 |
+| --- | --- | --- |
+| RequirementRef | 所属 task、需求/验收条件版本、条件内容或受控引用 | 预设统一检查方法 |
+| ArtifactRef | 所属 task、产物身份、具体版本/内容摘要/交付批次、存放位置、来源 | 只凭产物存在即宣称验证通过 |
+| VerificationRef | 被检查的 RequirementRef 与 ArtifactRef 版本、检查方式/环境、证据、已知结果 | 以验证成功覆盖未检查的其他条件 |
+| AcceptanceRecord | 被判定的 task 目标版本、已覆盖/未覆盖条件、结论及判定者/依据 | 把操作结果或模型自述直接变成正式验收 |
+| WorkLink | task 或 assignment 与 operation/外部委派的事实性关联 | 按关联本身赋予执行权限 |
+
+**数据模型粒度暂不冻结**：这些可编码为若干结构化引用及记录，不要求五个 SQLite 表、五套生命周期或统一外部 SDK。允许人工、工具或外部来源的验证，但必须保留来源/证据类型，不把用户草稿笔记提升为系统可信执行回执。
+
+### 12.3 一条可检验的端到端示例
+
+需求 R1：“功能在 Windows 本机可正常启动”；需求版本 `r1-v2`。
+产出 A1：“代码提交 X”，内容版本 `commit-X`。
+验证 V1：Linux 上的 Cargo 单测通过，绑定 `r1-v2 + commit-X`，覆盖部分技术检查，但**不证明 Windows 启动**。
+验证 V2：Windows 实机启动尚未执行，明确记录为未验证。
+验收：在约定要求包括 Windows 启动的情况下不得因为 V1 成功而宣布 R1 完成。
+如下一次修改产生 `commit-Y`，对 `commit-X` 的验证仍保留为历史事实，不能默认转用于 `commit-Y`。
+
+这只是版本、检查范围和结论的关系示例；研究、小说、巡检、外部委派分别采用适合自己目标的方式，不强制“编译/测试”环节。
+
+### 12.4 当前代码迁移的最低安全门槛
+
+1. **先定义单一 Task 权威写入路径**，将 Desktop 草案和 Core 运行规则通过可检查的映射连接，不直接将双方 `TaskStatus` 拼接成一个枚举；待核对其余调用方。
+2. **优先做只读映射/并行演示**，验证旧任务卡、旧 `TaskRecord` 的身份与内容仍可读；不能通过虚拟执行记录填补旧数据。
+3. 若改变持久 JSON 字段与含义，必须明确 `user_version > 6` 的新版本、写入事务、失败回滚与旧版本拒绝行为；不以随手加 `serde(default)` 代替正式迁移。
+4. 前端 `Task` 类型、Tauri 命令、DesktopService 和测试要同步改变。现有 `TaskRecord.source = User` 不应在没有依据时改写为 `Verified`。
+5. 对工具回执存储和桌面 Snapshot 的跨边界一致性进行专项故障测试；不能因为 SQLite 事务存在就假定文件系统证据和 Task 状态天然原子提交。
+6. 内置工具及外部执行的权限与取消规则原样保留；本工作稿不得直接授予任何能力、改变授权继承或自动补全不明产物版本。
+
+### 12.5 需后续裁决的实现取舍（本批不改）
+
+**D1 — Task 权威持有者及状态写入路径**：建议由可信应用服务统一协调，Core 继续提供纯规则；须先完整核对 Desktop 草案与 Core TaskBoard 的调用关系，不能定数据库或拆模型方案。
+
+**D2 — Verification/Acceptance 的最小存储形式**：建议先采用支持证据来源、产物版本、检查范围的结构化记录，用户可自定义检查类型；是否单独持久化对象、何时建立索引待评估。
+
+**D3 — 失败后的任务推进语义**：一次 Operation 失败可能是任务修复循环的正常输入，须与真正无法继续或验收失败区分。现有 `reconcile` 直接置 Task `Failed` 的逻辑未改，待产品语义与调用链一起审定。
+
+这三项目前不属于用户已明确批准的数据库/实现规则。先维持现有代码和文档基线。
+
+### 12.6 本批审查状态
+
+已核对 Desktop Task/TaskRecord、Tauri 前端类型及命令、DesktopSnapshot/SQLite schema 6 的静态实现。未执行真实 Windows 验证、迁移测试、Rust/TS 测试或 Actions；未修改 main、源代码或正式接口。
