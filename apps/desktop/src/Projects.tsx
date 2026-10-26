@@ -10,7 +10,7 @@ import { createAgent, type OpenChat, type Run } from './App';
 import { VerifiedConnectionCreation } from './Connections';
 import { roleNames, type AgentRole, type Project, type Snapshot } from './types';
 
-export function ProjectDetail({project,data,snapshotFresh=true,run,openChat}:{project:Project;data:Snapshot;snapshotFresh?:boolean;run:Run;openChat:OpenChat}) {
+export function ProjectDetail({project,data,snapshotFresh,run,openChat}:{project:Project;data:Snapshot;snapshotFresh:boolean;run:Run;openChat:OpenChat}) {
   const [selectedTask,setSelectedTask]=useState('');
   const [briefAgent,setBriefAgent]=useState('');
   const agents=data.agents.filter(a=>a.project_id===project.id);
