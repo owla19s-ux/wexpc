@@ -255,11 +255,15 @@ mod tests {
         );
         assert_eq!(
             checked,
-            ["github_file_read", "github_file_create", "github_file_write"]
+            vec![
+                "github_file_read".to_owned(),
+                "github_file_create".to_owned(),
+                "github_file_write".to_owned(),
+            ]
         );
         assert_eq!(
             tools.iter().map(|tool| tool.name.as_str()).collect::<Vec<_>>(),
-            ["github_read_file", "github_write_file"]
+            vec!["github_read_file", "github_write_file"]
         );
         for tool in &tools {
             let schema: serde_json::Value =
