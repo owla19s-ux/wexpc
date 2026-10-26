@@ -83,5 +83,27 @@ it('does not invent global permissions when no conversation exists', () => {
 it('labels cached connection counts as unverified instead of current truth', () => {
   render(<Settings data={state} snapshotFresh={false} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
   expect(screen.getByText(/上次读取（尚未核实）/)).toBeTruthy();
-  expect(screen.getByRole('status').textContent).toMatch(/Host 分别核实/);
+  expect(screen.getByRole('status').textContent).toMatch(/授权控件已暂停/);
+});
+
+it('pauses scoped permission controls when a previously verified snapshot becomes stale', () => {
+  const props = { onChanged: async () => {}, openConversation: vi.fn(), openConnections: vi.fn() };
+  const view = render(<Settings data={state} snapshotFresh={true} {...props}/>);
+  fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-B' } });
+  expect(screen.getByTestId('local-scope').textContent).toBe('conv-B');
+  expect(screen.getByTestId('github-scope').textContent).toBe('conv-B');
+
+  // Cached conversation membership is not sufficient to keep authorization
+  // controls mounted after the latest Host snapshot fails.
+  view.rerender(<Settings data={state} snapshotFresh={false} {...props}/>);
+  expect(screen.getByRole('status').textContent).toMatch(/授权控件已暂停/);
+  expect(screen.queryByTestId('local-scope')).toBeNull();
+  expect(screen.queryByTestId('github-scope')).toBeNull();
+  expect(screen.queryByRole('button', { name: '进入此对话查看进程与工具回执' })).toBeNull();
+
+  // After re-verification the explicit conversation selection remains B;
+  // the Host-backed children remount and independently read B's policies.
+  view.rerender(<Settings data={state} snapshotFresh={true} {...props}/>);
+  expect(screen.getByTestId('local-scope').textContent).toBe('conv-B');
+  expect(screen.getByTestId('github-scope').textContent).toBe('conv-B');
 });

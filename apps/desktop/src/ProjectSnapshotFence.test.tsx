@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ProjectDetail } from './Projects';
 import type { Project, Snapshot, Task } from './types';
 
 vi.mock('./App', () => ({ createAgent: vi.fn() }));
 vi.mock('./client', () => ({ command: vi.fn() }));
-vi.mock('./Connections', () => ({ Selection: () => null }));
+vi.mock('./Connections', () => ({ Selection: () => null, VerifiedConnectionCreation: () => null }));
 vi.mock('./MemberBriefPanel', () => ({ MemberBriefPanel: () => null }));
 vi.mock('./TaskJournal', () => ({ TaskJournal: () => null }));
 vi.mock('./TaskEditor', () => ({ TaskEditor: () => null }));
@@ -42,7 +42,7 @@ it('shows cached task evidence as unverified and hides dispatch controls until r
     snapshotFresh={false} run={run} openChat={openChat} />);
   expect(screen.getByText(/派工记录尚未核实/)).toBeTruthy();
   expect(screen.queryByText(/已登记待派工（尚未执行）/)).toBeNull();
-  screen.getByRole('button', { name: /任务/ }).click();
+  fireEvent.click(screen.getByRole('button', { name: /任务 草案|任务 已发布/ }));
   expect(screen.getByText(/已暂停准入预检和派工登记/)).toBeTruthy();
   expect(screen.queryByTestId('dispatch-controls')).toBeNull();
   view.rerender(<ProjectDetail project={project} data={data}
@@ -55,7 +55,7 @@ it('does not allow publishing a draft using a stale snapshot revision', () => {
   const data = state({ ...task, status: 'draft' });
   const view = render(<ProjectDetail project={project} data={data}
     snapshotFresh={false} run={run} openChat={openChat} />);
-  screen.getByRole('button', { name: /任务/ }).click();
+  fireEvent.click(screen.getByRole('button', { name: /任务 草案|任务 已发布/ }));
   const publish = screen.getByRole('button', { name: '发布任务（不启动施工）' }) as HTMLButtonElement;
   expect(publish.disabled).toBe(true);
   view.rerender(<ProjectDetail project={project} data={data}
