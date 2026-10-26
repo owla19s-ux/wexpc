@@ -6,6 +6,9 @@ WEX 的 **PC 优先工程仓库**，首期交付目标为 Windows。它与 `WEX`
 
 ## 先读这些文件
 
+- **[项目总说明](docs/PROJECT-OVERVIEW.md)**：定位、0.1.1 目标与核心职责。
+- **[完整文档索引](docs/README.md)**：按产品、架构、施工、提案和工程规范查找文档。
+
 1. [项目共识说明](docs/PROJECT-CONSENSUS.md)：PC与Android关系、首版使用效果、后续候选及实例；双方接手先读并各自回执。
 2. [PC 产品、功能与技术基线](docs/PC-PRODUCT-AND-TECH-BASELINE.md)：产品目标、已确认边界、待验证选型与阶段建议。
    [0.1.1 施工路线与链路验收计划](docs/WEXPC-0.1.1-IMPLEMENTATION-PLAN.md)：六批次、工作包、依赖、完成判定和未运行验证登记。
