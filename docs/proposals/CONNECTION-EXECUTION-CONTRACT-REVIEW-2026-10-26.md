@@ -158,3 +158,58 @@
 在 `tool_approvals.rs` 的通用进程路径中，`begin_approved_dispatch` 先通过权限回调与内存 `OperationLedger.begin`，随后 `journal(..., "in_flight", ...)` 写入 `tool-receipts`，然后才调用进程 Supervisor / 实际进程执行。就此片段的**调用顺序**而言，已安排持久 marker 早于进程外部副作用，不能将“使用临时 Ledger”误判为没有 durable InFlight 防护。但记录的原子性、各类文件/GitHub 路径是否同样遵守、失败回收、旧 marker 兼容，以及 marker 与未来持久 Task/Dispatcher 的一致性仍需逐路径核实。
 
 **建议**：未来薄执行协调层应复用当前 marker/receipt 写入能力与已验证的故障处理；先描述它们的现行权威范围，再统一引用，不要直接把 `OperationLedger` 的纯内存记录宣布为新的唯一持久操作数据库。
+
+## 9. 第三批：Dispatcher ↔ Task ↔ Operation 交接审查（2026-10-26）
+
+### 9.1 首要设计约束：协调宿主，不是全量执行平台
+
+**用户新增明确约束**：WEX 是连接、调度、交互和跨系统联通的宿主，不能将它建成对所有执行方式进行绝对标准化的全量执行平台。统一的是**WEX 侧可控制、可记录与可验证的交接边界**，不是要求每个外部系统内化为 WEX 的 Runtime、Task、工具循环或日志模型。
+
+- 对原生文件、命令、Git/GitHub 等已由 WEX 实际执行的操作，继续提供安全检查、操作追踪和可信结果。
+- 对 DSH/Hermes 等外部 Agent，只规范 WEX 发出的委托、外部定位、可观测投递/接收、成果引用及独立核验；能力不具备时明确报不支持或未知。
+- Dispatcher 只编排 WEX 可掌握的队列、依赖和交接，不接管第三方进程的内部调度；真实的外部并发控制须依赖实际隔离/协调能力。
+- 统一契约采用薄公共信封与分类型负载；普通请求响应、长进程、持续会话、模型流和异步委派保留各自专用语义。不要求所有能力都支持 cancel、progress、stream、resume。
+- 不把独立能力强制包装成用户可见 Connection，也不为了接口一致新增伪造的 Conversation、Task、Agent 或模拟工具回执。
+- 本条作为架构审查约束写入工作稿；具体字段和持久化实现仍待后续收敛，不因此扩大 0.1.1 产品门槛。
+
+### 9.2 核对的 Core 事实
+
+| 源码 | 已经具备的规则 | 尚不能据此宣称完成 |
+| --- | --- | --- |
+| `wex-core/src/task.rs` | `TaskBoard` 维护任务、Agent 分配及 `assignment_epoch`；中断恢复将 Running 恢复为 Blocked；可信证据去重 | 完整桌面任务服务已持久关联真实工具、审查与验证 |
+| `wex-core/src/dispatch.rs` | `admit` 核对项目、状态、Agent 与分配代次；`reserve` 取得资源 lease 并复检 ticket；注释明确 ticket 不是批准 | 获得 ticket 就拥有权限、或 WEX lease 能约束所有外部进程 |
+| `wex-core/src/task_operation.rs` | `TaskOperationIndex` 验证任务/操作/Agent 关联；旧分派结果不得更改新分派进度；成功仅收证据，UNKNOWN 阻塞任务 | 任何成功工具回执可以跳过 Review/Verify 直接关闭任务 |
+| `wex-core/src/operation.rs` | `OperationLedger` 约束审批、InFlight、结果及 Attempt；属于纯状态规则 | 内存状态机自身就是跨进程持久事务或远端运行时 |
+
+### 9.3 建议的最小跨边界交接契约（语义级，待编码）
+
+**Task → Dispatcher**：交付 `task_id`、项目、当前分配 Agent、`assignment_epoch`、任务版本/工作范围引用、所需能力与依赖引用（如实际存在）。Dispatcher 验证资格；不从任务关联推导新增权限。
+
+**Dispatcher → 执行入口**：在当前范围可用、租约有效时，交付稳定的派发/尝试关联、调用身份、能力或明确外部委派目标、资源与意图摘要。执行入口再次核验可执行权限。无 Task 的普通操作仍可直接走执行入口。
+
+**执行入口 → Task**：返回 WEX 可观察的 `operation_id`、`attempt_id`、已知结果或 UNKNOWN、可信证据/成果定位；由 Task 领域规则管理正式进度。完成、审查、验证是独立事实；不按外部返回的自由文字自动更改正式终态。
+
+**外部 Agent 专项**：若外部只支持提交任务和稍后取得交付文件，交接契约可只保留 WEX 投递结果、批次及产物关联；不要求生成虚构的每一步工具 Attempt。若接口无确认能力，状态保持不确定而不是补造接受事件。
+
+### 9.4 四个实现风险（待继续核对）
+
+1. `DispatchGuard` 的资源 lease 是当前 Core 控制边界；不能当作跨进程、外部 Agent 或 OS 沙箱。后续需查 Host/Dispatcher 实际使用调用者和失败释放路径。
+2. `TaskOperationIndex` 是读操作事实并更新 Task 进度的投影；源码注释明确由 Host 负责事务性保存，须进一步核对实际业务持久化和崩溃恢复是否接通。
+3. `OperationIntent.conversation_id` 仍为必填，与无需 Conversation 的任务操作场景有语义差异；待完成调用方兼容审查，不直接改字段。
+4. `TaskStatus::Failed` 目前可由失败的 Operation 回执触发；需区分“某步失败、可继续修复”和“整个任务失败”的产品语义，**不得未经确认改变现有 Task 转移规则**。
+
+### 9.5 拟定的最小可编码契约包（待进一步核查）
+
+- **A — 能力引用**：支持内置提供者或配置的 Connection 目标，记录能力种类及必要版本信息；不要求全部能力同形输入输出。
+- **B — 操作请求信封**：稳定调用身份、授权上下文、操作/attempt、目标/资源和幂等或版本约束（适用时）；Task/Conversation 为可选来源关联。
+- **C — Dispatcher 交接**：现有 `DispatchTicket` + 资源 lease + 有效授权复检，绝不把 ticket 当执行令牌。
+- **D — 结果/证据引用**：仅记录已知事实、UNKNOWN、外部可核对的成果引用；Review/Verify 独立。
+- **E — 适配器专用负载**：模型流、文件、进程、Git、外部 Agent 按协议单独定义；不把统一信封变成通用运行时或强制插件 SDK。
+
+正式 Rust 类型/方法、序列化版本和存储迁移 **未冻结**，本稿不可直接用作变更数据库和生产接口的批准书。
+
+### 9.6 本批结论
+
+原先 `TaskBoard`、`DispatchTicket`、`TaskOperationIndex` 和 `OperationLedger` 的职责边界具有可复用价值。主要工作是核实真实桌面调用与持久化交汇点，再少量补足跨边界关联，**不新建第二套任务状态机或全量执行平台**。
+
+本批为静态源码/文档审查；无代码、正式产品基线、存储迁移或 CI 修改。
