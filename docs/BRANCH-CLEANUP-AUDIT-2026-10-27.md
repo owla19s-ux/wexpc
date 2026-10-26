@@ -39,3 +39,11 @@
 ## 当前远端状态（查询时）
 - 83 个远端分支，含 main；开放 PR 仅 #7。
 - 本轮尚未删除远端分支，也未主动触发 GitHub Actions。
+
+## 2026-10-27 Windows 完整测试后新增证据
+
+- Windows gated validation #40408913676：`00c3b98f1df0bf6aa3b320586555d76ae503652b` 对应 `cargo test --workspace --locked`、Windows local resources contracts、Windows storage contracts、Tauri Host `cargo check --locked` 全部通过。此前 Linux #40403892754、frontend #40405405746 分别成功；各自对应不同 SHA，不能宣称同一 SHA 全平台验收。
+- 本轮仓库仍有 83 条远端分支（main + 82 条）。
+- 通过 GitHub compare(main...branch) 复核，以下分支 `ahead_by=0`，属于**可进一步核对远端 HEAD 后删除的候选**：`integration/tool-catalog-main-20261027`、`work/process-chain-20261026`、`work/process-pipe-cleanup-20261026`、`integration/process-evidence-ui-20261026`、`integration/task-dispatch-ui-20261026`。
+- 下列分支仍有独有提交，**禁止以 closed PR 理由直接删除**：`fix/ui-task-duty-selection-20261025`（ahead 2）、`feat/pc-scope-overlap-pure-2026-10-25`（ahead 39，PR #7）、`docs/connection-contract-review-20261026`（ahead 29）。独有提交不代表应整支合入。
+- 当前 GitHub 连接器未提供远端分支删除能力；尚未实际删除分支。其他分支仍需逐批 compare，不得把以上抽样当作 82 条均已审计。
