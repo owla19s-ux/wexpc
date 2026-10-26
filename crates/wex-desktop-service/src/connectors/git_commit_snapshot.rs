@@ -514,7 +514,12 @@ mod tests {
             resource_id: "repo".into(),
             action: Action::Write,
             expected_version: p.expected_head().map(str::to_owned),
-            intent_digest: crate::git_commit_intent_digest("repo", dir.path(), &p).unwrap(),
+            intent_digest: crate::git_commit_intent_digest(
+                "repo",
+                &registry.export_binding(&id).unwrap().path,
+                &p,
+            )
+            .unwrap(),
         };
         let mut ledger = OperationLedger::default();
         ledger.propose(intent.clone()).unwrap();
