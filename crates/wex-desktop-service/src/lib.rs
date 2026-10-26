@@ -11,7 +11,8 @@ pub use application::process_control::{
 };
 pub use application::DesktopService;
 pub use connectors::git_commit_admission::{
-    begin_git_commit, git_commit_resource_id, GitCommitAdmission, GitCommitBegin,
+    begin_git_commit, git_commit_resource_id, settle_verified_git_commit, GitCommitAdmission,
+    GitCommitBegin, GitCommitReceipt,
 };
 pub use connectors::git_commit_binding::{git_commit_intent_digest, verify_git_commit_dispatch};
 pub use connectors::git_commit_evidence::{

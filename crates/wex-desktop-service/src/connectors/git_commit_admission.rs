@@ -175,10 +175,95 @@ pub fn begin_git_commit(
     })
 }
 
+/// Confirmed durable terminal record, not authority for another write.
+/// The ledger stores an immutable commit reference, not the full readback.
+#[derive(Debug, PartialEq, Eq)]
+pub struct GitCommitReceipt {
+    revision: u64,
+    generation: u64,
+    operation_id: String,
+    attempt_id: String,
+    evidence_ref: String,
+    commit_oid: String,
+}
+impl GitCommitReceipt {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    pub fn operation_id(&self) -> &str {
+        &self.operation_id
+    }
+    pub fn attempt_id(&self) -> &str {
+        &self.attempt_id
+    }
+    pub fn evidence_ref(&self) -> &str {
+        &self.evidence_ref
+    }
+    pub fn commit_oid(&self) -> &str {
+        &self.commit_oid
+    }
+}
+
+/// Settle an admitted attempt using independent trusted Host evidence only.
+/// expected_tree must come from the isolated exact-path index before writing;
+/// actual must include authenticated object bytes, full changed paths and a
+/// current repository/branch/HEAD observation. Never use model-provided claims.
+///
+/// Retain admission (and its repository lease) through this call. On ANY error,
+/// do not issue another Git write: the persisted InFlight/Unknown fence remains,
+/// or another trusted worker/session has already changed the record. Recovery
+/// must inspect the actual state. This function does not reconcile cold starts.
+pub fn settle_verified_git_commit(
+    operations: &OperationStore,
+    admission: &GitCommitAdmission,
+    expected_tree: &str,
+    actual: &super::git_commit_evidence::CommitReadback,
+) -> Result<GitCommitReceipt> {
+    use wex_core::operation::Outcome;
+    use wex_workspace_store::operations::OperationChange;
+    admission
+        .prepared
+        .verify_readback(expected_tree, actual)
+        .map_err(|_| {
+            ServiceError::new(
+                "GIT_EVIDENCE_REJECTED",
+                "提交回读未能证明批准的结果；不得重派写入",
+            )
+        })?;
+    let current = verify_durable_admission(operations, &admission.committed)?;
+    let dispatch = &admission.committed.dispatch;
+    let evidence_ref = format!("git_commit_{}", actual.oid);
+    // CAS against this fresh view permits unrelated ledger changes, while any
+    // concurrent mutation after the check rejects settlement instead of success.
+    let settled = operations
+        .apply(
+            current.revision,
+            OperationChange::Finish {
+                id: dispatch.intent.id.clone(),
+                attempt_id: dispatch.attempt_id.clone(),
+                outcome: Outcome::Succeeded {
+                    evidence_ref: evidence_ref.clone(),
+                },
+            },
+        )
+        .map_err(store_error)?;
+    Ok(GitCommitReceipt {
+        revision: settled.revision,
+        generation: settled.generation,
+        operation_id: dispatch.intent.id.clone(),
+        attempt_id: dispatch.attempt_id.clone(),
+        evidence_ref,
+        commit_oid: actual.oid.clone(),
+    })
+}
+
 fn verify_durable_admission(
     operations: &OperationStore,
     committed: &CommittedDispatch,
-) -> Result<()> {
+) -> Result<wex_workspace_store::operations::OperationStoreView> {
     use wex_core::operation::OperationState;
     let current = operations.load().map_err(store_error)?;
     let live = current
@@ -190,13 +275,13 @@ fn verify_durable_admission(
         || !live.is_some_and(|r|r.intent==committed.dispatch.intent && matches!(&r.state,OperationState::InFlight{attempt_id} if attempt_id==&committed.dispatch.attempt_id)) {
         return Err(ServiceError::new("GIT_ADMISSION_UNCERTAIN","当前持久尝试已变化或待核查，不返回执行许可"));
     }
-    Ok(())
+    Ok(current)
 }
 
 fn store_error(_: wex_workspace_store::operations::OperationStoreError) -> ServiceError {
     ServiceError::new(
         "OPERATION_STORE_ERROR",
-        "操作账本未能确认本次准入，不得执行或自动重试",
+        "操作账本未能确认本次状态，不得派发或自动重试写入",
     )
 }
 
@@ -758,5 +843,226 @@ mod tests {
                 .code,
             "GIT_ADMISSION_UNCERTAIN"
         );
+    }
+    #[cfg(unix)]
+    fn with_settlement(
+        run: impl FnOnce(
+            &OperationStore,
+            &std::path::Path,
+            &GitCommitAdmission,
+            &ResourceLeases,
+            super::super::git_commit_evidence::CommitReadback,
+            String,
+        ),
+    ) {
+        let (_dir, registry, id) = fixture();
+        let data = tempfile::tempdir().unwrap();
+        let root = data.path().join("operations");
+        let store = OperationStore::open(&root).unwrap();
+        let leases = ResourceLeases::default();
+        let grants = [DirectoryGrant {
+            directory_id: &id,
+            access: Access::ReadWrite,
+            explicit_personal: false,
+        }];
+        let source = GitCommitSnapshotSource {
+            registry: &registry,
+            directory_id: &id,
+            system_access: true,
+            grants: &grants,
+            internal_roots: &[],
+        };
+        let (p, revision) = approve(&store, &source, "op");
+        // Synthetic trusted-read fixtures test settlement, not a real Git write.
+        let parts = p.binding_parts();
+        let tree = "e".repeat(40);
+        let actual = super::super::git_commit_evidence::CommitReadback {
+            oid: "d".repeat(40),
+            parents: vec![p.expected_head().unwrap().into()],
+            tree: tree.clone(),
+            message: "commit".into(),
+            changed_paths: vec!["a".into()],
+            repository_identity: String::from_utf8(parts[1].to_vec()).unwrap(),
+            branch: String::from_utf8(parts[2].to_vec()).unwrap(),
+            head: "d".repeat(40),
+        };
+        let admission = begin_git_commit(
+            &store,
+            &leases,
+            GitCommitBegin {
+                expected_store_revision: revision,
+                operation_id: "op",
+                attempt_id: "attempt",
+                checks: checks(),
+                source: &source,
+                prepared: p,
+            },
+        )
+        .unwrap();
+        run(&store, &root, &admission, &leases, actual, tree);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settlement_rejects_bad_evidence_without_clearing_durable_fence_or_lease() {
+        with_settlement(|store, root, admission, leases, actual, tree| {
+            let before = fs::read(root.join("operations.json")).unwrap();
+            let mut cases = Vec::new();
+            let mut bad = actual.clone();
+            bad.parents.clear();
+            cases.push(bad);
+            let mut bad = actual.clone();
+            bad.tree = "f".repeat(40);
+            cases.push(bad);
+            let mut bad = actual.clone();
+            bad.message.push('!');
+            cases.push(bad);
+            let mut bad = actual.clone();
+            bad.changed_paths.push("outside".into());
+            cases.push(bad);
+            let mut bad = actual.clone();
+            bad.repository_identity.push('!');
+            cases.push(bad);
+            let mut bad = actual.clone();
+            bad.head = "f".repeat(40);
+            cases.push(bad);
+            let mut bad = actual.clone();
+            bad.oid = "invalid".into();
+            cases.push(bad);
+            for bad in cases {
+                assert_eq!(
+                    settle_verified_git_commit(store, admission, &tree, &bad)
+                        .unwrap_err()
+                        .code,
+                    "GIT_EVIDENCE_REJECTED"
+                );
+            }
+            assert_eq!(fs::read(root.join("operations.json")).unwrap(), before);
+            assert!(leases
+                .is_busy(&format!(
+                    "repository:{}",
+                    admission.committed.dispatch.intent.resource_id
+                ))
+                .unwrap());
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settlement_returns_receipt_only_after_success_is_saved_and_survives_restart() {
+        with_settlement(|store, root, admission, leases, actual, tree| {
+            // Unrelated operations may advance the shared revision after begin.
+            let mut unrelated = admission.committed.dispatch.intent.clone();
+            unrelated.id = "unrelated".into();
+            let revision = store.load().unwrap().revision;
+            store
+                .apply(revision, OperationChange::Propose(unrelated))
+                .unwrap();
+            let revision = store.load().unwrap().revision;
+            let receipt = settle_verified_git_commit(store, admission, &tree, &actual).unwrap();
+            assert_eq!(receipt.revision(), revision + 1);
+            assert_eq!(receipt.generation(), admission.committed.generation);
+            assert_eq!(receipt.operation_id(), "op");
+            assert_eq!(receipt.attempt_id(), "attempt");
+            assert_eq!(receipt.commit_oid(), actual.oid);
+            assert_eq!(receipt.evidence_ref(), format!("git_commit_{}", actual.oid));
+            let saved = fs::read(root.join("operations.json")).unwrap();
+            assert!(leases
+                .is_busy(&format!(
+                    "repository:{}",
+                    admission.committed.dispatch.intent.resource_id
+                ))
+                .unwrap());
+            // A second settlement cannot publish another terminal revision.
+            assert!(settle_verified_git_commit(store, admission, &tree, &actual).is_err());
+            assert_eq!(fs::read(root.join("operations.json")).unwrap(), saved);
+            let reopened = OperationStore::open(root).unwrap();
+            assert!(matches!(&reopened.load().unwrap().ledger.records[0].state,
+                OperationState::Succeeded { attempt_id, evidence_ref }
+                if attempt_id == "attempt" && evidence_ref == receipt.evidence_ref()));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settlement_store_lock_failure_returns_no_success_and_leaves_inflight() {
+        with_settlement(|store, root, admission, _leases, actual, tree| {
+            let before = fs::read(root.join("operations.json")).unwrap();
+            fs::write(root.join("operations.lock"), "held").unwrap();
+            assert_eq!(
+                settle_verified_git_commit(store, admission, &tree, &actual)
+                    .unwrap_err()
+                    .code,
+                "OPERATION_STORE_ERROR"
+            );
+            fs::remove_file(root.join("operations.lock")).unwrap();
+            assert_eq!(fs::read(root.join("operations.json")).unwrap(), before);
+            assert!(matches!(
+                store.load().unwrap().ledger.records[0].state,
+                OperationState::InFlight { .. }
+            ));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settlement_leftover_temporary_snapshot_returns_no_success_and_restart_is_unknown() {
+        with_settlement(|store, root, admission, _leases, actual, tree| {
+            let before = fs::read(root.join("operations.json")).unwrap();
+            // An interrupted publication marker makes storage unavailable.
+            fs::create_dir(root.join("operations.tmp")).unwrap();
+            // The storage reader also treats a leftover tmp as unavailable.
+            assert!(settle_verified_git_commit(store, admission, &tree, &actual).is_err());
+            fs::remove_dir(root.join("operations.tmp")).unwrap();
+            assert_eq!(fs::read(root.join("operations.json")).unwrap(), before);
+            let reopened = OperationStore::open(root).unwrap();
+            assert!(matches!(
+                reopened.load().unwrap().ledger.records[0].state,
+                OperationState::OutcomeUnknown { .. }
+            ));
+        });
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn settlement_rejects_reconciled_unknown_and_replaced_session() {
+        with_settlement(|store, _root, admission, _leases, actual, tree| {
+            let revision = store.load().unwrap().revision;
+            store
+                .apply(
+                    revision,
+                    OperationChange::Finish {
+                        id: "op".into(),
+                        attempt_id: "attempt".into(),
+                        outcome: Outcome::Unknown,
+                    },
+                )
+                .unwrap();
+            let before = store.load().unwrap();
+            assert_eq!(
+                settle_verified_git_commit(store, admission, &tree, &actual)
+                    .unwrap_err()
+                    .code,
+                "GIT_ADMISSION_UNCERTAIN"
+            );
+            assert_eq!(store.load().unwrap(), before);
+        });
+        with_settlement(|store, root, admission, _leases, actual, tree| {
+            let reopened = OperationStore::open(root).unwrap();
+            let before = fs::read(root.join("operations.json")).unwrap();
+            assert_eq!(
+                settle_verified_git_commit(store, admission, &tree, &actual)
+                    .unwrap_err()
+                    .code,
+                "OPERATION_STORE_ERROR"
+            );
+            assert_eq!(
+                settle_verified_git_commit(&reopened, admission, &tree, &actual)
+                    .unwrap_err()
+                    .code,
+                "GIT_ADMISSION_UNCERTAIN"
+            );
+            assert_eq!(fs::read(root.join("operations.json")).unwrap(), before);
+        });
     }
 }

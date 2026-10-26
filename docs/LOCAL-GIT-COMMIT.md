@@ -89,3 +89,15 @@ cargo fmt --all -- --check
 新增测试覆盖物理根跨授权 ID 共享、InFlight 真实落盘后才返回许可、占用互斥、drop 后持久阻止重派、冷重开后 Unknown 与新授权 ID 仍隔离、旧文件/意图/authority 不消费审批、账本锁拒绝不返回 Dispatch，以及准入最终阶段的 Unknown/会话替换拒绝。独立审查发现的最终持久尝试状态缺检已以实际 OperationStore 阶段回归先失败再修复。初始测试数据目录不符合旧账本私有权限要求，测试改用由账本自行创建的私有子目录，未放宽生产规则。
 
 实际执行 Rust/Cargo1.99.1 的正式 workspace test、严格 all-targets Clippy、fmt 与 diff 检查；具体数量与提交 SHA 记在 PR #63。Windows 持久准入、Tauri Host、真实模型回合和实际 Commit 写入仍未运行/接通。下一步仍需完成 Windows 持久适配、实际 Git 写入与条件更新引用、资源协议向其它写工具接线、可信回执和 UNKNOWN 核查恢复；不向模型暴露未闭环的提交工具，不触发 Actions。
+
+## 后续增量：可信回读后的持久成功结算（2026-10-26）
+
+`settle_verified_git_commit` 将既有纯证据校验连接到 OperationStore 的成功终态。它借用当前 `GitCommitAdmission`，在整个调用期间继续保留仓库 lease；先验证父提交、独立预期 tree、消息、完整变更范围和当前仓库/分支/HEAD，再读取持久账本，要求 generation、完整 intent 与 InFlight attempt 一致。以该最新 revision 调用现有 Finish/Succeeded，确认保存成功才返回不可自行构造的 `GitCommitReceipt`，包含账本 revision/generation、原操作/尝试 ID、提交 OID 和 `git_commit_<oid>` 引用。允许其它无关操作推进账本 revision，不允许覆盖该尝试的新状态。
+
+这是 **Host 内部可信输入接口**：expected_tree 必须在写入前从独立精确范围索引取得；CommitReadback 的对象认证、全量变更列表和当前物理仓库观察由受信任 Host 提供，不能取自模型文字、工具参数或直接照抄待比较对象。该函数不会自己运行 Git、认证原始对象或采集变更列表，也不取代现有对象读取器。实际 writer 和这些读取步骤尚未串接，不能宣布可执行 Commit 闭环完成。
+
+错误证据、不可用账本、过期服务会话、已转 Unknown/终态的尝试均不返回成功；错误后绝不据此重新执行 Git 写入。结算接口不自动对冷启动 Unknown 作出恢复结论。内存 lease 由调用方在结果处理后释放；持久隔离不由 drop 清除。成功后重复调用被拒绝，不产生额外终态 revision。账本当前只持久化提交 OID 引用与原操作意图，**并未持久化完整回读/验证载荷，也未接入对话工具回执或 AI 续答**；独立证据保存和恢复查询仍待完成。
+
+本批新增 5 项 Unix 结算测试，以合成可信回读夹具验证错误证据不改变账本/占用、成功落盘与冷重开保留终态、无关 revision 变化、重复结算拒绝、锁不可用、残留临时快照拒绝及冷重开 Unknown、恢复流程提前隔离和服务会话替换。测试不冒充真实提交写入，残留临时快照用例也不冒充底层 fsync 故障注入。实际命令与数量记在 PR #63。工作区曾被维护清理，本批从固定远端 17f4920 恢复源码并重新安装工具链；旧测试结果未套用到新代码。
+
+Windows 原生私有权限、替换/同步语义和持久后端仍是阻塞；未移除 Unix 限制或回退内存账本。下一步继续完成真实执行、可信证据持久载荷、Windows 存储适配与 Host 接线；Windows/桌面/真实模型验收均待执行，保持 Draft 和 `[skip ci]`。
