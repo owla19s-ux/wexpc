@@ -50,7 +50,7 @@ it('does not show a late preview for a previously selected agent',async()=>{
   fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-b'}});
   fireEvent.click(screen.getByRole('button',{name:'核对调度准入（不执行）'}));
   fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
-  await act(async()=>{resolveOld?.({taskId:'task-1',agentId:'agent-b',assignmentEpoch:2});});
+  await act(async()=>{resolveOld?.({taskId:'task-1',projectId:'project',agentId:'agent-b',assignmentEpoch:2});});
   expect(screen.queryByRole('status')).toBeNull();
   fireEvent.click(screen.getByRole('button',{name:'核对调度准入（不执行）'}));
   await screen.findByText(/仅通过准入预检：agent-a/);
@@ -58,7 +58,7 @@ it('does not show a late preview for a previously selected agent',async()=>{
 
 it('invalidates a preview when snapshot revision or task changes',async()=>{
   ipc.mockImplementation(async(name:string,args:{taskId:string;agentId:string})=>{
-    if(name==='preview_task_dispatch')return {taskId:args.taskId,agentId:args.agentId,assignmentEpoch:2};
+    if(name==='preview_task_dispatch')return {taskId:args.taskId,projectId:'project',agentId:args.agentId,assignmentEpoch:2};
     throw new Error(name);
   });
   const view=render(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run}/>);
@@ -109,4 +109,19 @@ it('fails closed when persisted attempts are absent instead of treating missing 
   expect(ipc).not.toHaveBeenCalled();
   view.rerender(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run}/>);
   expect(queue.disabled).toBe(false);
+});
+
+
+it('rejects preview evidence with mismatched project or publication epoch',async()=>{
+  ipc.mockResolvedValueOnce({taskId:'task-1',projectId:'other',agentId:'agent-a',assignmentEpoch:2})
+    .mockResolvedValueOnce({taskId:'task-1',projectId:'project',agentId:'agent-a',assignmentEpoch:3});
+  render(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run}/>);
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  const preview=screen.getByRole('button',{name:'核对调度准入（不执行）'});
+  fireEvent.click(preview);
+  await waitFor(()=>expect(ipc).toHaveBeenCalledTimes(1));
+  expect(screen.queryByRole('status')).toBeNull();
+  fireEvent.click(preview);
+  await waitFor(()=>expect(ipc).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole('status')).toBeNull();
 });
