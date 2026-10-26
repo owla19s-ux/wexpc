@@ -57,3 +57,9 @@ it('does not project historical or cross-project attempts into the current publi
   expect(text).toContain('1 个尚未登记派工');
   expect(text).not.toContain('结果未知');
 });
+
+it('does not present a cached pending state as current after snapshot failure', () => {
+  const cached = state([published], [attempt('pending')]);
+  expect(taskFooterSummary(cached, false)).toBe('任务状态仅为上次读取结果（当前未核实）');
+  expect(taskFooterSummary(cached, true)).toContain('1 个待领取');
+});
