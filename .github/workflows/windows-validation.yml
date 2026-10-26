@@ -1,0 +1,30 @@
+name: WEXPC Windows gated validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ci-requests/windows/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wexpc-windows-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Workspace tests
+        run: cargo test --workspace --locked
+      - name: Windows local resources contracts
+        run: cargo test -p wex-local-resources --test windows_contract --locked -- --nocapture
+      - name: Windows storage contracts
+        run: cargo test -p wex-access-store --test windows_store --locked -- --nocapture
+      - name: Windows desktop Host check
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
