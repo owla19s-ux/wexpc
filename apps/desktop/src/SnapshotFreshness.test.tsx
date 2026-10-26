@@ -272,7 +272,7 @@ it('settles the original dispatch as unverified when a newer snapshot fails and 
   expect(finishedRuns).not.toHaveBeenCalled();
   await act(async () => { rejectB?.(new Error('latest snapshot unavailable')); });
   await waitFor(() => expect(finishedRuns).toHaveBeenCalledTimes(2));
-  expect(screen.getByText(/任务\\/派工状态当前未核实/)).toBeTruthy();
+  expect(screen.getByText(/任务\/派工状态当前未核实/)).toBeTruthy();
   expect((screen.getByRole('button', { name: '登记派工' }) as HTMLButtonElement).disabled).toBe(true);
   expect(dispatches).toBe(1);
 });
