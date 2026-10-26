@@ -39,7 +39,7 @@ it('keeps explicit authorization scope when the Host snapshot reorders conversat
   const props = { snapshotFresh: true, onChanged: async () => {}, openConversation: vi.fn(), openConnections: vi.fn() };
   const view = render(<Settings data={state} {...props}/>);
   expect(screen.queryByTestId('local-scope')).toBeNull();
-  expect(screen.getByRole('combobox', { name: '选择授权所属对话' }).value).toBe('');
+  expect((screen.getByRole('combobox', { name: '选择授权所属对话' }) as HTMLSelectElement).value).toBe('');
   fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-A' } });
   expect(screen.getByTestId('local-scope').textContent).toBe('conv-A');
   view.rerender(<Settings data={{ ...state, conversations: [b, a] }} {...props}/>);
