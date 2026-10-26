@@ -6,8 +6,8 @@ import { roleNames } from './types';
 
 type Preview = {taskId:string;agentId:string;revision:number;publicationEpoch:number;assignmentEpoch:number};
 
-export function TaskDispatchControls({task,agents,revision,attempts,run}:{
-  task:Task;agents:Agent[];revision:number;attempts?:DispatchAttempt[];run:Run;
+export function TaskDispatchControls({task,agents,revision,attempts,run,fresh=true}:{
+  task:Task;agents:Agent[];revision:number;attempts?:DispatchAttempt[];run:Run;fresh?:boolean;
 }) {
   const [agentId,setAgentId]=useState('');
   const [preview,setPreview]=useState<Preview|null>(null);
@@ -15,7 +15,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
   const generation=useRef(0);
   const epoch=task.publication_epoch;
   const selected=Boolean(agentId&&task.agent_ids.includes(agentId));
-  const evidenceLoaded=Array.isArray(attempts) && epoch !== undefined && epoch > 0;
+  const evidenceLoaded=fresh && Array.isArray(attempts) && epoch !== undefined && epoch > 0;
   const taskAttempts=(attempts??[]).filter(a=>a.project_id===task.project_id&&a.task_id===task.id);
   const alreadyQueued=taskAttempts.some(a=>a.publication_epoch===epoch);
   const statusText:Record<DispatchAttempt['status'],string>={
@@ -23,17 +23,17 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     in_flight:'已领取（不代表执行完成）',
     outcome_unknown:'结果未知（须核查，禁止自动重试）',
   };
-  const currentPreview=preview&&preview.taskId===task.id&&preview.agentId===agentId
+  const currentPreview=fresh&&preview&&preview.taskId===task.id&&preview.agentId===agentId
     &&preview.revision===revision&&preview.publicationEpoch===epoch?preview:null;
 
   useEffect(()=>{
     generation.current++;
     setPreview(null);
-  },[task.id,revision,epoch]);
+  },[task.id,revision,epoch,fresh]);
   useEffect(()=>{setAgentId('');},[task.id,epoch]);
 
   const previewAdmission=()=>{
-    if(!selected)return;
+    if(!selected||!fresh)return;
     const request=++generation.current;
     setPreview(null);
     const chosen=agentId;
@@ -49,7 +49,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     });
   };
   const queue=()=>{
-    if(!selected||!evidenceLoaded||alreadyQueued||queueing)return;
+    if(!selected||!evidenceLoaded||alreadyQueued||queueing||!fresh)return;
     generation.current++;
     setPreview(null);
     setQueueing(true);
@@ -77,10 +77,11 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
         })}
       </select>
     </label>
-    <button type="button" disabled={!selected||queueing} onClick={previewAdmission}>核对调度准入（不执行）</button>
+    <button type="button" disabled={!selected||queueing||!fresh} onClick={previewAdmission}>核对调度准入（不执行）</button>
     {currentPreview&&<p role="status">仅通过准入预检：{currentPreview.agentId}（分配版本 {currentPreview.assignmentEpoch}，读取修订 {currentPreview.revision}），未占用资源或启动工具。</p>}
     <button type="button" disabled={!selected||!evidenceLoaded||alreadyQueued||queueing} onClick={queue}>登记待派工尝试（不启动工具）</button>
-    {!evidenceLoaded&&<p className="muted">派工记录或发布版本尚未核实，暂不可登记；请重新读取任务状态。</p>}
+    {!fresh&&<p className="muted">当前任务快照读取失败，以下派工记录仅为历史缓存；请重新读取后操作。</p>}
+    {fresh&&!evidenceLoaded&&<p className="muted">派工记录或发布版本尚未核实，暂不可登记；请重新读取任务状态。</p>}
     {alreadyQueued&&<p className="muted">当前发布版本已登记派工尝试，不能重复登记；如结果未知，必须先核查实际执行事实。</p>}
     {taskAttempts.map(a=>{
       const assignee=agents.find(agent=>agent.id===a.agent_id);
