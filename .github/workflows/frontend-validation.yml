@@ -1,0 +1,29 @@
+name: WEXPC frontend gated validation
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ci-requests/frontend/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: wexpc-frontend-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/desktop
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
