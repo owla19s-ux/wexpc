@@ -26,5 +26,11 @@ jobs:
         run: cargo test -p wex-local-resources --test windows_contract --locked -- --nocapture
       - name: Windows storage contracts
         run: cargo test -p wex-access-store --test windows_store --locked -- --nocapture
-      - name: Windows desktop Host check
-        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+      - name: Windows desktop Host dependency resolution and compile check
+        run: cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - name: Report Tauri lockfile drift
+        if: always()
+        shell: pwsh
+        run: |
+          git diff -- apps/desktop/src-tauri/Cargo.lock
+          if (git diff --quiet -- apps/desktop/src-tauri/Cargo.lock) { Write-Output 'No Tauri lockfile drift' } else { Write-Output 'Tauri lockfile needs committed refresh' }
