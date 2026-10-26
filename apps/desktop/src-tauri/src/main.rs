@@ -2,6 +2,7 @@
 mod github_config;
 mod local_access;
 mod tool_approvals;
+mod tool_catalog;
 mod vault;
 
 use std::sync::{Arc, Mutex};
