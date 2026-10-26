@@ -457,3 +457,49 @@ Core `Task` 是较小的执行状态和分配事实；Desktop Service `Task` 是
 下一批应扩展到桌面任务 UI、操作回执文件和 TaskBoard/Dispatcher 是否经其他 service/Host 路径调用，结合测试和数据迁移方案制定准确接口变更表。完成全仓引用检查前，不应断言整个 Dispatcher 闭环完全不存在。
 
 本批没有修改正式基线、业务代码、TaskStatus、SQLite 或工作流，未进行编译/Actions；只更新审查工作稿。
+
+## 15. 第九批：桌面界面、工具 marker/结果与最小接口变更表（2026-10-27）
+
+### 15.1 实际界面与记录现状
+
+本批核查 main 的 `apps/desktop/src/App.tsx`、`Projects.tsx`、`apps/desktop/src-tauri/src/main.rs`、`crates/wex-desktop-service/src/tool_journal.rs`、`tool_results.rs`。这些是源码静态观察，不是桌面实机验收或全仓调用索引。
+
+- 项目 UI 在 `Projects.tsx` 显示任务卡、目标、范围、验收条件、人员和人工 TaskJournal，明确提示“施工、实际验证、审查与修复流转尚未接通”。因此用户可编辑任务资料，**不能把该界面当作已交付执行闭环**。
+- `App.tsx` 通过项目页挂接上述组件；当前 `Snapshot` 展示 Task/TaskRecord，不含可查询的版本化 Artifact/Verification/Acceptance 关联。
+- Tauri `main.rs` 有 `tool_receipts(conversation_id)` 和 `tool_results(conversation_id,turn_id)`，读的是按对话维度的工具证据，并没有从这两个命令直接把证据归并成任务验收。
+- `ToolReceiptMarker` 保存 operation、attempt、state、内容摘要及可选 conversation/turn/policy。marker 是单次执行的不可变状态记录；其读取按 conversation 筛选，**未绑定 Task 或成果版本**。遗留不带 conversation 的 marker 不被猜测归属到某一会话。
+- `SavedToolResult` 保存 conversation/turn/call/tool/参数/结果；`sequence` 仅是**同一次对话回合的发布顺序**，不是跨任务全局时钟，也不是 Artifact 内容版本或 Verification 编号。
+- marker 和 tool result 是两个独立的文件记录区域。不能假定它们和 SQLite 的 DesktopSnapshot 构成天然原子事务；后续任务引用须有崩溃恢复与证据存在性检查。
+
+### 15.2 最小接口变更表（面向施工者的审查提案，不是已获准修改的源码清单）
+
+| 现有入口 | 建议处理 | 新增或保持的最小语义 | 阶段 |
+| --- | --- | --- | --- |
+| Desktop `Task` / `TaskRecord` | **保留**用户草案和人工日志，不抹除历史 | 稳定 task_id；区分要求版本与 DesktopSnapshot.revision；人工记录保持 `source=User` | 先审查映射 |
+| `TaskBoard` / `DispatchTicket` | **复用**既有纯规则；接可信任务写入口 | task ID、assignment_epoch、单次派工主体和权威运行状态；多成员任务不降级为永远单 Agent | 先接只读投影 |
+| `OperationLedger` / `ToolReceiptMarker` | **复用**既有安全和不确定性保护 | 操作/尝试关联、实际可观察结果及 marker 的原始身份；不强制重写旧证据 | 优先接引用 |
+| `SavedToolResult` | **保留**对话工具结果存储 | 由受控索引将既有记录关联任务/成果，不能从纯文本内容直接推定“已验证” | 增量 |
+| Capability / Connection | **扩展**来源与能力绑定，支持内置和配置连接 | 实际目标、能力身份、配置/版本引用；不预设统一运行时 | 先契约 |
+| 新增成果关联 | **最小新记录或引用**，形式待定 | task + requirement version + artifact identity/version + source | 待迁移方案 |
+| 新增核验关联 | **最小新记录或引用**，形式待定 | 检查条件、artifact version、验证手段/环境、证据、结果 | 待迁移方案 |
+| 新增验收记录 | **可追溯结论**，形式待定 | task 要求版本、已满足和待验证条件、决定来源；工具成功不自动验收 | 待迁移方案 |
+| UI `Projects`/TaskJournal | **保留基础交互，按证据逐步展示** | 明确区分人工进度、真实执行、成果、验证和验收，未知则显示未验证 | 接线后实现 |
+| 外部 Agent Adapter | **仅补跨边界事实引用** | 委托、外部 session/job、交付批次、成果及可观察核验；不追逐完整内部操作 | 按需实现 |
+
+### 15.3 不应立即施工的改动
+
+1. 不能将 `ToolReceiptMarker` 简单改成强制 task_id：普通对话工具可以没有 Task，已有历史 marker 不应被编造归属。
+2. 不把 `SavedToolResult.sequence` 当作任务级有序执行编号，更不能拿它证明某版成果通过测试。
+3. 不删除 Desktop 的 `Draft` 任务，也不直接用 Core 的 `Queued/Running/Failed` 覆盖现有 UI 字段。
+4. 不因为“统一执行入口”而强制 DSH/Hermes 内部采用 WEX OperationLedger 或做逐命令上报。
+5. 不在未完成旧 JSON、marker、Tauri TS 与 SQLite 迁移核对前直接冻结新增数据库字段。
+
+### 15.4 当前可收敛与真正待定
+
+**可收敛为契约原则**：Task 身份和需求版本必须稳定；工具回执和人工日志分离；成果版本与检查条件可追溯；原生与外部交接深度不同；执行失败不直接代表任务终结。
+
+**需要真实接口设计或实施前核对**：Task 状态的单一权威服务及它与 Core/桌面草案的映射；新记录的具体格式和事务策略；多 Agent 分工的最小实体；失败状态映射；外部成果版本取得方式。均不因本次表格直接得到修改生产代码的授权。
+
+后续应以一个真实 WEXPC 开发任务为样例逐项走通：发布任务 → 两人不重叠派工 → 文件/测试证据 → 成果版本 → 独立核验 → 任务视图与重启恢复。真实 Windows 验证必须明确 NOT_RUN 时不得宣称通过。
+
+本批无代码、数据库、正式规范或 Actions 修改；仅审查文档提交。
