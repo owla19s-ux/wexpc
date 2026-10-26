@@ -211,3 +211,97 @@ it('keeps evidence stale when the superseding snapshot fails', async () => {
   expect(screen.getByText(/任务\/派工状态当前未核实/)).toBeTruthy();
   expect((screen.getByRole('button', { name: '登记派工' }) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('settles the original dispatch after a newer verified snapshot even when the old IPC never returns', async () => {
+  let reads = 0;
+  let dispatches = 0;
+  let resolveB: ((value: Snapshot) => void) | undefined;
+  ipc.mockImplementation((name: string) => {
+    if (name === 'snapshot') {
+      reads++;
+      if (reads === 1) return Promise.resolve(snapshot('pending'));
+      if (reads === 2) return new Promise<Snapshot>(() => {}); // A never settles.
+      if (reads === 3) return new Promise<Snapshot>(resolve => { resolveB = resolve; });
+      throw new Error('unexpected snapshot read');
+    }
+    if (name === 'queue_dispatch_attempt') {
+      dispatches++;
+      return Promise.reject(new Error('dispatch response lost'));
+    }
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await waitFor(() => expect(reads).toBe(2));
+  fireEvent.click(screen.getByRole('button', { name: '并发刷新' }));
+  await waitFor(() => expect(reads).toBe(3));
+  expect(finishedRuns).not.toHaveBeenCalled();
+  await act(async () => { resolveB?.(snapshot('outcome_unknown')); });
+  await waitFor(() => expect(finishedRuns).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(/1 个结果未知/)).toBeTruthy();
+  expect(dispatches).toBe(1);
+});
+
+it('settles the original dispatch as unverified when a newer snapshot fails and old IPC hangs', async () => {
+  let reads = 0;
+  let dispatches = 0;
+  let rejectB: ((reason: Error) => void) | undefined;
+  ipc.mockImplementation((name: string) => {
+    if (name === 'snapshot') {
+      reads++;
+      if (reads === 1) return Promise.resolve(snapshot('pending'));
+      if (reads === 2) return new Promise<Snapshot>(() => {}); // A never settles.
+      if (reads === 3) return new Promise<Snapshot>((_, reject) => { rejectB = reject; });
+      throw new Error('unexpected snapshot read');
+    }
+    if (name === 'queue_dispatch_attempt') {
+      dispatches++;
+      return Promise.reject(new Error('dispatch response lost'));
+    }
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await waitFor(() => expect(reads).toBe(2));
+  fireEvent.click(screen.getByRole('button', { name: '并发刷新' }));
+  await waitFor(() => expect(reads).toBe(3));
+  expect(finishedRuns).not.toHaveBeenCalled();
+  await act(async () => { rejectB?.(new Error('latest snapshot unavailable')); });
+  await waitFor(() => expect(finishedRuns).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(/任务\\/派工状态当前未核实/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: '登记派工' }) as HTMLButtonElement).disabled).toBe(true);
+  expect(dispatches).toBe(1);
+});
+
+it('settles A and B callers via C without waiting for either superseded IPC', async () => {
+  let reads = 0;
+  let resolveC: ((value: Snapshot) => void) | undefined;
+  ipc.mockImplementation((name: string) => {
+    if (name === 'snapshot') {
+      reads++;
+      if (reads === 1) return Promise.resolve(snapshot('pending'));
+      if (reads === 2 || reads === 3) return new Promise<Snapshot>(() => {});
+      if (reads === 4) return new Promise<Snapshot>(resolve => { resolveC = resolve; });
+      throw new Error('unexpected snapshot read');
+    }
+    if (name === 'queue_dispatch_attempt') return Promise.reject(new Error('dispatch response lost'));
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await waitFor(() => expect(reads).toBe(2));
+  fireEvent.click(screen.getByRole('button', { name: '并发刷新' }));
+  await waitFor(() => expect(reads).toBe(3));
+  fireEvent.click(screen.getByRole('button', { name: '并发刷新' }));
+  await waitFor(() => expect(reads).toBe(4));
+  expect(finishedRuns).not.toHaveBeenCalled();
+  await act(async () => { resolveC?.(snapshot('outcome_unknown')); });
+  await waitFor(() => expect(finishedRuns).toHaveBeenCalledTimes(3));
+  expect(screen.getByText(/1 个结果未知/)).toBeTruthy();
+});
