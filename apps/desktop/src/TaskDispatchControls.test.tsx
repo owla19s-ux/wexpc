@@ -125,3 +125,27 @@ it('rejects preview evidence with mismatched project or publication epoch',async
   await waitFor(()=>expect(ipc).toHaveBeenCalledTimes(2));
   expect(screen.queryByRole('status')).toBeNull();
 });
+
+
+it('does not offer an admission preview when the dispatch ledger is unavailable',()=>{
+  render(<TaskDispatchControls task={task} agents={agents} revision={11} run={run}/>);
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  const preview=screen.getByRole('button',{name:'核对调度准入（不执行）'}) as HTMLButtonElement;
+  expect(preview.disabled).toBe(true);
+  fireEvent.click(preview);
+  expect(ipc).not.toHaveBeenCalled();
+});
+
+it('does not show a stale preview after an existing attempt arrives',async()=>{
+  ipc.mockResolvedValue({taskId:'task-1',projectId:'project',agentId:'agent-a',assignmentEpoch:2});
+  const view=render(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run}/>);
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  fireEvent.click(screen.getByRole('button',{name:'核对调度准入（不执行）'}));
+  await screen.findByRole('status');
+  view.rerender(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[{
+    id:'existing',task_id:'task-1',project_id:'project',agent_id:'agent-b',
+    publication_epoch:2,status:'outcome_unknown',recorded_revision:10,
+  }]} run={run}/>);
+  expect(screen.queryByRole('status')).toBeNull();
+  expect((screen.getByRole('button',{name:'核对调度准入（不执行）'}) as HTMLButtonElement).disabled).toBe(true);
+});
