@@ -29,6 +29,30 @@ pub fn approved_git_diff(
     approved_git_read(dispatch, repo_id, trusted_root, "git_diff")
 }
 
+/// Remove inherited Git-specific overrides, including arbitrary indexed
+/// GIT_CONFIG_KEY_N values. Git's own prompt restriction is set afterward.
+fn is_git_override(key: &std::ffi::OsStr) -> bool {
+    key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_")
+}
+
+fn sanitize_git_environment(command: &mut Command) {
+    // Remove overrides inherited from the parent and overrides explicitly
+    // configured on this Command (which take precedence over inheritance).
+    let mut names: Vec<_> = std::env::vars_os()
+        .map(|(key, _)| key)
+        .filter(|key| is_git_override(key))
+        .collect();
+    names.extend(
+        command
+            .get_envs()
+            .filter(|(key, _)| is_git_override(key))
+            .map(|(key, _)| key.to_os_string()),
+    );
+    for key in names {
+        command.env_remove(key);
+    }
+}
+
 fn approved_git_read(
     dispatch: &Dispatch,
     repo_id: &str,
@@ -55,6 +79,7 @@ fn approved_git_read(
         .ok_or_else(|| ServiceError::new("INVALID_INPUT", "仓库路径编码不可用"))?;
     super::intent_binding::verify_arguments(dispatch, &[root.as_bytes()])?;
     let mut child = Command::new("git");
+    sanitize_git_environment(&mut child);
     child
         .arg("--no-optional-locks")
         // A repository-controlled core.fsmonitor hook can execute a program
@@ -129,6 +154,62 @@ fn collect_bounded_output(mut source: impl Read, limit: usize) -> std::io::Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn all_git_override_names_are_fenced_including_numbered_keys() {
+        use std::ffi::OsStr;
+        for name in [
+            "GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+            "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_57", "GIT_CONFIG_VALUE_57",
+            "GIT_CONFIG_PARAMETERS", "GIT_SSH_COMMAND",
+        ] {
+            assert!(is_git_override(OsStr::new(name)), "{name}");
+        }
+        for name in ["GITHUB_TOKEN", "HOME", "PATH", "EDITOR"] {
+            assert!(!is_git_override(OsStr::new(name)), "{name}");
+        }
+    }
+
+    #[test]
+    fn sanitizer_removes_explicit_git_overrides_from_command() {
+        let mut cmd = Command::new("git");
+        cmd.env("GIT_DIR", "/other/repository")
+            .env("GIT_CONFIG_KEY_57", "core.fsmonitor")
+            .env("GIT_CONFIG_VALUE_57", "evil-program")
+            .env("UNRELATED_SETTING", "preserve");
+        sanitize_git_environment(&mut cmd);
+        let configured: Vec<_> = cmd.get_envs()
+            .map(|(key, value)| (key.to_string_lossy().to_string(), value.is_some()))
+            .collect();
+        assert!(configured.iter().any(|(key, active)| key == "UNRELATED_SETTING" && *active));
+        assert!(configured.iter().all(|(key, active)| {
+            !is_git_override(std::ffi::OsStr::new(key)) || !active
+        }));
+    }
+
+    #[test]
+    fn sanitized_git_process_does_not_inherit_repository_redirection() {
+        let trusted = tempfile::tempdir().unwrap();
+        let hostile = tempfile::tempdir().unwrap();
+        for root in [trusted.path(), hostile.path()] {
+            assert!(Command::new("git").arg("init").arg("--quiet")
+                .arg(root).status().unwrap().success());
+        }
+        std::fs::write(trusted.path().join("trusted.txt"), b"allowed").unwrap();
+        std::fs::write(hostile.path().join("hostile.txt"), b"wrong repo").unwrap();
+        let mut cmd = Command::new("git");
+        // Inject an actively hostile repository override into this Command.
+        // A plain git -C trusted_root would read the hostile repository.
+        cmd.env("GIT_DIR", hostile.path().join(".git"))
+            .env("GIT_WORK_TREE", hostile.path());
+        sanitize_git_environment(&mut cmd);
+        cmd.arg("-C").arg(trusted.path()).args(GIT_STATUS_ARGS);
+        let output = cmd.output().unwrap();
+        assert!(output.status.success());
+        let status = String::from_utf8(output.stdout).unwrap();
+        assert!(status.contains("trusted.txt"), "{status}");
+        assert!(!status.contains("hostile.txt"), "{status}");
+    }
+
     #[test]
     fn oversized_git_output_is_drained_without_unbounded_retention() {
         let mut source = std::io::Cursor::new(vec![b'x'; 128 * 1024]);
