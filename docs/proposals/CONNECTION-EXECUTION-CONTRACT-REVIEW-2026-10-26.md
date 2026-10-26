@@ -503,3 +503,84 @@ Core `Task` 是较小的执行状态和分配事实；Desktop Service `Task` 是
 后续应以一个真实 WEXPC 开发任务为样例逐项走通：发布任务 → 两人不重叠派工 → 文件/测试证据 → 成果版本 → 独立核验 → 任务视图与重启恢复。真实 Windows 验证必须明确 NOT_RUN 时不得宣称通过。
 
 本批无代码、数据库、正式规范或 Actions 修改；仅审查文档提交。
+
+## 16. 第十批：最小可编码数据契约 V0（审查提案，2026-10-27）
+
+> **范围**：为已经确认的“任务要求 ↔ 实际产出 ↔ 对应验证 ↔ 验收依据”提供能写代码、能做测试的最小协议草案。该方案不是全量执行平台、不是所有 Task 的固定阶段，也不改变 Rust/SQLite/前端的正式接口。字段名只是建议，不视为已冻结 ABI。
+
+### 16.1 与既有领域对象的边界
+
+- `Desktop Task` 继续承担用户看到的目标、修改范围、验收条件、参与成员；旧 task ID 和人工 TaskRecord 不改变语义。
+- `Core TaskBoard` 继续提供分派相关状态规则，但不把它变成第二个独立持久化的正式任务真相。
+- `OperationLedger` 继续管理 WEX 自己执行的操作及结果；外部 Agent 的全部内部步骤不强制映射成 Operation。
+- `Dispatcher` 只管可控制的派工/交接/资源占用，权限与外部运行时仍由相应 Host/Adapter 负责。
+- 结构化关联记录是 **Task 工作事实的索引**，不是执行器或通用工作流节点。
+
+### 16.2 语义字段候选（允许以单一表、JSON 记录或其他受控存储实现）
+
+| 概念 | 最小字段候选 | 校验不变量 |
+| --- | --- | --- |
+| `RequirementSnapshot` | `task_id`, `requirement_revision`, `goal`, `scope`, `acceptance_criteria`, `captured_at` | 已发布要求版本不可被静默覆盖；新编辑生成新版本/引用；旧 Task 可以仅有历史原文而不伪造发布审批 |
+| `WorkReference` | `task_id`, `assignment_ref?`, `operation_id?`, `external_job_ref?`, `source_kind` | 原生操作和外部委派均可只存 WEX 可观察边界；无任务的对话工具不强制此记录 |
+| `ArtifactRevision` | `artifact_id`, `task_id`, `requirement_revision?`, `locator`, `version_kind`, `version_value`, `produced_by?`, `observed_at` | 仅 locator/文件名不构成版本；不可确认版本时记录 unknown，不继承已通过验证 |
+| `VerificationRecord` | `verification_id`, `task_id`, `requirement_revision`, `artifact_revisions[]`, `criterion_refs[]`, `method`, `environment?`, `result`, `evidence_refs[]`, `verified_by` | 必须明确覆盖的要求与成果版本；实际未运行不能标 pass；审核意见与可信测试结果保留来源区别 |
+| `AcceptanceRecord` | `acceptance_id`, `task_id`, `requirement_revision`, `artifact_revisions[]`, `covered_criteria[]`, `outstanding_criteria[]`, `decision`, `decided_by`, `evidence_refs[]` | 完成结论有明确条件与依据；仅一个 operation succeeded 不足以自动验收；人工确认不伪装成机器验证 |
+
+这里 `?` 表示字段可选，不代表“无证据也能写成功”。时间信息只辅助排序，不替代内容版本或可信外部 ID。`version_kind` 可为 commit hash、内容摘要、外部修订号、不可变交付批次等受支持来源；不是一律要求所有成果 SHA256。
+
+### 16.3 针对已确认产品规则的三个操作示例
+
+**开发任务**：代码版本 `commit-A` + Linux 单测 pass；Windows 实机为 unknown/not_run。验收条件包含 Windows 实机可运行时，任务不得显示“已全部验收”。新代码 `commit-B` 不自动继承 A 的单测。
+
+**研究任务**：报告 `rev-2` + 资料来源核查记录；是否满足全部研究范围由适用审查或人工判定。无需自动编译、运行环境、统一 Agent 工具日志。
+
+**外部委托**：外部系统返回 job ID 与交付件 revision；WEX 记录可核验的交付及条件对应；若只返回临时链接/缺少版本，标版本未知与待核实，不编造第三方内部命令。
+
+### 16.4 最小接口边界（伪签名，仅表示请求与责任）
+
+```text
+TaskApplication:
+  publish_requirement(task_id, expected_revision, terms) -> requirement_ref
+  record_work_link(task_id?, dispatch_ref?, operation_or_external_ref, observed_source) -> work_ref
+  record_artifact(task_id, artifact_identity, version_evidence, provenance) -> artifact_ref
+  record_verification(task_id, requirement_ref, artifact_refs, checked_criteria, method, outcome, evidence) -> verification_ref
+  propose_acceptance(task_id, requirement_ref, considered_artifacts, criterion_coverage, rationale) -> proposal
+  commit_acceptance(proposal, authorized_decision) -> acceptance_ref
+
+Dispatcher:
+  admit_task(assignment_and_scope) -> ticket_or_refusal
+  handoff(ticket, target_capability_or_external_job) -> observable_handoff
+  on_receipt(reference, observed_result) -> event  // no AI judgment or automatic final acceptance
+
+NativeExecutionHost:
+  authorize_and_execute(intent) -> operation/attempt/evidence   // retains current security/recovery controls
+
+ExternalAdapter:
+  delegate_or_query(supported_request) -> observable_reference_or_unknown  // no universal internal runtime contract
+```
+
+**注意**：以上不是“必须照这个方法名创建新类”。一个已有应用服务可以暴露若干受控操作来实现，不需要造新的通用 Manager、Engine 或额外后台常驻模块。工作链接不是新增授权来源，所有写入需保持来源身份与事务校验。
+
+### 16.5 对失败与未验证的最小状态语义
+
+- `OperationFailed`：某次实际执行失败，错误与证据永久保留；默认不等同任务最终失败。
+- `Blocked`：不能在现有权限/环境/证据范围内继续，或副作用结果不明，需要核对；禁止对不确定写入盲重试。
+- `NeedsRepair`：是可在任务视图/调度建议中表达的下一步工作类型，**不要求立即新增 Core TaskStatus 枚举**；必须有批准的工作范围和实际执行权限才能执行修复。
+- `TaskEndedUnfulfilled`：任务层依用户/明确规则决定停止但目标未达成；具体映射现有 Failed/其他终态待实现审查。
+- `AcceptancePending`：已有成果但条件未覆盖或尚未取得有效验收依据；可独立于派工状态存在，不把它强塞到每个执行状态。
+
+### 16.6 兼容与落地门禁
+
+1. **第一步只读评估**：旧 `DesktopSnapshot` 的 Task/TaskRecord 仍能读取；原始人工记录不得自动晋升为 Verification。
+2. **稳定身份**：维持原 task ID、operation/attempt ID 与对话工具回执身份；新增引用建立显式关联，不根据相似名称猜测归属。
+3. **版本不可混用**：DesktopSnapshot 全局 revision ≠ requirement_revision ≠ artifact_revision ≠ assignment_epoch；需要在接口上防止误用。
+4. **事务与恢复**：SQLite 任务记录与磁盘工具 marker 分属不同介质，必须验证掉电/失败后的引用完整性及结果 unknown 的保守显示。
+5. **权限与多成员**：发布、记录成果、验证、正式验收各自按实际已授权身份写入；Task 归属不自动授予外部资源权限；业务多成员不强制降为单 Agent。
+6. **外部兼容**：不强迫外部 Agent、插件或 MCP 适配器支持内部 Task、状态枚举、progress/stream/cancel/resume 全套能力；只要求声明真实可用能力和可观察回执。
+7. **测试用例**：至少覆盖旧数据读取、同路径新版不继承旧验证、同卡多 Agent、验证失败后继续修复、缺少 Windows 实机验证时不能最终完成、外部只交付文件、迟到回执、未知副作用不得重试。
+
+### 16.7 决策状态
+
+本节的**事实分离、需求/产出/验证对应、灵活流程、外部边界**是用户已确认和旧设计可继承的原则。**具体字段、持久化对象个数、方法签名、权限角色和自动验收条件**为本次新增的实现提案，未获冻结批准；施工前应对照实际调用方进行最小化裁剪。
+
+本批仅文档审查，无业务代码、正式接口、SQLite schema、Actions 或 Windows 实机测试变化。
