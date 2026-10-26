@@ -31,6 +31,26 @@ it('uses existing Host-backed controls only for the selected conversation', () =
   expect(openConnections).toHaveBeenCalledOnce();
 });
 
+it('does not silently grant controls to a different conversation when the selected one disappears', () => {
+  const openConversation = vi.fn();
+  const props = { snapshotFresh: true, onChanged: async () => {}, openConversation, openConnections: vi.fn() };
+  const view = render(<Settings data={state} {...props}/>);
+  fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-B' } });
+  expect(screen.getByTestId('local-scope').textContent).toBe('conv-B');
+
+  // The Host snapshot no longer contains B. Never fall back to A without user selection.
+  view.rerender(<Settings data={{ ...state, conversations: [a] }} {...props}/>);
+  expect(screen.getByRole('alert').textContent).toMatch(/不会自动切换到其他对话/);
+  expect(screen.queryByTestId('local-scope')).toBeNull();
+  expect(screen.queryByTestId('github-scope')).toBeNull();
+  expect(screen.queryByRole('button', { name: '进入此对话查看进程与工具回执' })).toBeNull();
+
+  fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-A' } });
+  expect(screen.getByTestId('local-scope').textContent).toBe('conv-A');
+  expect(screen.getByTestId('github-scope').textContent).toBe('conv-A');
+  expect(openConversation).not.toHaveBeenCalled();
+});
+
 it('does not imply permissions exist before the authoritative snapshot loads', () => {
   render(<Settings data={null} snapshotFresh={false} onChanged={async () => {}} openConversation={vi.fn()} openConnections={vi.fn()}/>);
   expect(screen.getByText(/尚未读取桌面服务的权威数据/)).toBeTruthy();
