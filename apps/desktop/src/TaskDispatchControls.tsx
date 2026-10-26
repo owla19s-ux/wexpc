@@ -43,7 +43,7 @@ export function TaskDispatchControls({task,agents,revision,attempts,run}:{
     void run(async()=>{
       const ticket=await command<{taskId:string;projectId:string;agentId:string;assignmentEpoch:number}>(
         'preview_task_dispatch',{revision:snapshotRevision,taskId,agentId:chosen});
-      if(request===generation.current&&ticket.taskId===taskId&&ticket.agentId===chosen){
+      if(request===generation.current&&ticket.taskId===taskId&&ticket.projectId===task.project_id&&ticket.agentId===chosen&&ticket.assignmentEpoch===publicationEpoch){
         setPreview({taskId,agentId:chosen,revision:snapshotRevision,publicationEpoch:publicationEpoch??0,assignmentEpoch:ticket.assignmentEpoch});
       }
     });
