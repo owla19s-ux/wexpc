@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { afterEach, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { App } from './App';
 import type { Snapshot } from './types';
 
-const { ipc } = vi.hoisted(() => ({ ipc: vi.fn() }));
+const { ipc, finishedRuns } = vi.hoisted(() => ({ ipc: vi.fn(), finishedRuns: vi.fn() }));
 vi.mock('./client', () => ({
   desktopAvailable: true,
   command: ipc,
@@ -21,9 +21,10 @@ vi.mock('./Projects', () => ({
   }) =>
     <div data-testid="project-freshness">
       {snapshotFresh ? 'fresh' : 'stale'}
-      <button disabled={!snapshotFresh} onClick={() => void run(() => ipc('queue_dispatch_attempt'))}>
+      <button disabled={!snapshotFresh} onClick={() => void run(() => ipc('queue_dispatch_attempt')).then(finishedRuns)}>
         登记派工
       </button>
+      <button onClick={() => void run(async () => {}).then(finishedRuns)}>并发刷新</button>
     </div>,
 }));
 vi.mock('./Chat', () => ({ Chat: () => null }));
@@ -44,7 +45,7 @@ function snapshot(status: 'pending' | 'outcome_unknown'): Snapshot {
       agent_id: 'agent-1', publication_epoch: 1, status, recorded_revision: 1 }],
   } as unknown as Snapshot;
 }
-afterEach(() => { cleanup(); ipc.mockReset(); });
+afterEach(() => { cleanup(); ipc.mockReset(); finishedRuns.mockReset(); });
 
 it('marks cached task evidence stale after snapshot failure and restores it only on a successful read', async () => {
   let reads = 0;
@@ -142,4 +143,71 @@ it('preserves the original IPC error while showing the Host state after a succes
   await screen.findByText(/1 个结果未知/);
   expect(screen.queryByText(/快照读取未核实/)).toBeNull();
   expect(reads).toBe(2);
+});
+
+
+it('waits for the newest snapshot when dispatch reconciliation is superseded', async () => {
+  let reads = 0;
+  let dispatches = 0;
+  let resolveA: ((value: Snapshot) => void) | undefined;
+  let resolveB: ((value: Snapshot) => void) | undefined;
+  ipc.mockImplementation((name: string) => {
+    if (name === 'snapshot') {
+      reads++;
+      if (reads === 1) return Promise.resolve(snapshot('pending'));
+      if (reads === 2) return new Promise<Snapshot>(resolve => { resolveA = resolve; });
+      if (reads === 3) return new Promise<Snapshot>(resolve => { resolveB = resolve; });
+      throw new Error('unexpected snapshot read');
+    }
+    if (name === 'queue_dispatch_attempt') {
+      dispatches++;
+      return Promise.reject(new Error('IPC response lost'));
+    }
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await waitFor(() => expect(reads).toBe(2));
+  fireEvent.click(screen.getByRole('button', { name: '并发刷新' }));
+  await waitFor(() => expect(reads).toBe(3));
+  // A has a valid payload, but B has superseded it and remains pending.
+  await act(async () => { resolveA?.(snapshot('outcome_unknown')); });
+  expect(finishedRuns).not.toHaveBeenCalled();
+  expect(screen.getByText(/1 个待领取/)).toBeTruthy();
+  await act(async () => { resolveB?.(snapshot('outcome_unknown')); });
+  await waitFor(() => expect(finishedRuns).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(/1 个结果未知/)).toBeTruthy();
+  expect(dispatches).toBe(1);
+});
+
+it('keeps evidence stale when the superseding snapshot fails', async () => {
+  let reads = 0;
+  let resolveA: ((value: Snapshot) => void) | undefined;
+  let rejectB: ((reason: Error) => void) | undefined;
+  ipc.mockImplementation((name: string) => {
+    if (name === 'snapshot') {
+      reads++;
+      if (reads === 1) return Promise.resolve(snapshot('pending'));
+      if (reads === 2) return new Promise<Snapshot>(resolve => { resolveA = resolve; });
+      if (reads === 3) return new Promise<Snapshot>((_, reject) => { rejectB = reject; });
+      throw new Error('unexpected snapshot read');
+    }
+    if (name === 'queue_dispatch_attempt') return Promise.reject(new Error('IPC response lost'));
+    throw new Error(name);
+  });
+  render(<App />);
+  await screen.findByText(/1 个待领取/);
+  fireEvent.click(screen.getAllByRole('button', { name: '测试项目' })[0]);
+  fireEvent.click(screen.getByRole('button', { name: '登记派工' }));
+  await waitFor(() => expect(reads).toBe(2));
+  fireEvent.click(screen.getByRole('button', { name: '并发刷新' }));
+  await waitFor(() => expect(reads).toBe(3));
+  await act(async () => { resolveA?.(snapshot('pending')); });
+  expect(finishedRuns).not.toHaveBeenCalled();
+  await act(async () => { rejectB?.(new Error('latest snapshot unavailable')); });
+  await waitFor(() => expect(finishedRuns).toHaveBeenCalledTimes(2));
+  expect(screen.getByText(/任务\/派工状态当前未核实/)).toBeTruthy();
+  expect((screen.getByRole('button', { name: '登记派工' }) as HTMLButtonElement).disabled).toBe(true);
 });
