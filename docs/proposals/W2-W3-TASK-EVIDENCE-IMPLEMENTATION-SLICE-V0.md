@@ -245,3 +245,34 @@ read_or_execute_on_source(source_identity, current_authority, action)
 - **测试**：两个同名 Context 不冲突；改名称/排序不影响所有关联和授权；同一对象在不同展示视图可有各自序号；显示编号缺失或重复不造成记录错误归属。
 
 本节不冻结具体字段名、序号格式、排序存储位置或前端交互，也不要求把 ID 暴露给普通用户。
+
+## 11. 第十七批：Context 身份、名称与显示排序的源码核查（2026-10-27）
+
+### 已确认的现有代码事实
+
+核查 main：`crates/wex-desktop-service/src/domain/organization.rs`、`application/organization.rs`、`apps/desktop/src/Organization.tsx`。
+
+- Space、Group、Context 都有独立 `id` 和 `name`；ContextPlacement 用 `context_id/space_id/group_id` 组织位置，均未看到独立排序字段。
+- `rename_space`、`rename_group`、Context 编辑入口和 `move_context` 操作按稳定 ID 定位原对象；现有实现不必因重命名/移动而生成新 ID。
+- 当前组织界面使用 `data.contexts.filter(...)` 得到列表后直接 `.map` 展示，没有显式用户可调整的排序号或排序设置；显示先后实际上依赖快照集合原有顺序，**不等于正式、可管理的排序契约**。
+- 上述是源码静态核对；未进行交互测试或 SQLite 迁移验证。
+
+### 与用户确认语义的对应结论
+
+**内部 ID、用户名称、展示顺序必须独立**，但当前无需急于改动已有 ID/name/placement 的有效结构。实施优先级：
+
+1. **维持稳定 ID**：重命名或重排不替换原 `Context.id`，也不使用列表位置当跨 Context 引用或权限标识。
+2. **只在确有 UI 排序功能时加排序元数据**：建议排序信息附着于具体列表/Placement/视图，按已有对象 ID 关联；一个对象在不同视图的序号允许不同，不强制全局连续唯一编号。
+3. **先定义无排序字段时的兼容行为**：旧数据按既有顺序呈现作为回退，避免一次升级导致用户看到的排列无故大幅改变；要更换排序算法应单独说明并验证。
+4. **相同名称仍由不同 ID 区分**：正式引用、调度事件和证据均引用 ID；名称/数字显示号只用于查找与呈现，**不得代替 ID 来鉴权或关联**。
+5. **ContextPlacement 既有一个位置的定义与多处引用不能混用**：显示排序不应顺手把 placement 改造成多个真实归属；未来多 Context 引用应使用受控 reference 关系。
+
+### 必须有的回归场景
+
+- 同名 Context、Space 或 Group 的身份不冲突（如果应用当前命名校验另有约束，先核查再改，不伪称现已支持）。
+- Context 重命名、重新排序和移动后，Task、会话、产物、审查回执及跨 Context 引用仍指向同一稳定 ID。
+- 同 Context 在两个视图排序号不同，不影响真实归属。
+- 旧快照缺少排序元数据时可读且 UI 有稳定回退，不迁移出新对象或丢失原顺序。
+- 用户显示序号重复、不连续或为空不会造成对象绑定、权限校验或任务执行异常。
+
+本批不冻结排序字段名、唯一性策略及具体拖拽 UI；只是限定将来实施时不得让显示顺序侵入身份/权限/状态逻辑。
