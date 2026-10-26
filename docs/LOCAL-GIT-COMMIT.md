@@ -127,3 +127,13 @@ Windows 原生私有权限、替换/同步语义和持久后端仍是阻塞；�
 **执行语义边界**：这批明确为 Unix 原始文件规划切片，不运行 Git clean/smudge filters、attributes、编码或行尾转换，也不实现 core.filemode 等完整 Git 配置语义；不能把它直接当作普通 git add 的替代品或已批准的最终 writer 策略。Windows 的模式和私有持久后端仍未支持，本入口非 Unix 拒绝。unborn、删除、gitfile/linked worktree、symlink/gitlink 等旧缺口仍保留，尚不对模型开放。
 
 新增测试包括纯树排序/模式、前缀/别名/非法 OID、深度/访问次数/对象大小拒绝，以及真实 SHA-1/SHA-256 准入：已存在未批准暂存变化且选中文件配置必定失败的 required clean filter 时，原生规划不运行该过滤器，原始二进制/CRLF 字节与 Git hash-object --no-filters 结果一致；规划后 index、HEAD、对象库逐字不变。随后只有测试夹具持久化计划对象、创建提交和条件更新 ref，再通过计划绑定的真实读取器结算成功；提交不带入未批准暂存内容，真实 index 仍原样。无变化、批准后文件变化和降为只读均不产生可用计划。初始夹具曾在配置失败过滤器后执行 git add 导致索引刷新触发 filter，已调整夹具顺序，未改变生产实现以绕过失败。具体全量结果登记 PR #63，生产 writer/Windows/Host/模型及对话续答仍待完成，不触发 Actions。
+
+## 后续增量：不可变 commit 候选（2026-10-26）
+
+新增 `git_commit_candidate.rs`，`prepare_admitted_git_commit` 由既有原生树计划、批准消息的精确字节，以及受信任 Host 选定的 author/committer 元数据，在内存中生成固定 commit bytes 和 SHA-1/SHA-256 OID。独立作者/提交者名称、邮箱、时间和时区被固定在原始对象中；拒绝头注入、非法邮箱分隔、混合 OID 长度、过大消息/时间/时区等。保留消息是否带末尾换行，不调用 commit-tree 的消息规整，也不读取 Git 用户配置、运行 hooks、签名或自动添加 trailers。对象准备仍不写对象库、索引或引用。
+
+元数据来自 **Host 身份/时间策略，不是模型工具参数**；现有人工审批摘要尚不包含这些身份字段，不能称为“用户已批准作者”。本批只保证候选在 Host 选定之后不可变；最终 writer 的身份选择与审批展示政策仍须接线。时间切片限定非负 Unix 秒至 9999 年，时区限定 -14:00 至 +14:00；名称/邮箱验证用于有界且无歧义的 Git header，不冒充完整邮件地址验证。
+
+`GitCommitCandidate` 私有持有 attempt 绑定的 tree plan 和 commit 对象，提供只读 bytes/OID 及待保存对象迭代器。`read_and_settle_candidate_git_commit` 不再接收调用方临时给定的候选 OID，固定以预先计算的 OID 接入既有真实 HEAD、对象/tree/范围/身份及持久账本结算。即使另一对象的树、父提交和消息相同，只要作者/时间等字节不同，也不能替代这份候选。该候选仍是内存数据，不是派发许可或持久恢复日志；重启后不能从新时间重造候选并自动重派 Unknown 写入。
+
+新增 3 项纯编码/元数据测试，初始编码与注入回归 RED→GREEN；新增 Unix 真实 SHA-1/SHA-256 测试：候选 raw commit hash 与 Git 一致，准备后对象库未变；仅测试夹具保存计划对象并将分支指向“同树同消息、作者被替换”的提交，严格候选结算拒绝且保留 InFlight；分支改为精确候选才经真实回读持久成功，原索引与未批准暂存隔离仍保留。该测试持久化命令不是产品 writer。完整证据保存、对象/ref 生产写入、身份政策接线、Windows 持久后端、Host/模型入口和对话续答仍未完成；保持 Draft 与 skip ci，实际全量结果登记 PR #63。

@@ -16,6 +16,10 @@ pub use connectors::git_commit_admission::{
     GitCommitBegin, GitCommitReceipt,
 };
 pub use connectors::git_commit_binding::{git_commit_intent_digest, verify_git_commit_dispatch};
+pub use connectors::git_commit_candidate::{
+    prepare_admitted_git_commit, read_and_settle_candidate_git_commit, GitCommitCandidate,
+    GitCommitIdentity, GitCommitMetadata,
+};
 pub use connectors::git_commit_evidence::{
     parse_commit_object, CommitEvidenceError, CommitObject, CommitReadback, PreparedCommit,
     RepositoryVersion,

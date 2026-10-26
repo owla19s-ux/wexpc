@@ -18,6 +18,13 @@ pub struct PlannedGitObject {
     bytes: Vec<u8>,
 }
 impl PlannedGitObject {
+    pub(super) fn commit(bytes: Vec<u8>, width: usize) -> Result<Self> {
+        Ok(Self {
+            kind: "commit",
+            oid: object_oid("commit", &bytes, width)?,
+            bytes,
+        })
+    }
     pub fn kind(&self) -> &str {
         self.kind
     }
@@ -661,5 +668,130 @@ mod tests {
                 "PERMISSION_DENIED"
             );
         });
+    }
+    #[cfg(unix)]
+    #[test]
+    fn exact_precomputed_candidate_rejects_substituted_author_then_settles_real_git_object() {
+        for format in ["sha1", "sha256"] {
+            with_fixture(format, true, |store, admission, source, root| {
+                let metadata = crate::GitCommitMetadata {
+                    author: crate::GitCommitIdentity {
+                        name: "Candidate Author",
+                        email: "author@example.invalid",
+                        unix_seconds: 1_700_000_000,
+                        utc_offset_minutes: 480,
+                    },
+                    committer: crate::GitCommitIdentity {
+                        name: "Candidate Committer",
+                        email: "committer@example.invalid",
+                        unix_seconds: 1_700_000_001,
+                        utc_offset_minutes: 0,
+                    },
+                };
+                let index = std::fs::read(root.join(".git/index")).unwrap();
+                let before = object_files(root);
+                let candidate = crate::prepare_admitted_git_commit(
+                    store,
+                    admission,
+                    source,
+                    &git_program(),
+                    &metadata,
+                )
+                .unwrap();
+                assert_eq!(object_files(root), before);
+                assert_eq!(
+                    git(
+                        root,
+                        &["hash-object", "-t", "commit", "--stdin"],
+                        Some(candidate.commit().bytes())
+                    ),
+                    candidate.oid()
+                );
+                assert!(String::from_utf8(candidate.commit().bytes().to_vec())
+                    .unwrap()
+                    .contains(
+                        "author Candidate Author <author@example.invalid> 1700000000 +0800\n"
+                    ));
+                assert_eq!(
+                    crate::parse_commit_object(candidate.commit().bytes())
+                        .unwrap()
+                        .message,
+                    admission.prepared().message()
+                );
+                // All following writes are fixture-only, never product dispatch.
+                for object in candidate.objects() {
+                    git(
+                        root,
+                        &[
+                            "hash-object",
+                            "--no-filters",
+                            "-w",
+                            "-t",
+                            object.kind(),
+                            "--stdin",
+                        ],
+                        Some(object.bytes()),
+                    );
+                }
+                let substituted = String::from_utf8(candidate.commit().bytes().to_vec())
+                    .unwrap()
+                    .replace("author Candidate Author", "author Substituted Author");
+                let other_oid = git(
+                    root,
+                    &["hash-object", "-w", "-t", "commit", "--stdin"],
+                    Some(substituted.as_bytes()),
+                );
+                assert_ne!(other_oid, candidate.oid());
+                git(
+                    root,
+                    &[
+                        "update-ref",
+                        "refs/heads/work",
+                        &other_oid,
+                        candidate.tree_plan().parent(),
+                    ],
+                    None,
+                );
+                assert_eq!(
+                    crate::read_and_settle_candidate_git_commit(
+                        store,
+                        admission,
+                        source,
+                        &git_program(),
+                        &candidate
+                    )
+                    .unwrap_err()
+                    .code,
+                    "GIT_EVIDENCE_REJECTED"
+                );
+                assert!(matches!(
+                    store.load().unwrap().ledger.records[0].state,
+                    wex_core::operation::OperationState::InFlight { .. }
+                ));
+                git(
+                    root,
+                    &["update-ref", "refs/heads/work", candidate.oid(), &other_oid],
+                    None,
+                );
+                let receipt = crate::read_and_settle_candidate_git_commit(
+                    store,
+                    admission,
+                    source,
+                    &git_program(),
+                    &candidate,
+                )
+                .unwrap();
+                assert_eq!(receipt.commit_oid(), candidate.oid());
+                assert_eq!(std::fs::read(root.join(".git/index")).unwrap(), index);
+                assert_eq!(
+                    git(
+                        root,
+                        &["show", &format!("{}:unrelated", candidate.oid())],
+                        None
+                    ),
+                    "original"
+                );
+            });
+        }
     }
 }

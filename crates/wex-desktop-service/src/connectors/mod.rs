@@ -1,5 +1,6 @@
 pub mod git_commit_admission;
 pub mod git_commit_binding;
+pub mod git_commit_candidate;
 pub mod git_commit_evidence;
 pub mod git_commit_policy;
 pub mod git_commit_reader;
