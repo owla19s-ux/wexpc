@@ -63,14 +63,16 @@ fn generic_process_definition() -> ToolDefinition {
 /// Local file capabilities are scoped to this conversation's configured directories.
 fn append_local_capabilities(app: &AppHandle, chat: &wex_desktop_service::PreparedChat, policies: &impl ToolPolicyAuthority, tools: &mut Vec<ToolDefinition>) {
     let tool = ToolDefinition {
-    name: "read_file".into(),
-    description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
-    parameters_json: r#"{"type":"object","properties":{"file_name":{"type":"string"}},"required":["file_name"],"additionalProperties":false}"#.into(),
-};
+        name: "read_file".into(),
+        description: "Read a single UTF-8 file only after the user selects that exact file in a native approval dialog.".into(),
+        parameters_json: r#"{"type":"object","properties":{"file_name":{"type":"string"}},"required":["file_name"],"additionalProperties":false}"#.into(),
+    };
     let readable = policies
         .policy("local_file_read")
         .is_ok_and(|s| s.policy != wex_desktop_service::PolicyChoice::Block);
-    if readable { tools.push(tool); }
+    if readable {
+        tools.push(tool);
+    }
     if readable {
         if let Ok(status) = crate::local_access::open(app, &chat.conversation_id)
             .and_then(|store| crate::local_access::status(&store))
@@ -187,6 +189,17 @@ mod tests {
         let schema: serde_json::Value =
             serde_json::from_str(&process.parameters_json).expect("valid process schema");
         assert_eq!(schema["type"], "object");
+    }
+
+    #[test]
+    fn host_command_provider_keeps_existing_model_tool_order() {
+        let mut tools = Vec::new();
+        append_host_commands(&mut tools);
+        let names: Vec<_> = tools.iter().map(|tool| tool.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["git_status", "git_diff", "cargo_test", "cargo_fmt_check", "run_command"]
+        );
     }
 
     #[test]
