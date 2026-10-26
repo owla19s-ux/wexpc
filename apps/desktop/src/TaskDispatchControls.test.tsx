@@ -97,3 +97,16 @@ it('shows historical dispatch evidence without blocking a new publication epoch'
   const queue=screen.getByRole('button',{name:'登记待派工尝试（不启动工具）'}) as HTMLButtonElement;
   expect(queue.disabled).toBe(false);
 });
+
+
+it('fails closed when persisted attempts are absent instead of treating missing evidence as empty',()=>{
+  const view=render(<TaskDispatchControls task={task} agents={agents} revision={11} run={run}/>);
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  const queue=screen.getByRole('button',{name:'登记待派工尝试（不启动工具）'}) as HTMLButtonElement;
+  expect(queue.disabled).toBe(true);
+  expect(screen.getByText(/派工记录或发布版本尚未核实/)).toBeTruthy();
+  fireEvent.click(queue);
+  expect(ipc).not.toHaveBeenCalled();
+  view.rerender(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run}/>);
+  expect(queue.disabled).toBe(false);
+});
