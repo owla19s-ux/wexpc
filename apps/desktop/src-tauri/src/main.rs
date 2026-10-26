@@ -2,6 +2,7 @@
 mod github_config;
 mod local_access;
 mod tool_approvals;
+mod tool_catalog;
 mod vault;
 
 use std::sync::{Arc, Mutex};
@@ -250,11 +251,7 @@ fn preview_task_dispatch(
 }
 
 #[tauri::command]
-fn publish_task(
-    state: State<'_, Shared>,
-    revision: u64,
-    task_id: String,
-) -> Result<Task> {
+fn publish_task(state: State<'_, Shared>, revision: u64, task_id: String) -> Result<Task> {
     locked(&state)?.publish_task(revision, &task_id)
 }
 
