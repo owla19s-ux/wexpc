@@ -132,7 +132,7 @@ fn schema_five_migration_preserves_payload_and_does_not_invent_auto_authorizatio
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, u32>(0))
             .unwrap(),
-        6
+        8
     );
     assert_eq!(
         db.query_row("SELECT body FROM desktop_state WHERE id=1", [], |r| r
