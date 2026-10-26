@@ -117,3 +117,7 @@ Work接受纯协议解码器与I/O传输分层；协议核只依赖确定性数�
 D-002已收到鱼对主workspace方案的接受，Work确认该方向；依赖版本及锁文件仍由Work准备。D-003补充采纳max_continuation_bytes独立字节上限，拒绝超限、不得截断续传，Continuation/ApiRequest不派生Serialize。手机a600f2cd类型测试4项通过不替代尚缺的请求/参数/消息/代理校验、默认值、Retry-After及Decoder测试；这些缺口均接受核对意见，后续实现和证据分别登记。
 
 手机ENV实证见REC-6387015668：全workspace Windows目标check因ring构建缺assert.h失败，不能继续沿用此前“全目标已通过”的概括；纯Rust子集检查与Android原生测试分别记录。双方按现有评论达成分层方向，不代签尚未实现模块或最终传输契约已采用。
+
+## 2026-10-26 架构细化入口
+
+[轻量宿主架构 V0.1](architecture/WEXPC-LIGHTWEIGHT-HOST-ARCHITECTURE-V0.1.md)：细化核心对象关联、状态权威、连接交接、原生与外部执行、并发及恢复。状态为**待审阅设计稿**，承接已确认顶层方向，不替代产品基线；具体字段、trait/DTO、数据库与外部接口仍待逐项收敛，不宣称已实现。下一项契约顺序见该文 §10，0.1.1 范围不变。

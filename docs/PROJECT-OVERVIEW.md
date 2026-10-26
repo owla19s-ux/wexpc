@@ -39,3 +39,7 @@ WEX 以 Space → 可选 Group → Context 组织不同领域的工作，连接�
 ## 工程约束
 
 本阶段 PC 优先；不凭历史 Android 测试宣称 Windows 验收；成本受限期避免主动触发 Actions。文档性修改使用 `[skip ci]` 并记录实际检查情况，不将 CI 未运行写成通过。参见 [开发流程](DEVELOPMENT-WORKFLOW.md) 与根目录 [AGENTS.md](../AGENTS.md)。
+
+## 2026-10-26 架构细化入口
+
+[轻量宿主架构 V0.1](architecture/WEXPC-LIGHTWEIGHT-HOST-ARCHITECTURE-V0.1.md)：细化核心对象关联、状态权威、连接交接、原生与外部执行、并发及恢复。状态为**待审阅设计稿**，承接已确认顶层方向，不替代产品基线；具体字段、trait/DTO、数据库与外部接口仍待逐项收敛，不宣称已实现。下一项契约顺序见该文 §10，0.1.1 范围不变。
