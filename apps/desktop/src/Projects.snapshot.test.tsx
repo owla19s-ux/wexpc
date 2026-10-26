@@ -21,6 +21,7 @@ vi.mock('./TaskDispatchStatus', () => ({
 const project = { id: 'project-1', name: '项目 A', goal: '', resources: [], context_id: null } as Project;
 const state = {
   revision: 4,
+  projects: [project],
   agents: [{ id: 'agent-1', name: '施工成员', project_id: 'project-1', role: 'worker', connection_id: 'api', model_id: 'model-a' }],
   agent_duties: [],
   connections: [{ id: 'api', name: 'API A', base_url: 'https://example.invalid', models: ['model-a'], enabled: true }],
