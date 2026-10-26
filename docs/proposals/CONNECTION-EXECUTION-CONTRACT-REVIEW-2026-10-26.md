@@ -645,3 +645,57 @@ ExternalAdapter:
 同理，“三类记录”是降低首版实现成本的结构候选，不代表三种验证类型语义完全等价。若出现强制单流程、强制外部 Agent 的 WEX 内部协议或权限自动继承，均视为偏离本轮已确认架构。
 
 本批仅提交审查文档，无 main、Rust/TS、SQLite、Actions 或 Windows 真实验收改动。
+
+## 18. 第十二批：现有测试覆盖矩阵与最小施工顺序（2026-10-27）
+
+### 18.1 实际核对的 Core 测试
+
+本批读取 main 的 `task.rs`、`task_operation.rs` 和 `dispatch.rs`，按测试函数核对源码存在性，**没有实际执行测试**。
+
+| 已有测试及所在模块 | 已覆盖的主要规则 | 不能推断 |
+| --- | --- | --- |
+| `task.rs`: `restore_does_not_claim_running_work_completed`、`cold_restore_preserves_evidence_and_blocks_only_inflight_work` | 恢复时 Running 不伪装完成，已有完成证据保留 | SQLite + 文件 marker 的整体恢复已打通 |
+| `task.rs`: `assignment_epoch_advances_without_wrap_or_partial_reassignment` | 分配代次递增且溢出拒绝 | 业务任务多 Agent 分工已接入 |
+| `task_operation.rs`: `success_records_evidence_without_completing_task`、`unknown_outcome_blocks_task_without_false_success` | 成功操作只记证据，未知操作阻塞 | 全部验收流程、真实核验已经实现 |
+| `task_operation.rs`: `reassignment_preserves_historical_link_without_replaying_old_receipt`、`old_receipt_cannot_affect_new_assignment_to_same_agent` | 旧派工回执不能污染新派工 | 桌面服务已持久运行此映射 |
+| `task_operation.rs`: `failed_receipt_is_recorded_once_and_marks_running_task_failed` | 当前确实测试了单次失败令 Running Task Failed | **与历史持续修复语义待调整**；不是先前讨论的目标状态 |
+| `dispatch.rs`: `old_ticket_cannot_dispatch_after_reassignment`、`reserve_rejects_conflicts_and_releases_on_drop` | 派工票据代次校验、进程内互斥与释放 | 外部 Agent、OS 进程或跨设备资源必定互斥 |
+
+### 18.2 不重复建设的最小施工顺序（建议）
+
+**P0：先补“可证明的任务事实”底座，尚不增加流程平台。** 校验 Desktop 旧数据、任务目标/验收条件版本及唯一权威写入，设计要求快照、成果引用、验证/验收记录的最小持久形态；保留旧 TaskRecord 和会话回执。为旧 schema、未知证据、版本漂移先补契约测试。
+
+**P1：接上现有执行链，而非另建执行器。** 把已发布任务的明确分工关联到 Core 派工票据；在 Host 权限和资源检查后使用现有操作执行与回执，保存 task/operation/attempt 链接；普通对话不强制进入 Task。首次可只打通一个真实本地工具链路并验证恢复。
+
+**P2：产出、检查与验收接入 UI。** 成果绑定具体版本，审查/技术测试/人工验收保留各自来源。用户明确区分已产出、已核验、待实机和最终验收；不将工具成功自动视为完成。随后增加外部 Agent 的最小委托/产物关联，不强迫第三方内部标准化。
+
+**P3：多 Agent 和故障接续扩充。** 同一业务任务多个分工/成果；已验证的资源互斥只在实际控制范围生效；失败记录保留并允许任务内修复。外部并发实际隔离的方案视接入目标决定，不把 Core `ResourceLeases` 视为远程锁。
+
+这些是依赖顺序而非必须经历的 Task 流程；P0–P3 也不是新的产品版本编号。WEXPC 0.1.1 的已批准功能边界保持不变。
+
+### 18.3 开工前必须新增的验收用例
+
+| 编号 | 场景 | 合格结果 |
+| --- | --- | --- |
+| CT-01 | 旧 SQLite schema 6 含 Task/TaskRecord/Agent/Conversation | 无损读取、升级失败不覆盖原内容，不虚构过去的验收 |
+| CT-02 | 同一要求下两个成果版本，旧版测试通过新版未测 | 旧验证可追溯，新版仍显示待验证 |
+| CT-03 | 已发布需求编辑为新版 | 新成果与核验对应新版，旧版历史保留 |
+| CT-04 | 编译失败→同权限范围修复→再测试通过 | 失败事实保留；任务不因第一次工具失败自动终结 |
+| CT-05 | 任务实际要求 Windows 本机运行，仅 Linux 单测通过 | 标“部分核验”，不得宣布真实 Windows 验收完成 |
+| CT-06 | 双 Agent 非重叠范围，以及重叠写入冲突 | 范围可控时分别接续；真实冲突拒绝；不夸大外部锁 |
+| CT-07 | Agent 重新分配后旧 Attempt 迟到回执 | 保留历史回执，不能改变新分派任务状态 |
+| CT-08 | 工具 marker 已落盘但结果文件/SQLite 写入失败 | 显示 InFlight/Unknown、允许核查；不得盲重试副作用 |
+| CT-09 | 外部 Agent 仅给任务 ID 与交付件 | WEX 可关联成果并独立检查，不要求外部逐命令历史 |
+| CT-10 | 普通对话工具调用无 task_id | 原有对话工具执行与回执可继续工作，无伪造任务 |
+| CT-11 | 未授权工具或撤销授权后续派发 | 仍由 Host 终局核验拒绝；任务归属不构成资源授权 |
+| CT-12 | 用户手工标注“通过”，没有实际工具测试 | 保存人工判断来源，但不能标成机器/实机验证已通过 |
+
+### 18.4 最小接口调整清单：需要改、不要改和暂缓
+
+**先改（获得正式施工批准后）**：可信任务应用服务中的受控写入与版本化引用；Desktop Task 执行投影/关联；Tauri/TS 同步 DTO；上述用例的测试。
+
+**先保持**：Core Operation 的安全状态机及执行前持久 marker；Task 既有 ID；原始 `TaskRecord`；已存在的真实文件、命令和 GitHub adapter；旧 evidence 的来源和原文；普通对话调用路径。
+
+**待核对后改**：`TaskOperationIndex.reconcile` 失败映射；Core `Task` 与 Desktop `Task` 投影责任；多 Agent 每次派工标识和数据原子性；真正需要的外部工作隔离。
+
+**本批限制**：本表是架构/测试实施建议，尚未创建代码施工任务、测试运行、Windows 验收或正式基线变更。
