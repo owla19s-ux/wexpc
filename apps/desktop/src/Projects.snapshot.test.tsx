@@ -47,7 +47,7 @@ it('keeps project and task evidence visible but pauses every project mutation on
   assertPaused(false);
 
   view.rerender(<ProjectDetail project={project} data={state} snapshotFresh={false} run={run} openChat={vi.fn()}/>);
-  expect(screen.getByText(/任务与派工证据来自上次成功快照/)).toBeTruthy();
+  expect(screen.getByText(/项目与任务资料来自上次成功快照/)).toBeTruthy();
   expect(screen.getByRole('heading', { name: '任务 A' })).toBeTruthy();
   assertPaused(true);
 
