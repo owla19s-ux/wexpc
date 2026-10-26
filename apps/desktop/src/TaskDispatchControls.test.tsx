@@ -125,3 +125,19 @@ it('rejects preview evidence with mismatched project or publication epoch',async
   await waitFor(()=>expect(ipc).toHaveBeenCalledTimes(2));
   expect(screen.queryByRole('status')).toBeNull();
 });
+
+it('blocks admission and dispatch when the current snapshot has failed to refresh',()=>{
+  const view=render(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run} fresh={false}/>);
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  const preview=screen.getByRole('button',{name:'核对调度准入（不执行）'}) as HTMLButtonElement;
+  const queue=screen.getByRole('button',{name:'登记待派工尝试（不启动工具）'}) as HTMLButtonElement;
+  expect(preview.disabled).toBe(true);
+  expect(queue.disabled).toBe(true);
+  expect(screen.getByText(/仅为历史缓存/)).toBeTruthy();
+  fireEvent.click(preview);
+  fireEvent.click(queue);
+  expect(ipc).not.toHaveBeenCalled();
+  view.rerender(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={run} fresh={true}/>);
+  expect(preview.disabled).toBe(false);
+  expect(queue.disabled).toBe(false);
+});
