@@ -20,6 +20,9 @@ it('uses existing Host-backed controls only for the selected conversation', () =
   const openConversation = vi.fn();
   const openConnections = vi.fn();
   render(<Settings data={state} snapshotFresh={true} onChanged={async () => {}} openConversation={openConversation} openConnections={openConnections}/>);
+  expect(screen.queryByTestId('local-scope')).toBeNull();
+  expect(screen.queryByTestId('github-scope')).toBeNull();
+  fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-A' } });
   expect(screen.getByTestId('local-scope').textContent).toBe('conv-A');
   expect(screen.getByTestId('github-scope').textContent).toBe('conv-A');
   fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-B' } });
@@ -29,6 +32,19 @@ it('uses existing Host-backed controls only for the selected conversation', () =
   expect(openConversation).toHaveBeenCalledWith(b);
   fireEvent.click(screen.getByRole('button', { name: '管理 API 与 GitHub 连接' }));
   expect(openConnections).toHaveBeenCalledOnce();
+});
+
+
+it('keeps explicit authorization scope when the Host snapshot reorders conversations', () => {
+  const props = { snapshotFresh: true, onChanged: async () => {}, openConversation: vi.fn(), openConnections: vi.fn() };
+  const view = render(<Settings data={state} {...props}/>);
+  expect(screen.queryByTestId('local-scope')).toBeNull();
+  expect(screen.getByRole('combobox', { name: '选择授权所属对话' }).value).toBe('');
+  fireEvent.change(screen.getByRole('combobox', { name: '选择授权所属对话' }), { target: { value: 'conv-A' } });
+  expect(screen.getByTestId('local-scope').textContent).toBe('conv-A');
+  view.rerender(<Settings data={{ ...state, conversations: [b, a] }} {...props}/>);
+  expect(screen.getByTestId('local-scope').textContent).toBe('conv-A');
+  expect(screen.getByTestId('github-scope').textContent).toBe('conv-A');
 });
 
 it('does not silently grant controls to a different conversation when the selected one disappears', () => {
