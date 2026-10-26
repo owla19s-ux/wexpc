@@ -98,3 +98,57 @@
 ## 7. 当前变更边界
 
 本文件本身只新增设计工作稿，无应用源码、数据库、接口签名、权限规则或正式基线修改。未运行 Rust/Windows/真实服务/Actions 测试；不对能力接通或安全隔离作成功声明。
+
+## 8. 第二批：源码级调用链及最小契约审查（2026-10-26）
+
+本节已实际读取 main 对应源码：`wex-core/src/operation.rs`、`connection_session.rs`、`wex-desktop-service/src/domain/mod.rs`、`application/mod.rs`、`apps/desktop/src-tauri/src/tool_approvals.rs`。**本节只记录静态代码可见事实，不等于已审完全部派工和持久化链路。**
+
+### 8.1 可直接证明的当前调用路径
+
+- **配置 AI**：Desktop Service `add_connection` 强制 `base_url`、`models`，创建 `AiConnection`；其内部构造临时 `Catalog` 并注册 `ConnectionKind::Ai`。因此 Core Catalog 支持 Tool 种类，当前产品快照仍只持久化 AI 连接。
+- **准备对话**：`prepare_chat` 解析会话绑定、模型与凭证引用，生成 `PreparedChat`。这属于 AI 会话专用请求快照，不应升格为通用能力请求基类。
+- **模型工具**：Tauri `tool_approvals.rs` 对 tool name 执行显式分派，分别进入文件、命令和 GitHub 的具体处理器；部分操作会创建 `OperationIntent`、`OperationLedger`，批准后调用 `begin_approved_dispatch`。此入口是现有模型工具路径，并不能直接证明无人对话任务已复用。
+- **操作领域规则**：Core `OperationIntent` 目前必须带 `actor_id`、`conversation_id`、`connection_id`、`capability_id`、`resource_id`、`intent_digest`；`begin` 验证批准版本、连接启用、身份认证、平台与资源可用，然后进入 InFlight。Core 注释明确：必须由可信持久化服务先记录 InFlight，再派发外部副作用。
+- **现有本地调用样例**：在 Tauri 文件读取处理中，`connection_id = local`，`capability_id = local_file_read`，且 `conversation_id` 从 `PreparedChat` 取得；这里的 `local` 是已有操作来源标识，不证明已经存在一个用户配置的持久本地 Connection。
+- **工具输出**：模型工具分支显式调用 `save_tool_result`，使用 `conversation_id`、`turn_id`、tool call 及实际结果保存输出；这份会话输出保存不能自动替代跨任务的 Operation/Attempt/Receipt 权威关联。
+
+### 8.2 最小接线提案（仅逻辑边界，不冻结 Rust 签名）
+
+| 入口 | 控制信息 | 实际执行 | 最终关联 |
+| --- | --- | --- | --- |
+| 普通对话工具 | actor + 可选 conversation + capability + 资源/参数摘要 | 沿用当前 Host/Adapter | operation / attempt / receipt；会话工具结果按原专用格式继续保存 |
+| 用户直接操作 | 用户 actor + capability + 资源/参数摘要；不必造 conversation | 沿用现有执行器 | operation / attempt / receipt；无 task 亦可 |
+| Dispatcher 派工 | task/revision + assignment + actor + capability + 资源/参数摘要 | 通过同一可信执行协调边界使用 Host/Adapter | task → dispatch → operation / attempt / receipt，再交回任务服务 |
+| 外部 Agent 委托 | 目标 connection/capability + task/operation + 外部定位和交付批次 | Adapter/原生外部运行时 | WEX 自身投递与接收证据、成果定位、验证引用；不伪造外部内部工具事件 |
+
+**必须保留的两个分离**：
+
+1. 能力入口不以 `PreparedChat` 为公共参数；模型工具适配层将其映射为通用操作请求，而不是删掉现有专用对话信息。
+2. `OperationLedger` 是纯领域状态机，不负责数据库事务、OS/Vault、资源许可核验或外部副作用；持久记录与最后一次有效权限核验必须在可信边界完成。不能简单把一个内存 Ledger 移到新 crate 就声称任务级可恢复。
+
+### 8.3 建议的接口评审检查清单
+
+- **来源身份**：区分 `actor`、`conversation`、`task/revision`、`operation/attempt`；缺 conversation 不得通过生成假会话解决。
+- **能力身份**：区分来源提供者（内置或持久 Connection）、能力种类、配置版本和实际目标；内置来源不默认取得 OS 文件读取权。
+- **授权事实**：用户策略与资源/账号权限分开；模型工具声明与目录可见性不形成可信授权；保留执行前最终核验。
+- **调度与结果**：Dispatcher 的投递/lease 不等于外部成功；Operation 的 `Succeeded` 也不等于 Review/Verify 通过。未知结果阻断有副作用的自动重试。
+- **持久化边界**：副作用之前 durable InFlight，发布回执及会话输出的原子性/顺序/去重需要沿现有实际存储调用继续核对。
+- **错误与兼容**：未配置连接、能力不存在、认证失败、授权拒绝、版本冲突、适配器拒绝、超时 UNKNOWN 分别呈现；不因通用化折叠成 `false` 或空字符串。
+
+### 8.4 本批新发现的风险与待核对项
+
+**R1（重要，需继续审查）**：当前 Tauri 工具执行样例会按操作新建内存 `OperationLedger::default()`；已有 durable marker、回执和中断处理位于其他边界，**不能由这一片代码断言持久化缺失**，但也不能认定全部 Operation 状态和任务级恢复已被持久统一。下一轮必须追踪 `begin_approved_dispatch`、marker 写入、工具输出、回执持久化及错误/取消时的结算顺序。
+
+**R2（重要，已知设计约束）**：`OperationIntent.conversation_id` 为必填，不支持无对话任务的真实输入。拟允许可选来源前必须核对所有 `valid_intent`、序列化、测试、UI 和回执读取调用者，不能仅把 `String` 改成 `Option<String>`。
+
+**R3（重要，已知设计约束）**：Core `ConnectionKind::Tool(adapter)` 可以表达工具类别，但 DesktopSnapshot 持久层强制 `AiConnection`。不要创建平行的第二份可修改 Connection 真相；先制定从旧 AI 实例及 GitHub 独立凭证引用映射到统一读取视图的规则。
+
+**R4（需要审查）**：模型工具名称分派已集中于 Tauri；提取可注册的能力绑定应先保留每一条具体参数验证、权限复检和结果处理，再迁移调用者；不能先暴露通用执行后靠 UI 判断安全。
+
+### 8.5 已允许推进与暂缓项目
+
+**可继续审查/写草案**：现有执行路径、最小来源关联、能力提供者与绑定关系、操作错误语义、兼容测试清单。
+
+**须先完成专项核对或另行确认再改**：通用化 `OperationIntent` 的结构、旧 Snapshot 数据格式、GitHub 连接身份落盘、外部进程隔离方式、任何授权默认放宽及正式 Product Baseline 条款。
+
+本批没有修改 Rust、Tauri、React、SQLite、权限策略或正式产品基线；未运行 Actions / 编译 / 测试。
