@@ -203,3 +203,43 @@ fn stale_checkpoint_cursor_never_repeats_a_dispatch() {
     assert_eq!(result.unwrap_err().code, "TOOL_CHECKPOINT_ERROR");
     assert_eq!(dispatches, 0);
 }
+
+#[test]
+fn restored_receipts_are_sent_to_model_but_only_new_proposals_are_dispatched() {
+    let mut requests = 0;
+    let mut dispatched = Vec::new();
+    let mut phases = Vec::new();
+    let answer = drive_tool_rounds_from_history(
+        history(),
+        |messages| {
+            requests += 1;
+            assert_eq!(messages[0].tool_calls[0].id, "old_call");
+            assert_eq!(messages[1].content.as_deref(), Some("old receipt"));
+            if requests == 1 {
+                assert_eq!(messages.len(), 2);
+                Ok(proposal())
+            } else {
+                assert_eq!(messages.len(), 4);
+                assert_eq!(messages[2].tool_calls[0].id, "new_call");
+                assert_eq!(messages[3].tool_call_id.as_deref(), Some("new_call"));
+                assert_eq!(messages[3].content.as_deref(), Some("new receipt"));
+                Ok(ModelStep::Text("continued successfully".into()))
+            }
+        },
+        |calls| {
+            assert_eq!(calls.len(), 1);
+            dispatched.push(calls[0].id.clone());
+            Ok(vec![(calls[0].id.clone(), "new receipt".into())])
+        },
+        |messages, pending| {
+            assert_eq!(messages[1].content.as_deref(), Some("old receipt"));
+            phases.push((messages.len(), pending));
+            Ok(())
+        },
+    )
+    .unwrap();
+    assert_eq!(answer, "continued successfully");
+    assert_eq!(requests, 2);
+    assert_eq!(dispatched, vec!["new_call"]);
+    assert_eq!(phases, vec![(3, true), (4, false)]);
+}
