@@ -149,3 +149,37 @@ it('does not show a stale preview after an existing attempt arrives',async()=>{
   expect(screen.queryByRole('status')).toBeNull();
   expect((screen.getByRole('button',{name:'核对调度准入（不执行）'}) as HTMLButtonElement).disabled).toBe(true);
 });
+
+it('does not permit a second dispatch while an IPC error awaits snapshot reconciliation',async()=>{
+  let finishRecheck:(()=>void)|undefined;
+  const recheck=new Promise<void>(resolve=>{finishRecheck=resolve;});
+  let dispatches=0;
+  ipc.mockImplementation(async(name:string)=>{
+    if(name==='queue_dispatch_attempt'){
+      dispatches++;
+      throw new Error('IPC reply lost after durable write');
+    }
+    throw new Error(name);
+  });
+  // App.run() catches the command failure and waits for a Host snapshot read.
+  const runWithRecheck=async(action:()=>Promise<void>)=>{
+    try{await action();}catch{/* IPC failure does not prove no side effect. */}
+    await recheck;
+  };
+  const view=render(<TaskDispatchControls task={task} agents={agents} revision={11} attempts={[]} run={runWithRecheck}/>);
+  fireEvent.change(screen.getByLabelText('选择派工成员'),{target:{value:'agent-a'}});
+  const queue=screen.getByRole('button',{name:'登记待派工尝试（不启动工具）'}) as HTMLButtonElement;
+  fireEvent.click(queue);
+  await waitFor(()=>expect(dispatches).toBe(1));
+  expect(queue.disabled).toBe(true);
+  fireEvent.click(queue);
+  expect(dispatches).toBe(1);
+  // Reconciliation returned a persisted UNKNOWN attempt, not a safe retry.
+  await act(async()=>{finishRecheck?.();});
+  view.rerender(<TaskDispatchControls task={task} agents={agents} revision={12} run={runWithRecheck}
+    attempts={[{id:'attempt-1',task_id:'task-1',project_id:'project',agent_id:'agent-a',
+      publication_epoch:2,status:'outcome_unknown',recorded_revision:12}]}/>);
+  expect(queue.disabled).toBe(true);
+  fireEvent.click(queue);
+  expect(dispatches).toBe(1);
+});
