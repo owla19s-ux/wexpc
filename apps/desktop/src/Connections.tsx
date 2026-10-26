@@ -10,6 +10,41 @@ export function Selection({connections}:{connections:AiConnection[]}) {
   return <div className="fields"><label>API 连接<select name="connection" required value={active?.id||''} onChange={e=>setSelected(e.target.value)}><option value="" disabled>请先配置连接</option>{available.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>模型<select key={active?.id} name="model" required><option value="" disabled>选择模型</option>{active?.models.map(m=><option key={m} value={m}>{m}</option>)}</select></label></div>;
 }
 
+// A cached Snapshot may no longer reflect the Host's enabled state. Never
+// invert a stale value; the next verified snapshot is required before toggling.
+// The Host remains the authority for the actual connection state.
+export function ApiConnectionControls({connections, snapshotFresh, run}:{
+  connections: AiConnection[];
+  snapshotFresh: boolean;
+  run: Run;
+}) {
+  const [pendingIds, setPendingIds] = useState<Set<string>>(new Set());
+  async function toggle(connection: AiConnection) {
+    setPendingIds(current => new Set(current).add(connection.id));
+    try {
+      await run(async () => {
+        await command('set_connection_enabled', {connectionId: connection.id, enabled: !connection.enabled});
+      });
+    } finally {
+      setPendingIds(current => {
+        const next = new Set(current);
+        next.delete(connection.id);
+        return next;
+      });
+    }
+  }
+  return <>
+    {!snapshotFresh && <p className="notice" role="status">API 连接启停已暂停：当前仅有未核实的快照。请先重新读取桌面服务状态。</p>}
+    {connections.map(connection => <div className="item" key={connection.id}>
+      <strong>{connection.name}</strong>
+      <span>{connection.base_url}</span>
+      <span>{connection.models.join(' · ')}</span>
+      <button type="button" disabled={!snapshotFresh || pendingIds.has(connection.id)}
+        onClick={() => void toggle(connection)}>{connection.enabled ? '停用' : '启用'}</button>
+    </div>)}
+  </>;
+}
+
 export function ConnectionForm({run}:{run:Run}) {
   return <details><summary>添加 API 连接</summary><form onSubmit={e=>{e.preventDefault();const form=e.currentTarget;const values=new FormData(form);const key=String(values.get('key')||'');(form.elements.namedItem('key') as HTMLInputElement).value='';void run(async()=>{await command('add_connection',{input:{name:values.get('name'),base_url:values.get('url'),models:String(values.get('models')||'').split('\n').map(s=>s.trim()).filter(Boolean)},apiKey:key});form.reset();});}}>
     <label>连接名称<input name="name" required maxLength={128} placeholder="例如 DeepSeek 官方" /></label>
