@@ -4350,6 +4350,7 @@ dependencies = [
  "wex-api",
  "wex-core",
  "wex-local-resources",
+ "wex-workspace-store",
 ]
 
 [[package]]
@@ -4357,6 +4358,15 @@ name = "wex-local-resources"
 version = "0.1.0"
 dependencies = [
  "libc",
+ "wex-core",
+]
+
+[[package]]
+name = "wex-workspace-store"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
  "wex-core",
 ]
 
