@@ -105,3 +105,67 @@ TaskCheck
 - 测试增加：独立短期对话不建项目；项目内资料跨 Context 引用仍归原项目且遵循授权；执行者/API 切换后旧 attempt/receipt 保留，新尝试不继承旧权限；有失败后持续执行及多个成果版本独立检查。
 
 **确认程度**：以上为产品与数据语义方向已确认；数据库表、文件目录、文件格式、角色/权限 API、迁移实现仍需源码对照，不视为已经编码。
+
+## 8. 第十五批：已有 Project / Context / Conversation 的归属与引用接口核对（2026-10-27）
+
+### 8.1 main 源码观察
+
+本批读取 `crates/wex-desktop-service/src/domain/mod.rs`、`application/organization.rs` 和 `apps/desktop/src/types.ts`。基于当前已读路径：
+
+| 现有结构 | 已观察到的事实 | 不能视为已实现 |
+| --- | --- | --- |
+| `Project` | `id/name/goal/resources/context_id?`；resources 注释声明只是引用、不授予工具权限 | 多 Context 引用同一项目的完整索引、项目文件物理归档策略 |
+| `Conversation` | `id/project_id?/context_id?/connection_id/model_id`；可不属于项目或 Context | 一段对话一个物理文件；跨多个 Context 的显式引用集合 |
+| `Context` 与 `ContextPlacement` | Context 自身有稳定 ID；placement 指向 Space、可选 Group，支持单位置移动 | 每次移动必须移动实际资料/变更所有权 |
+| `bind_conversation_context` | 校验 Context 是否存在后修改 Conversation 的一个 `context_id` 字段 | 多个 Context 同时引用同一对话；被引用时不会误认为重新归属 |
+| `bind_project_context` | 修改 Project 的单个 `context_id` 字段 | 多 Context 对同一项目的引用关系 |
+| `Task` | `project_id` 必填，`agent_ids` 列出参与成员，仅 Draft 状态 | 记录不同 Attempt 对应的实际执行 Agent、API 和委托环境 |
+| `Agent` | 实例保存 `role/connection_id/model_id/conversation_id` | 换 API、模型或执行者时自动生成可核实执行历史 |
+
+### 8.2 用户已确认语义与现有结构的落差
+
+**重要：不能把 `context_id` 同时当成独占拥有者和可多处引用的集合。** 已有 Project/Conversation 的 `context_id` 是单值关联；虽然可以重新绑定，但没有已证实的多对多“引用同一个对象”语义。若要实现“仍归原项目、在其他 Context 引用”，应**保留原对象 ID/原归属**，使用独立的受控引用关联，而不是通过 `bind_*_context` 改写原归属。
+
+同时，用户所说“未分类对话独立保存”与 `Conversation.project_id=None,context_id=None` 已具备的逻辑独立性相容。它**不等于**现有实现已经使用单文件储存，暂不修改物理存储方案。
+
+关于模型/API：`Conversation` 和 `Agent` 当前存默认连接/模型选择。这与“Task 不永久锁定执行模型/API”不冲突，但真实执行时应**记录本次尝试实际使用的绑定和来源**，不能仅通过事后读取当前 Agent/Conversation 配置来倒推旧执行事实。
+
+### 8.3 优先采用的最小补充接口（候选，不是已批准 ABI）
+
+```text
+ObjectReference:
+  reference_id
+  source_object_kind + source_object_id
+  target_context_id
+  purpose?                      // 如索引/研究引用，不改变所有权
+  created_by + created_at
+
+ExecutionAttempt:
+  attempt_id
+  task_id?
+  assignment_ref?
+  actual_agent_id?
+  model_or_provider_ref?
+  connection_or_external_runtime_ref?
+  operation_or_external_job_ref?
+  outcome + evidence_ref?
+```
+
+规则：`ObjectReference` 为 **可选跨 Context 引用**，并不授予访问权；对象实际归属仍由已有稳定 identity/项目字段及后续正式归属规则决定，不能从引用推导 ACL。无 Task 的普通对话依旧有效。执行尝试记录的是**历史当时值**，后续换 Agent/模型/API 不回写旧 Attempt。
+
+避免急于新增万能 ObjectStore、通用抽象平台、强制“所有内容归属 Context”逻辑。先用现有具体实体类型与兼容性检查建立最窄关联。
+
+### 8.4 应当新增的用例
+
+1. `Conversation(project_id=None,context_id=None)` 可以存在和使用，不生成虚构项目。
+2. 项目原归属不变的情况下，两个 Context 可以在各自有效授权下引用同一个项目资料；取消一处引用不删除源对象。
+3. 原属项目被移动到其他 Context 时，原始 Task、执行回执及真实资料地址不因展示位置变化而更改。
+4. 一个 Task 连续经历 Agent A + 模型 X、Agent B + 模型 Y、再由 A 恢复，三个 Attempt 都保留当时执行身份、真实证据和结果；旧模型绑定不被事后覆盖。
+5. 改变当前 `Agent.connection_id/model_id` 不会重写已经发生的历史 Attempt，也不会从旧许可推断新模型/外部运行时获得资源权限。
+6. 无可核实执行回执的“AI 自述已调用模型”只算声明，不自动制造一次真实执行事件。
+
+### 8.5 施工优先级调整
+
+在上一节 S1 兼容测试基础上，先补**归属与引用不能互相覆盖**的回归测试；再将跨 Context 引用作为最小引用索引能力，与 Task 成果/验证记录平行推进。执行尝试的实际 Provider/Agent 身份在 W2/W3 接线时记录，不能仅将 `Task.agent_ids` 当作派工历史。
+
+以上仅是代码审查所得的接口候选；未检查完整跨 Context ACL、当前模型请求实际拼装与所有存储路径前，不宣布参考实现已经完备，也不直接变更生产数据结构。
