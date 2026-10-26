@@ -32,7 +32,9 @@ pub fn approved_git_diff(
 /// Remove inherited Git-specific overrides, including arbitrary indexed
 /// GIT_CONFIG_KEY_N values. Git's own prompt restriction is set afterward.
 fn is_git_override(key: &std::ffi::OsStr) -> bool {
-    key.to_string_lossy().to_ascii_uppercase().starts_with("GIT_")
+    key.to_string_lossy()
+        .to_ascii_uppercase()
+        .starts_with("GIT_")
 }
 
 fn sanitize_git_environment(command: &mut Command) {
@@ -158,9 +160,15 @@ mod tests {
     fn all_git_override_names_are_fenced_including_numbered_keys() {
         use std::ffi::OsStr;
         for name in [
-            "GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
-            "GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_57", "GIT_CONFIG_VALUE_57",
-            "GIT_CONFIG_PARAMETERS", "GIT_SSH_COMMAND",
+            "GIT_DIR",
+            "git_work_tree",
+            "GIT_INDEX_FILE",
+            "GIT_OBJECT_DIRECTORY",
+            "GIT_CONFIG_COUNT",
+            "GIT_CONFIG_KEY_57",
+            "GIT_CONFIG_VALUE_57",
+            "GIT_CONFIG_PARAMETERS",
+            "GIT_SSH_COMMAND",
         ] {
             assert!(is_git_override(OsStr::new(name)), "{name}");
         }
@@ -177,13 +185,16 @@ mod tests {
             .env("GIT_CONFIG_VALUE_57", "evil-program")
             .env("UNRELATED_SETTING", "preserve");
         sanitize_git_environment(&mut cmd);
-        let configured: Vec<_> = cmd.get_envs()
+        let configured: Vec<_> = cmd
+            .get_envs()
             .map(|(key, value)| (key.to_string_lossy().to_string(), value.is_some()))
             .collect();
-        assert!(configured.iter().any(|(key, active)| key == "UNRELATED_SETTING" && *active));
-        assert!(configured.iter().all(|(key, active)| {
-            !is_git_override(std::ffi::OsStr::new(key)) || !active
-        }));
+        assert!(configured
+            .iter()
+            .any(|(key, active)| key == "UNRELATED_SETTING" && *active));
+        assert!(configured
+            .iter()
+            .all(|(key, active)| { !is_git_override(std::ffi::OsStr::new(key)) || !active }));
     }
 
     #[test]
@@ -191,8 +202,13 @@ mod tests {
         let trusted = tempfile::tempdir().unwrap();
         let hostile = tempfile::tempdir().unwrap();
         for root in [trusted.path(), hostile.path()] {
-            assert!(Command::new("git").arg("init").arg("--quiet")
-                .arg(root).status().unwrap().success());
+            assert!(Command::new("git")
+                .arg("init")
+                .arg("--quiet")
+                .arg(root)
+                .status()
+                .unwrap()
+                .success());
         }
         std::fs::write(trusted.path().join("trusted.txt"), b"allowed").unwrap();
         std::fs::write(hostile.path().join("hostile.txt"), b"wrong repo").unwrap();

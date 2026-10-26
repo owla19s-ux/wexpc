@@ -111,7 +111,10 @@ fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
     let mut identities = std::collections::BTreeSet::new();
     let mut publications = std::collections::BTreeSet::new();
     for attempt in &snapshot.dispatch_attempts {
-        let task = snapshot.tasks.iter().find(|task| task.id == attempt.task_id)
+        let task = snapshot
+            .tasks
+            .iter()
+            .find(|task| task.id == attempt.task_id)
             .ok_or_else(|| ServiceError::new("INVALID_SNAPSHOT", "派工引用的任务不存在"))?;
         if attempt.id.is_empty()
             || attempt.recorded_revision == 0
@@ -120,13 +123,19 @@ fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
             || task.status != TaskStatus::Published
             || task.project_id != attempt.project_id
             || !snapshot.projects.iter().any(|p| p.id == attempt.project_id)
-            || !snapshot.agents.iter().any(|agent| agent.id == attempt.agent_id)
+            || !snapshot
+                .agents
+                .iter()
+                .any(|agent| agent.id == attempt.agent_id)
             || task.publication_epoch != attempt.publication_epoch
             || !task.agent_ids.contains(&attempt.agent_id)
             || !identities.insert(attempt.id.clone())
             || !publications.insert((attempt.task_id.clone(), attempt.publication_epoch))
         {
-            return Err(ServiceError::new("INVALID_SNAPSHOT", "派工记录不一致，拒绝恢复"));
+            return Err(ServiceError::new(
+                "INVALID_SNAPSHOT",
+                "派工记录不一致，拒绝恢复",
+            ));
         }
     }
     Ok(())
@@ -149,7 +158,11 @@ impl DesktopService {
         validate_dispatch_snapshot(&snapshot)?;
         // An interrupted Host may have performed an external write.
         // Never turn InFlight into Pending and never launch it automatically.
-        if snapshot.dispatch_attempts.iter().any(|a| a.status == DispatchAttemptStatus::InFlight) {
+        if snapshot
+            .dispatch_attempts
+            .iter()
+            .any(|a| a.status == DispatchAttemptStatus::InFlight)
+        {
             service.mutate(|s| {
                 for attempt in &mut s.dispatch_attempts {
                     if attempt.status == DispatchAttemptStatus::InFlight {
@@ -365,22 +378,47 @@ impl DesktopService {
     pub fn publish_task(&mut self, revision: u64, task_id: &str) -> Result<Task> {
         self.mutate(|s| {
             organization::check_revision(s, revision)?;
-            let task = s.tasks.iter().find(|task| task.id == task_id)
+            let task = s
+                .tasks
+                .iter()
+                .find(|task| task.id == task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
             if task.status != TaskStatus::Draft {
-                return Err(ServiceError::new("INVALID_TRANSITION", "任务不是草案，无法重复发布"));
+                return Err(ServiceError::new(
+                    "INVALID_TRANSITION",
+                    "任务不是草案，无法重复发布",
+                ));
             }
-            if task.agent_ids.is_empty() || task.scope.is_empty() || task.scope.iter().any(|scope| scope.trim().is_empty() || scope.chars().any(char::is_control)) || task.goal.trim().is_empty() || task.acceptance.trim().is_empty() {
-                return Err(ServiceError::new("INVALID_INPUT", "发布任务需要目标、成员、工作范围与验收标准"));
+            if task.agent_ids.is_empty()
+                || task.scope.is_empty()
+                || task
+                    .scope
+                    .iter()
+                    .any(|scope| scope.trim().is_empty() || scope.chars().any(char::is_control))
+                || task.goal.trim().is_empty()
+                || task.acceptance.trim().is_empty()
+            {
+                return Err(ServiceError::new(
+                    "INVALID_INPUT",
+                    "发布任务需要目标、成员、工作范围与验收标准",
+                ));
             }
-            if task.agent_ids.iter().any(|id| !task_member_assigned(s, id, &task.project_id)) {
-                return Err(ServiceError::new("INVALID_BINDING", "任务成员不再拥有项目职责"));
+            if task
+                .agent_ids
+                .iter()
+                .any(|id| !task_member_assigned(s, id, &task.project_id))
+            {
+                return Err(ServiceError::new(
+                    "INVALID_BINDING",
+                    "任务成员不再拥有项目职责",
+                ));
             }
             // Publication must never create a task the Core dispatcher will
             // subsequently reject for intrinsic task format constraints.
-            let epoch = s.revision.checked_add(1).ok_or_else(|| {
-                ServiceError::new("STORAGE_ERROR", "任务发布版本无法保存")
-            })?;
+            let epoch = s
+                .revision
+                .checked_add(1)
+                .ok_or_else(|| ServiceError::new("STORAGE_ERROR", "任务发布版本无法保存"))?;
             // Every assignee must be compatible with Core, not only the first:
             // subsequent dispatch admission can target any assigned member.
             for agent_id in &task.agent_ids {
@@ -398,7 +436,10 @@ impl DesktopService {
                     ServiceError::new("INVALID_TASK", "任务目标或成员标识不符合 Core 调度格式")
                 })?;
             }
-            let task = s.tasks.iter_mut().find(|task| task.id == task_id)
+            let task = s
+                .tasks
+                .iter_mut()
+                .find(|task| task.id == task_id)
                 .expect("task checked above");
             task.publication_epoch = epoch;
             task.status = TaskStatus::Published;
@@ -417,7 +458,10 @@ impl DesktopService {
         use wex_core::task::{Task as CoreTask, TaskBoard, TaskStatus as CoreStatus};
         let state = self.snapshot()?;
         organization::check_revision(&state, revision)?;
-        let task = state.tasks.iter().find(|task| task.id == task_id)
+        let task = state
+            .tasks
+            .iter()
+            .find(|task| task.id == task_id)
             .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
         if task.status != TaskStatus::Published {
             return Err(ServiceError::new("TASK_NOT_PUBLISHED", "任务尚未发布"));
@@ -428,20 +472,32 @@ impl DesktopService {
         if !task.agent_ids.iter().any(|id| id == agent_id)
             || !task_member_assigned(&state, agent_id, &task.project_id)
         {
-            return Err(ServiceError::new("AGENT_NOT_ASSIGNED", "成员未获该项目有效任务分配"));
+            return Err(ServiceError::new(
+                "AGENT_NOT_ASSIGNED",
+                "成员未获该项目有效任务分配",
+            ));
         }
         let mut board = TaskBoard::default();
-        board.insert(CoreTask {
-            id: task.id.clone(),
-            project_id: task.project_id.clone(),
-            objective: task.goal.clone(),
-            assigned_agent: Some(agent_id.to_owned()),
-            assignment_epoch: task.publication_epoch,
-            status: CoreStatus::Queued,
-            evidence_refs: vec![],
-        }).map_err(|_| ServiceError::new("INVALID_TASK", "任务无法映射到调度核心"))?;
-        wex_core::dispatch::admit(&board, task_id, &task.project_id, agent_id, task.publication_epoch, true)
-            .map_err(|_| ServiceError::new("DISPATCH_REFUSED", "任务未通过调度准入核查"))
+        board
+            .insert(CoreTask {
+                id: task.id.clone(),
+                project_id: task.project_id.clone(),
+                objective: task.goal.clone(),
+                assigned_agent: Some(agent_id.to_owned()),
+                assignment_epoch: task.publication_epoch,
+                status: CoreStatus::Queued,
+                evidence_refs: vec![],
+            })
+            .map_err(|_| ServiceError::new("INVALID_TASK", "任务无法映射到调度核心"))?;
+        wex_core::dispatch::admit(
+            &board,
+            task_id,
+            &task.project_id,
+            agent_id,
+            task.publication_epoch,
+            true,
+        )
+        .map_err(|_| ServiceError::new("DISPATCH_REFUSED", "任务未通过调度准入核查"))
     }
 
     /// Atomically record one intent for a published task and a selected agent.
@@ -456,20 +512,28 @@ impl DesktopService {
         let ticket = self.task_dispatch_candidate(revision, task_id, agent_id)?;
         self.mutate(|s| {
             organization::check_revision(s, revision)?;
-            let task = s.tasks.iter().find(|t| t.id == ticket.task_id)
+            let task = s
+                .tasks
+                .iter()
+                .find(|t| t.id == ticket.task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
             if task.status != TaskStatus::Published
                 || task.publication_epoch != ticket.assignment_epoch
                 || !task.agent_ids.contains(&ticket.agent_id)
                 || !task_member_assigned(s, &ticket.agent_id, &task.project_id)
             {
-                return Err(ServiceError::new("DISPATCH_REFUSED", "任务或成员分配在领取前发生变化"));
+                return Err(ServiceError::new(
+                    "DISPATCH_REFUSED",
+                    "任务或成员分配在领取前发生变化",
+                ));
             }
             if s.dispatch_attempts.iter().any(|a| {
-                a.task_id == ticket.task_id
-                    && a.publication_epoch == ticket.assignment_epoch
+                a.task_id == ticket.task_id && a.publication_epoch == ticket.assignment_epoch
             }) {
-                return Err(ServiceError::new("DUPLICATE_DISPATCH", "该发布版本已有派工尝试，不能重复登记"));
+                return Err(ServiceError::new(
+                    "DUPLICATE_DISPATCH",
+                    "该发布版本已有派工尝试，不能重复登记",
+                ));
             }
             let attempt = DispatchAttempt {
                 id: id("attempt"),
@@ -478,9 +542,10 @@ impl DesktopService {
                 agent_id: ticket.agent_id,
                 publication_epoch: ticket.assignment_epoch,
                 status: DispatchAttemptStatus::Pending,
-                recorded_revision: s.revision.checked_add(1).ok_or_else(|| {
-                    ServiceError::new("STORAGE_ERROR", "派工版本无法保存")
-                })?,
+                recorded_revision: s
+                    .revision
+                    .checked_add(1)
+                    .ok_or_else(|| ServiceError::new("STORAGE_ERROR", "派工版本无法保存"))?,
             };
             s.dispatch_attempts.push(attempt.clone());
             Ok(attempt)
@@ -497,12 +562,21 @@ impl DesktopService {
     ) -> Result<DispatchAttempt> {
         self.mutate(|s| {
             organization::check_revision(s, revision)?;
-            let prior = s.dispatch_attempts.iter().find(|a| a.id == attempt_id)
+            let prior = s
+                .dispatch_attempts
+                .iter()
+                .find(|a| a.id == attempt_id)
                 .ok_or_else(|| ServiceError::new("ATTEMPT_NOT_FOUND", "派工记录不存在"))?;
             if prior.status != DispatchAttemptStatus::Pending {
-                return Err(ServiceError::new("ATTEMPT_NOT_PENDING", "派工记录已领取或需要人工核对"));
+                return Err(ServiceError::new(
+                    "ATTEMPT_NOT_PENDING",
+                    "派工记录已领取或需要人工核对",
+                ));
             }
-            let task = s.tasks.iter().find(|t| t.id == prior.task_id)
+            let task = s
+                .tasks
+                .iter()
+                .find(|t| t.id == prior.task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "原任务不存在"))?;
             if task.status != TaskStatus::Published
                 || task.project_id != prior.project_id
@@ -510,7 +584,10 @@ impl DesktopService {
                 || !task.agent_ids.contains(&prior.agent_id)
                 || !task_member_assigned(s, &prior.agent_id, &task.project_id)
             {
-                return Err(ServiceError::new("DISPATCH_REFUSED", "任务版本或成员授权关系已变化"));
+                return Err(ServiceError::new(
+                    "DISPATCH_REFUSED",
+                    "任务版本或成员授权关系已变化",
+                ));
             }
             // Temporary fail-closed global fence until the Host can hold
             // canonical, path-overlap-aware leases for entire tool lifetimes.
@@ -519,8 +596,7 @@ impl DesktopService {
             // a shared filesystem or connector. Without durable scoped leases,
             // globally refuse another claim until the uncertainty is resolved.
             if s.dispatch_attempts.iter().any(|other| {
-                other.id != attempt_id
-                    && other.status == DispatchAttemptStatus::OutcomeUnknown
+                other.id != attempt_id && other.status == DispatchAttemptStatus::OutcomeUnknown
             }) {
                 return Err(ServiceError::new(
                     "UNKNOWN_DISPATCH_BLOCKED",
@@ -528,15 +604,17 @@ impl DesktopService {
                 ));
             }
             if s.dispatch_attempts.iter().any(|other| {
-                other.id != attempt_id
-                    && other.status == DispatchAttemptStatus::InFlight
+                other.id != attempt_id && other.status == DispatchAttemptStatus::InFlight
             }) {
                 return Err(ServiceError::new(
                     "ACTIVE_DISPATCH_BLOCKED",
                     "存在执行中的派工，资源隔离接通前禁止并发领取",
                 ));
             }
-            let attempt = s.dispatch_attempts.iter_mut().find(|a| a.id == attempt_id)
+            let attempt = s
+                .dispatch_attempts
+                .iter_mut()
+                .find(|a| a.id == attempt_id)
                 .expect("attempt checked above");
             attempt.status = DispatchAttemptStatus::InFlight;
             Ok(attempt.clone())
@@ -558,7 +636,10 @@ impl DesktopService {
                 .find(|t| t.id == task_id)
                 .ok_or_else(|| ServiceError::new("TASK_NOT_FOUND", "任务不存在"))?;
             if task.status != TaskStatus::Draft {
-                return Err(ServiceError::new("INVALID_TRANSITION", "已发布任务不能按草案直接覆盖，请走任务修订流程"));
+                return Err(ServiceError::new(
+                    "INVALID_TRANSITION",
+                    "已发布任务不能按草案直接覆盖，请走任务修订流程",
+                ));
             }
             if task.project_id != input.project_id
                 || input
@@ -723,36 +804,38 @@ mod publication_tests {
 
     fn draft_service() -> DesktopService {
         let mut service = DesktopService::memory().unwrap();
-        service.mutate(|snapshot| {
-            snapshot.projects.push(Project {
-                id: "p_1".into(),
-                name: "Project".into(),
-                goal: String::new(),
-                resources: vec![],
-                context_id: None,
-            });
-            snapshot.agents.push(Agent {
-                id: "a_1".into(),
-                project_id: "p_1".into(),
-                name: "Worker".into(),
-                role: AgentRole::Worker,
-                connection_id: "c_1".into(),
-                model_id: "model".into(),
-                conversation_id: "conv_1".into(),
-            });
-            snapshot.tasks.push(Task {
-                id: "task_1".into(),
-                project_id: "p_1".into(),
-                title: "Implement".into(),
-                goal: "Make change".into(),
-                scope: vec!["src".into()],
-                acceptance: "Tests pass".into(),
-                agent_ids: vec!["a_1".into()],
-                status: TaskStatus::Draft,
-                publication_epoch: 0,
-            });
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.projects.push(Project {
+                    id: "p_1".into(),
+                    name: "Project".into(),
+                    goal: String::new(),
+                    resources: vec![],
+                    context_id: None,
+                });
+                snapshot.agents.push(Agent {
+                    id: "a_1".into(),
+                    project_id: "p_1".into(),
+                    name: "Worker".into(),
+                    role: AgentRole::Worker,
+                    connection_id: "c_1".into(),
+                    model_id: "model".into(),
+                    conversation_id: "conv_1".into(),
+                });
+                snapshot.tasks.push(Task {
+                    id: "task_1".into(),
+                    project_id: "p_1".into(),
+                    title: "Implement".into(),
+                    goal: "Make change".into(),
+                    scope: vec!["src".into()],
+                    acceptance: "Tests pass".into(),
+                    agent_ids: vec!["a_1".into()],
+                    status: TaskStatus::Draft,
+                    publication_epoch: 0,
+                });
+                Ok(())
+            })
+            .unwrap();
         service
     }
 
@@ -764,15 +847,31 @@ mod publication_tests {
         assert_eq!(published.status, TaskStatus::Published);
         let state = service.snapshot().unwrap();
         assert_eq!(state.tasks[0].status, TaskStatus::Published);
-        assert_eq!(service.publish_task(state.revision, "task_1").unwrap_err().code, "INVALID_TRANSITION");
-        assert_eq!(service.update_task(state.revision, "task_1", NewTask {
-            project_id: "p_1".into(),
-            title: "Overwritten".into(),
-            goal: "Changed".into(),
-            scope: vec!["src".into()],
-            acceptance: "Done".into(),
-            agent_ids: vec!["a_1".into()],
-        }).unwrap_err().code, "INVALID_TRANSITION");
+        assert_eq!(
+            service
+                .publish_task(state.revision, "task_1")
+                .unwrap_err()
+                .code,
+            "INVALID_TRANSITION"
+        );
+        assert_eq!(
+            service
+                .update_task(
+                    state.revision,
+                    "task_1",
+                    NewTask {
+                        project_id: "p_1".into(),
+                        title: "Overwritten".into(),
+                        goal: "Changed".into(),
+                        scope: vec!["src".into()],
+                        acceptance: "Done".into(),
+                        agent_ids: vec!["a_1".into()],
+                    }
+                )
+                .unwrap_err()
+                .code,
+            "INVALID_TRANSITION"
+        );
         assert_eq!(service.snapshot().unwrap().revision, state.revision);
     }
 
@@ -781,21 +880,32 @@ mod publication_tests {
         let mut service = draft_service();
         let before = service.snapshot().unwrap().revision;
         assert_eq!(
-            service.task_dispatch_candidate(before, "task_1", "a_1").unwrap_err().code,
+            service
+                .task_dispatch_candidate(before, "task_1", "a_1")
+                .unwrap_err()
+                .code,
             "TASK_NOT_PUBLISHED"
         );
         service.publish_task(before, "task_1").unwrap();
         let current = service.snapshot().unwrap().revision;
-        let ticket = service.task_dispatch_candidate(current, "task_1", "a_1").unwrap();
+        let ticket = service
+            .task_dispatch_candidate(current, "task_1", "a_1")
+            .unwrap();
         assert_eq!(ticket.task_id, "task_1");
         assert_eq!(ticket.agent_id, "a_1");
         assert_eq!(ticket.assignment_epoch, current);
         assert_eq!(
-            service.task_dispatch_candidate(before, "task_1", "a_1").unwrap_err().code,
+            service
+                .task_dispatch_candidate(before, "task_1", "a_1")
+                .unwrap_err()
+                .code,
             "REVISION_CONFLICT"
         );
         assert_eq!(
-            service.task_dispatch_candidate(current, "task_1", "a_2").unwrap_err().code,
+            service
+                .task_dispatch_candidate(current, "task_1", "a_2")
+                .unwrap_err()
+                .code,
             "AGENT_NOT_ASSIGNED"
         );
     }
@@ -806,14 +916,22 @@ mod publication_tests {
         let initial = service.snapshot().unwrap().revision;
         service.publish_task(initial, "task_1").unwrap();
         let revision = service.snapshot().unwrap().revision;
-        let attempt = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        let attempt = service
+            .queue_dispatch_attempt(revision, "task_1", "a_1")
+            .unwrap();
         assert_eq!(attempt.status, DispatchAttemptStatus::Pending);
         let saved = service.snapshot().unwrap();
         assert_eq!(saved.dispatch_attempts.len(), 1);
         assert_eq!(saved.dispatch_attempts[0].id, attempt.id);
-        assert_eq!(saved.dispatch_attempts[0].publication_epoch, saved.tasks[0].publication_epoch);
         assert_eq!(
-            service.queue_dispatch_attempt(saved.revision, "task_1", "a_1").unwrap_err().code,
+            saved.dispatch_attempts[0].publication_epoch,
+            saved.tasks[0].publication_epoch
+        );
+        assert_eq!(
+            service
+                .queue_dispatch_attempt(saved.revision, "task_1", "a_1")
+                .unwrap_err()
+                .code,
             "DUPLICATE_DISPATCH"
         );
         assert_eq!(service.snapshot().unwrap().revision, saved.revision);
@@ -825,24 +943,36 @@ mod publication_tests {
         let revision = service.snapshot().unwrap().revision;
         service.publish_task(revision, "task_1").unwrap();
         let revision = service.snapshot().unwrap().revision;
-        let queued = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        let queued = service
+            .queue_dispatch_attempt(revision, "task_1", "a_1")
+            .unwrap();
         let revision = service.snapshot().unwrap().revision;
-        let claimed = service.claim_dispatch_attempt(revision, &queued.id).unwrap();
+        let claimed = service
+            .claim_dispatch_attempt(revision, &queued.id)
+            .unwrap();
         assert_eq!(claimed.status, DispatchAttemptStatus::InFlight);
         let saved = service.snapshot().unwrap();
         assert_eq!(
-            service.claim_dispatch_attempt(saved.revision, &queued.id).unwrap_err().code,
+            service
+                .claim_dispatch_attempt(saved.revision, &queued.id)
+                .unwrap_err()
+                .code,
             "ATTEMPT_NOT_PENDING"
         );
         assert_eq!(service.snapshot().unwrap().revision, saved.revision);
         let original = saved.dispatch_attempts[0].clone();
-        service.mutate(|s| {
-            assert_eq!(s.dispatch_attempts[0].id, original.id);
-            s.dispatch_attempts[0].status = DispatchAttemptStatus::OutcomeUnknown;
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|s| {
+                assert_eq!(s.dispatch_attempts[0].id, original.id);
+                s.dispatch_attempts[0].status = DispatchAttemptStatus::OutcomeUnknown;
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(
-            service.claim_dispatch_attempt(service.snapshot().unwrap().revision, &queued.id).unwrap_err().code,
+            service
+                .claim_dispatch_attempt(service.snapshot().unwrap().revision, &queued.id)
+                .unwrap_err()
+                .code,
             "ATTEMPT_NOT_PENDING"
         );
     }
@@ -852,38 +982,63 @@ mod publication_tests {
         let mut service = draft_service();
         let mut second = service.snapshot().unwrap().tasks[0].clone();
         second.id = "task_2".into();
-        service.mutate(|snapshot| {
-            snapshot.tasks.push(second);
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.tasks.push(second);
+                Ok(())
+            })
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.publish_task(rev, "task_1").unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.publish_task(rev, "task_2").unwrap();
         let rev = service.snapshot().unwrap().revision;
-        let first = service.queue_dispatch_attempt(rev, "task_1", "a_1").unwrap();
+        let first = service
+            .queue_dispatch_attempt(rev, "task_1", "a_1")
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
-        let second = service.queue_dispatch_attempt(rev, "task_2", "a_1").unwrap();
+        let second = service
+            .queue_dispatch_attempt(rev, "task_2", "a_1")
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.claim_dispatch_attempt(rev, &first.id).unwrap();
         let rev = service.snapshot().unwrap().revision;
         assert_eq!(
-            service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
+            service
+                .claim_dispatch_attempt(rev, &second.id)
+                .unwrap_err()
+                .code,
             "ACTIVE_DISPATCH_BLOCKED"
         );
         assert_eq!(service.snapshot().unwrap().revision, rev);
-        service.mutate(|snapshot| {
-            snapshot.dispatch_attempts.iter_mut().find(|a| a.id == first.id).unwrap().status =
-                DispatchAttemptStatus::OutcomeUnknown;
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot
+                    .dispatch_attempts
+                    .iter_mut()
+                    .find(|a| a.id == first.id)
+                    .unwrap()
+                    .status = DispatchAttemptStatus::OutcomeUnknown;
+                Ok(())
+            })
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
         assert_eq!(
-            service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
+            service
+                .claim_dispatch_attempt(rev, &second.id)
+                .unwrap_err()
+                .code,
             "UNKNOWN_DISPATCH_BLOCKED"
         );
         assert_eq!(
-            service.snapshot().unwrap().dispatch_attempts.iter().find(|a| a.id == second.id).unwrap().status,
+            service
+                .snapshot()
+                .unwrap()
+                .dispatch_attempts
+                .iter()
+                .find(|a| a.id == second.id)
+                .unwrap()
+                .status,
             DispatchAttemptStatus::Pending
         );
     }
@@ -894,18 +1049,24 @@ mod publication_tests {
         let revision = service.snapshot().unwrap().revision;
         service.publish_task(revision, "task_1").unwrap();
         let revision = service.snapshot().unwrap().revision;
-        service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
-        service.mutate(|snapshot| {
-            snapshot.agents[0].project_id = "another_project".into();
-            Ok(())
-        }).unwrap();
+        service
+            .queue_dispatch_attempt(revision, "task_1", "a_1")
+            .unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.agents[0].project_id = "another_project".into();
+                Ok(())
+            })
+            .unwrap();
         let persisted = service.snapshot().unwrap();
         // Restoring history does not grant current authority. Claim must
         // separately enforce today's project duty and assignment.
         assert!(validate_dispatch_snapshot(&persisted).is_ok());
         assert_eq!(
-            service.claim_dispatch_attempt(persisted.revision, &persisted.dispatch_attempts[0].id)
-                .unwrap_err().code,
+            service
+                .claim_dispatch_attempt(persisted.revision, &persisted.dispatch_attempts[0].id)
+                .unwrap_err()
+                .code,
             "DISPATCH_REFUSED"
         );
     }
@@ -916,36 +1077,54 @@ mod publication_tests {
         let db = dir.path().join("desktop.sqlite");
         let attempt_id = {
             let mut service = DesktopService::open(&db).unwrap();
-            service.mutate(|snapshot| {
-                snapshot.projects.push(Project {
-                    id: "p_1".into(), name: "Project".into(), goal: String::new(),
-                    resources: vec![], context_id: None,
-                });
-                snapshot.agents.push(Agent {
-                    id: "a_1".into(), project_id: "p_1".into(),
-                    name: "Worker".into(), role: AgentRole::Worker,
-                    connection_id: "c_1".into(), model_id: "model".into(),
-                    conversation_id: "conv_1".into(),
-                });
-                snapshot.tasks.push(Task {
-                    id: "task_1".into(), project_id: "p_1".into(),
-                    title: "Implement".into(), goal: "Change file".into(),
-                    scope: vec!["src".into()], acceptance: "Review".into(),
-                    agent_ids: vec!["a_1".into()], status: TaskStatus::Draft,
-                    publication_epoch: 0,
-                });
-                Ok(())
-            }).unwrap();
+            service
+                .mutate(|snapshot| {
+                    snapshot.projects.push(Project {
+                        id: "p_1".into(),
+                        name: "Project".into(),
+                        goal: String::new(),
+                        resources: vec![],
+                        context_id: None,
+                    });
+                    snapshot.agents.push(Agent {
+                        id: "a_1".into(),
+                        project_id: "p_1".into(),
+                        name: "Worker".into(),
+                        role: AgentRole::Worker,
+                        connection_id: "c_1".into(),
+                        model_id: "model".into(),
+                        conversation_id: "conv_1".into(),
+                    });
+                    snapshot.tasks.push(Task {
+                        id: "task_1".into(),
+                        project_id: "p_1".into(),
+                        title: "Implement".into(),
+                        goal: "Change file".into(),
+                        scope: vec!["src".into()],
+                        acceptance: "Review".into(),
+                        agent_ids: vec!["a_1".into()],
+                        status: TaskStatus::Draft,
+                        publication_epoch: 0,
+                    });
+                    Ok(())
+                })
+                .unwrap();
             let revision = service.snapshot().unwrap().revision;
             service.publish_task(revision, "task_1").unwrap();
             let revision = service.snapshot().unwrap().revision;
-            service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap().id
+            service
+                .queue_dispatch_attempt(revision, "task_1", "a_1")
+                .unwrap()
+                .id
         };
         let recovered = DesktopService::open(&db).unwrap();
         let snapshot = recovered.snapshot().unwrap();
         assert_eq!(snapshot.dispatch_attempts.len(), 1);
         assert_eq!(snapshot.dispatch_attempts[0].id, attempt_id);
-        assert_eq!(snapshot.dispatch_attempts[0].status, DispatchAttemptStatus::Pending);
+        assert_eq!(
+            snapshot.dispatch_attempts[0].status,
+            DispatchAttemptStatus::Pending
+        );
     }
 
     #[test]
@@ -954,41 +1133,63 @@ mod publication_tests {
         let db = dir.path().join("desktop.sqlite");
         let attempt_id = {
             let mut service = DesktopService::open(&db).unwrap();
-            service.mutate(|snapshot| {
-                snapshot.projects.push(Project {
-                    id: "p_1".into(), name: "Project".into(), goal: String::new(),
-                    resources: vec![], context_id: None,
-                });
-                snapshot.agents.push(Agent {
-                    id: "a_1".into(), project_id: "p_1".into(),
-                    name: "Worker".into(), role: AgentRole::Worker,
-                    connection_id: "c_1".into(), model_id: "model".into(),
-                    conversation_id: "conv_1".into(),
-                });
-                snapshot.tasks.push(Task {
-                    id: "task_1".into(), project_id: "p_1".into(),
-                    title: "Implement".into(), goal: "Change file".into(),
-                    scope: vec!["src".into()], acceptance: "Review".into(),
-                    agent_ids: vec!["a_1".into()], status: TaskStatus::Draft,
-                    publication_epoch: 0,
-                });
-                Ok(())
-            }).unwrap();
+            service
+                .mutate(|snapshot| {
+                    snapshot.projects.push(Project {
+                        id: "p_1".into(),
+                        name: "Project".into(),
+                        goal: String::new(),
+                        resources: vec![],
+                        context_id: None,
+                    });
+                    snapshot.agents.push(Agent {
+                        id: "a_1".into(),
+                        project_id: "p_1".into(),
+                        name: "Worker".into(),
+                        role: AgentRole::Worker,
+                        connection_id: "c_1".into(),
+                        model_id: "model".into(),
+                        conversation_id: "conv_1".into(),
+                    });
+                    snapshot.tasks.push(Task {
+                        id: "task_1".into(),
+                        project_id: "p_1".into(),
+                        title: "Implement".into(),
+                        goal: "Change file".into(),
+                        scope: vec!["src".into()],
+                        acceptance: "Review".into(),
+                        agent_ids: vec!["a_1".into()],
+                        status: TaskStatus::Draft,
+                        publication_epoch: 0,
+                    });
+                    Ok(())
+                })
+                .unwrap();
             let revision = service.snapshot().unwrap().revision;
             service.publish_task(revision, "task_1").unwrap();
             let revision = service.snapshot().unwrap().revision;
-            let attempt = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+            let attempt = service
+                .queue_dispatch_attempt(revision, "task_1", "a_1")
+                .unwrap();
             let revision = service.snapshot().unwrap().revision;
-            service.claim_dispatch_attempt(revision, &attempt.id).unwrap();
+            service
+                .claim_dispatch_attempt(revision, &attempt.id)
+                .unwrap();
             attempt.id
         };
         let mut recovered = DesktopService::open(&db).unwrap();
         let restored = recovered.snapshot().unwrap();
         assert_eq!(restored.dispatch_attempts.len(), 1);
         assert_eq!(restored.dispatch_attempts[0].id, attempt_id);
-        assert_eq!(restored.dispatch_attempts[0].status, DispatchAttemptStatus::OutcomeUnknown);
         assert_eq!(
-            recovered.claim_dispatch_attempt(restored.revision, &attempt_id).unwrap_err().code,
+            restored.dispatch_attempts[0].status,
+            DispatchAttemptStatus::OutcomeUnknown
+        );
+        assert_eq!(
+            recovered
+                .claim_dispatch_attempt(restored.revision, &attempt_id)
+                .unwrap_err()
+                .code,
             "ATTEMPT_NOT_PENDING"
         );
         assert_eq!(recovered.snapshot().unwrap().dispatch_attempts.len(), 1);
@@ -1000,29 +1201,48 @@ mod publication_tests {
         let revision = service.snapshot().unwrap().revision;
         service.publish_task(revision, "task_1").unwrap();
         let revision = service.snapshot().unwrap().revision;
-        let attempt = service.queue_dispatch_attempt(revision, "task_1", "a_1").unwrap();
+        let attempt = service
+            .queue_dispatch_attempt(revision, "task_1", "a_1")
+            .unwrap();
         let valid = service.snapshot().unwrap();
         assert!(validate_dispatch_snapshot(&valid).is_ok());
 
         let mut duplicate = valid.clone();
         duplicate.dispatch_attempts.push(attempt.clone());
-        assert_eq!(validate_dispatch_snapshot(&duplicate).unwrap_err().code, "INVALID_SNAPSHOT");
+        assert_eq!(
+            validate_dispatch_snapshot(&duplicate).unwrap_err().code,
+            "INVALID_SNAPSHOT"
+        );
 
         let mut orphan = valid.clone();
         orphan.dispatch_attempts[0].task_id = "missing".into();
-        assert_eq!(validate_dispatch_snapshot(&orphan).unwrap_err().code, "INVALID_SNAPSHOT");
+        assert_eq!(
+            validate_dispatch_snapshot(&orphan).unwrap_err().code,
+            "INVALID_SNAPSHOT"
+        );
 
         let mut forged_epoch = valid.clone();
         forged_epoch.dispatch_attempts[0].publication_epoch += 1;
-        assert_eq!(validate_dispatch_snapshot(&forged_epoch).unwrap_err().code, "INVALID_SNAPSHOT");
+        assert_eq!(
+            validate_dispatch_snapshot(&forged_epoch).unwrap_err().code,
+            "INVALID_SNAPSHOT"
+        );
 
         let mut forged_agent = valid.clone();
         forged_agent.dispatch_attempts[0].agent_id = "other_agent".into();
-        assert_eq!(validate_dispatch_snapshot(&forged_agent).unwrap_err().code, "INVALID_SNAPSHOT");
+        assert_eq!(
+            validate_dispatch_snapshot(&forged_agent).unwrap_err().code,
+            "INVALID_SNAPSHOT"
+        );
 
         let mut future_revision = valid;
         future_revision.dispatch_attempts[0].recorded_revision = future_revision.revision + 1;
-        assert_eq!(validate_dispatch_snapshot(&future_revision).unwrap_err().code, "INVALID_SNAPSHOT");
+        assert_eq!(
+            validate_dispatch_snapshot(&future_revision)
+                .unwrap_err()
+                .code,
+            "INVALID_SNAPSHOT"
+        );
     }
 
     #[test]
@@ -1031,45 +1251,69 @@ mod publication_tests {
         let mut other = service.snapshot().unwrap().tasks[0].clone();
         other.id = "task_other".into();
         other.project_id = "p_other".into();
-        service.mutate(|snapshot| {
-            snapshot.projects.push(Project {
-                id: "p_other".into(), name: "Other".into(), goal: String::new(),
-                resources: vec![], context_id: None,
-            });
-            snapshot.agents.push(Agent {
-                id: "a_other".into(), project_id: "p_other".into(),
-                name: "Other worker".into(), role: AgentRole::Worker,
-                connection_id: "c_1".into(), model_id: "model".into(),
-                conversation_id: "conv_other".into(),
-            });
-            other.agent_ids = vec!["a_other".into()];
-            snapshot.tasks.push(other);
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.projects.push(Project {
+                    id: "p_other".into(),
+                    name: "Other".into(),
+                    goal: String::new(),
+                    resources: vec![],
+                    context_id: None,
+                });
+                snapshot.agents.push(Agent {
+                    id: "a_other".into(),
+                    project_id: "p_other".into(),
+                    name: "Other worker".into(),
+                    role: AgentRole::Worker,
+                    connection_id: "c_1".into(),
+                    model_id: "model".into(),
+                    conversation_id: "conv_other".into(),
+                });
+                other.agent_ids = vec!["a_other".into()];
+                snapshot.tasks.push(other);
+                Ok(())
+            })
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.publish_task(rev, "task_1").unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.publish_task(rev, "task_other").unwrap();
         let rev = service.snapshot().unwrap().revision;
-        let first = service.queue_dispatch_attempt(rev, "task_1", "a_1").unwrap();
+        let first = service
+            .queue_dispatch_attempt(rev, "task_1", "a_1")
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
-        let second = service.queue_dispatch_attempt(rev, "task_other", "a_other").unwrap();
+        let second = service
+            .queue_dispatch_attempt(rev, "task_other", "a_other")
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
         service.claim_dispatch_attempt(rev, &first.id).unwrap();
         let active_rev = service.snapshot().unwrap().revision;
         assert_eq!(
-            service.claim_dispatch_attempt(active_rev, &second.id).unwrap_err().code,
+            service
+                .claim_dispatch_attempt(active_rev, &second.id)
+                .unwrap_err()
+                .code,
             "ACTIVE_DISPATCH_BLOCKED"
         );
         assert_eq!(service.snapshot().unwrap().revision, active_rev);
-        service.mutate(|snapshot| {
-            snapshot.dispatch_attempts.iter_mut().find(|a| a.id == first.id).unwrap().status =
-                DispatchAttemptStatus::OutcomeUnknown;
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot
+                    .dispatch_attempts
+                    .iter_mut()
+                    .find(|a| a.id == first.id)
+                    .unwrap()
+                    .status = DispatchAttemptStatus::OutcomeUnknown;
+                Ok(())
+            })
+            .unwrap();
         let rev = service.snapshot().unwrap().revision;
         assert_eq!(
-            service.claim_dispatch_attempt(rev, &second.id).unwrap_err().code,
+            service
+                .claim_dispatch_attempt(rev, &second.id)
+                .unwrap_err()
+                .code,
             "UNKNOWN_DISPATCH_BLOCKED"
         );
     }
@@ -1080,7 +1324,10 @@ mod publication_tests {
         let initial = service.snapshot().unwrap().revision;
         service.publish_task(initial, "task_1").unwrap();
         assert_eq!(
-            service.queue_dispatch_attempt(initial, "task_1", "a_1").unwrap_err().code,
+            service
+                .queue_dispatch_attempt(initial, "task_1", "a_1")
+                .unwrap_err()
+                .code,
             "REVISION_CONFLICT"
         );
         assert!(service.snapshot().unwrap().dispatch_attempts.is_empty());
@@ -1092,14 +1339,21 @@ mod publication_tests {
         let initial = service.snapshot().unwrap().revision;
         let published = service.publish_task(initial, "task_1").unwrap();
         assert_eq!(published.publication_epoch, initial + 1);
-        service.mutate(|snapshot| {
-            snapshot.projects[0].goal = "Unrelated update".into();
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.projects[0].goal = "Unrelated update".into();
+                Ok(())
+            })
+            .unwrap();
         let after = service.snapshot().unwrap();
         assert!(after.revision > published.publication_epoch);
-        assert_eq!(after.tasks[0].publication_epoch, published.publication_epoch);
-        let ticket = service.task_dispatch_candidate(after.revision, "task_1", "a_1").unwrap();
+        assert_eq!(
+            after.tasks[0].publication_epoch,
+            published.publication_epoch
+        );
+        let ticket = service
+            .task_dispatch_candidate(after.revision, "task_1", "a_1")
+            .unwrap();
         assert_eq!(ticket.assignment_epoch, published.publication_epoch);
     }
 
@@ -1107,37 +1361,50 @@ mod publication_tests {
     fn publication_rejects_blank_and_control_character_scopes() {
         for invalid_scope in [" ", "src\nother"] {
             let mut service = draft_service();
-            service.mutate(|snapshot| {
-                snapshot.tasks[0].scope = vec![invalid_scope.into()];
-                Ok(())
-            }).unwrap();
+            service
+                .mutate(|snapshot| {
+                    snapshot.tasks[0].scope = vec![invalid_scope.into()];
+                    Ok(())
+                })
+                .unwrap();
             let revision = service.snapshot().unwrap().revision;
             assert_eq!(
                 service.publish_task(revision, "task_1").unwrap_err().code,
                 "INVALID_INPUT"
             );
             assert_eq!(service.snapshot().unwrap().revision, revision);
-            assert_eq!(service.snapshot().unwrap().tasks[0].status, TaskStatus::Draft);
+            assert_eq!(
+                service.snapshot().unwrap().tasks[0].status,
+                TaskStatus::Draft
+            );
         }
     }
 
     #[test]
     fn publication_checks_all_assignees_not_only_first() {
         let mut service = draft_service();
-        service.mutate(|snapshot| {
-            let other = "a".repeat(65);
-            snapshot.agents.push(Agent {
-                id: other.clone(), project_id: "p_1".into(),
-                name: "Invalid Core agent".into(), role: AgentRole::Worker,
-                connection_id: "c_1".into(), model_id: "model".into(),
-                conversation_id: "conv_other".into(),
-            });
-            snapshot.tasks[0].agent_ids.push(other);
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                let other = "a".repeat(65);
+                snapshot.agents.push(Agent {
+                    id: other.clone(),
+                    project_id: "p_1".into(),
+                    name: "Invalid Core agent".into(),
+                    role: AgentRole::Worker,
+                    connection_id: "c_1".into(),
+                    model_id: "model".into(),
+                    conversation_id: "conv_other".into(),
+                });
+                snapshot.tasks[0].agent_ids.push(other);
+                Ok(())
+            })
+            .unwrap();
         let before = service.snapshot().unwrap();
         assert_eq!(
-            service.publish_task(before.revision, "task_1").unwrap_err().code,
+            service
+                .publish_task(before.revision, "task_1")
+                .unwrap_err()
+                .code,
             "INVALID_TASK"
         );
         let after = service.snapshot().unwrap();
@@ -1149,13 +1416,18 @@ mod publication_tests {
     #[test]
     fn publish_rejects_objective_exceeding_core_limit_without_durable_changes() {
         let mut service = draft_service();
-        service.mutate(|snapshot| {
-            snapshot.tasks[0].goal = "x".repeat(8193);
-            Ok(())
-        }).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.tasks[0].goal = "x".repeat(8193);
+                Ok(())
+            })
+            .unwrap();
         let before = service.snapshot().unwrap();
         assert_eq!(
-            service.publish_task(before.revision, "task_1").unwrap_err().code,
+            service
+                .publish_task(before.revision, "task_1")
+                .unwrap_err()
+                .code,
             "INVALID_TASK"
         );
         let after = service.snapshot().unwrap();
@@ -1168,13 +1440,24 @@ mod publication_tests {
     fn publication_rejects_stale_revision_and_missing_scope_without_mutating_snapshot() {
         let mut service = draft_service();
         let revision = service.snapshot().unwrap().revision;
-        assert_eq!(service.publish_task(revision - 1, "task_1").unwrap_err().code, "REVISION_CONFLICT");
-        service.mutate(|state| {
-            state.tasks[0].scope.clear();
-            Ok(())
-        }).unwrap();
+        assert_eq!(
+            service
+                .publish_task(revision - 1, "task_1")
+                .unwrap_err()
+                .code,
+            "REVISION_CONFLICT"
+        );
+        service
+            .mutate(|state| {
+                state.tasks[0].scope.clear();
+                Ok(())
+            })
+            .unwrap();
         let revision = service.snapshot().unwrap().revision;
-        assert_eq!(service.publish_task(revision, "task_1").unwrap_err().code, "INVALID_INPUT");
+        assert_eq!(
+            service.publish_task(revision, "task_1").unwrap_err().code,
+            "INVALID_INPUT"
+        );
         let state = service.snapshot().unwrap();
         assert_eq!(state.revision, revision);
         assert_eq!(state.tasks[0].status, TaskStatus::Draft);

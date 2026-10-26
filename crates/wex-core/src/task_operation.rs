@@ -64,7 +64,10 @@ impl TaskOperationIndex {
     /// A stable ordering for the task detail/evidence view. Callers still
     /// resolve the operation receipt from the authoritative ledger.
     pub fn operations_for_task(&self, task_id: &str) -> Vec<&TaskOperationLink> {
-        self.links.values().filter(|link| link.task_id == task_id).collect()
+        self.links
+            .values()
+            .filter(|link| link.task_id == task_id)
+            .collect()
     }
 
     /// A link never grants authority to execute an operation.

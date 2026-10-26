@@ -72,6 +72,12 @@ fn child_git_environment_isolation() {
         attempt_id: "attempt_git_env".into(),
     };
     let status = approved_git_status(&dispatch, "approved_repo", &root).unwrap();
-    assert!(status.contains("?? expected_only.txt"), "wrong repository: {status}");
-    assert!(!status.contains("alternate_only.txt"), "ambient repo leaked: {status}");
+    assert!(
+        status.contains("?? expected_only.txt"),
+        "wrong repository: {status}"
+    );
+    assert!(
+        !status.contains("alternate_only.txt"),
+        "ambient repo leaked: {status}"
+    );
 }

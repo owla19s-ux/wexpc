@@ -126,7 +126,10 @@ mod publication_schema_tests {
     #[test]
     fn newly_created_store_uses_schema_eight() {
         let store = DesktopStore::memory().unwrap();
-        let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+        let version: u32 = store
+            .db
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
         assert_eq!(version, 8);
     }
 
@@ -145,17 +148,24 @@ mod publication_schema_tests {
                 "tasks": [],
                 "conversations": [],
                 "turns": []
-            }).to_string();
-            db.execute("INSERT INTO desktop_state(id,body) VALUES (1,?1)", [&prior]).unwrap();
+            })
+            .to_string();
+            db.execute("INSERT INTO desktop_state(id,body) VALUES (1,?1)", [&prior])
+                .unwrap();
             let store = DesktopStore::init(db, None).unwrap();
-            let version: u32 = store.db.query_row("PRAGMA user_version", [], |row| row.get(0)).unwrap();
+            let version: u32 = store
+                .db
+                .query_row("PRAGMA user_version", [], |row| row.get(0))
+                .unwrap();
             assert_eq!(version, 8);
             assert_eq!(store.load().unwrap().revision, 42);
-            let preserved: String = store.db.query_row(
-                "SELECT body FROM desktop_state WHERE id=1", [], |row| row.get(0)
-            ).unwrap();
+            let preserved: String = store
+                .db
+                .query_row("SELECT body FROM desktop_state WHERE id=1", [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
             assert_eq!(preserved, prior);
         }
     }
-
 }
