@@ -2,8 +2,9 @@ import type { DispatchAttempt, Snapshot } from './types';
 
 // This is a read-only view of persisted task/dispatch facts, not a dispatcher.
 // In particular, "claimed" is not evidence that a tool ran or a task passed review.
-export function taskFooterSummary(data: Pick<Snapshot, 'tasks' | 'dispatch_attempts'> | null): string {
+export function taskFooterSummary(data: Pick<Snapshot, 'tasks' | 'dispatch_attempts'> | null, fresh = true): string {
   if (!data) return '任务状态尚未加载';
+  if (!fresh) return '任务状态仅为上次读取结果（当前未核实）';
   if (!data.tasks.length) return '暂无任务';
 
   const drafts = data.tasks.filter(task => task.status === 'draft').length;
