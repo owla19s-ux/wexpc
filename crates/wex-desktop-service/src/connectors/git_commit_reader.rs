@@ -24,7 +24,27 @@ pub fn read_approved_git_commit_object(
     oid: &str,
 ) -> Result<CommitObject> {
     verify_git_commit_approval(dispatch, resource_id, root, prepared)?;
-    if !matches!(oid.len(), 40 | 64)
+    let raw = read_authenticated_object(
+        root,
+        trusted_git_program,
+        oid,
+        "commit",
+        Instant::now() + Duration::from_secs(15),
+    )?;
+    parse_commit_object(&raw).map_err(|_| evidence_unavailable())
+}
+
+// Only fixed object types and hex IDs reach this shared bounded runner.
+pub(super) fn read_authenticated_object(
+    root: &Path,
+    trusted_git_program: &Path,
+    oid: &str,
+    kind: &str,
+    deadline: Instant,
+) -> Result<Vec<u8>> {
+    if !matches!(kind, "commit" | "tree")
+        || Instant::now() >= deadline
+        || !matches!(oid.len(), 40 | 64)
         || !oid
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -36,7 +56,7 @@ pub fn read_approved_git_commit_object(
             "Git 程序或提交对象标识无效",
         ));
     }
-    let mut command = object_command(trusted_git_program, root, oid);
+    let mut command = object_command(trusted_git_program, root, oid, kind);
     struct Child(std::process::Child);
     impl Drop for Child {
         fn drop(&mut self) {
@@ -50,10 +70,9 @@ pub fn read_approved_git_commit_object(
     let pipe = PipeReader::new(child.0.stdout.take().expect("piped Git stdout"))
         .map_err(|_| evidence_unavailable())?;
     let mut capture = collect(pipe);
-    let started = Instant::now();
     let mut status = None;
     loop {
-        if started.elapsed() >= Duration::from_secs(15) {
+        if Instant::now() >= deadline {
             return Err(evidence_unavailable());
         }
         if status.is_none() {
@@ -81,7 +100,7 @@ pub fn read_approved_git_commit_object(
     } else {
         &ring::digest::SHA256
     });
-    hash.update(format!("commit {}\0", state.bytes.len()).as_bytes());
+    hash.update(format!("{kind} {}\0", state.bytes.len()).as_bytes());
     hash.update(&state.bytes);
     let actual = hash
         .finish()
@@ -92,7 +111,7 @@ pub fn read_approved_git_commit_object(
     if actual != oid {
         return Err(evidence_unavailable());
     }
-    parse_commit_object(&state.bytes).map_err(|_| evidence_unavailable())
+    Ok(state.bytes.clone())
 }
 
 fn evidence_unavailable() -> ServiceError {
@@ -104,7 +123,7 @@ fn evidence_unavailable() -> ServiceError {
 
 // The binary is selected by trusted Host environment configuration, never by
 // model tool arguments. Git versions lacking --no-lazy-fetch fail closed.
-fn object_command(program: &Path, root: &Path, oid: &str) -> Command {
+fn object_command(program: &Path, root: &Path, oid: &str, kind: &str) -> Command {
     let mut command = Command::new(program);
     command
         .env_clear()
@@ -131,7 +150,7 @@ fn object_command(program: &Path, root: &Path, oid: &str) -> Command {
             "-c",
             "protocol.allow=never",
             "cat-file",
-            "commit",
+            kind,
             oid,
         ])
         .stdin(Stdio::null())

@@ -260,6 +260,73 @@ pub fn settle_verified_git_commit(
     })
 }
 
+/// Collect authenticated objects/full tree changes and stable live repository
+/// observations before settling. expected_tree is still an independent Host
+/// pre-write value; this API does not produce or execute a Git write.
+pub fn read_and_settle_git_commit(
+    operations: &OperationStore,
+    admission: &GitCommitAdmission,
+    source: &GitCommitSnapshotSource<'_>,
+    trusted_git_program: &std::path::Path,
+    expected_tree: &str,
+    oid: &str,
+) -> Result<GitCommitReceipt> {
+    verify_durable_admission(operations, &admission.committed)?;
+    let resource = git_commit_resource_id(source)?;
+    if resource != admission.committed.dispatch.intent.resource_id {
+        return Err(ServiceError::new(
+            "INTENT_MISMATCH",
+            "结果回读仓库与批准资源不符",
+        ));
+    }
+    let root = source
+        .registry
+        .export_binding(source.directory_id)
+        .map_err(|_| ServiceError::new("GIT_SNAPSHOT_UNAVAILABLE", "仓库绑定已失效"))?
+        .path;
+    let before =
+        super::git_commit_snapshot::observe_prepared_git_commit(source, &admission.prepared)?;
+    if before.head.as_deref() != Some(oid) {
+        return Err(ServiceError::new(
+            "GIT_EVIDENCE_REJECTED",
+            "当前仓库尚未指向待核验提交",
+        ));
+    }
+    let changes = super::git_tree_evidence::read_approved_git_commit_changes(
+        &admission.committed.dispatch,
+        &resource,
+        &root,
+        &admission.prepared,
+        trusted_git_program,
+        oid,
+    )?;
+    let after =
+        super::git_commit_snapshot::observe_prepared_git_commit(source, &admission.prepared)?;
+    if before != after {
+        return Err(ServiceError::new(
+            "VERSION_CONFLICT",
+            "提交回读期间仓库或文件发生变化",
+        ));
+    }
+    settle_verified_git_commit(
+        operations,
+        admission,
+        expected_tree,
+        &super::git_commit_evidence::CommitReadback {
+            oid: changes.oid().into(),
+            parents: changes.object().parents.clone(),
+            tree: changes.object().tree.clone(),
+            message: changes.object().message.clone(),
+            changed_paths: changes.paths().to_vec(),
+            repository_identity: after.identity,
+            branch: after.branch,
+            head: after
+                .head
+                .ok_or_else(|| ServiceError::new("GIT_EVIDENCE_REJECTED", "缺少当前提交版本"))?,
+        },
+    )
+}
+
 fn verify_durable_admission(
     operations: &OperationStore,
     committed: &CommittedDispatch,
@@ -351,7 +418,16 @@ mod tests {
         source: &GitCommitSnapshotSource<'_>,
         id: &str,
     ) -> (PreparedCommit, u64) {
-        let p = prepare_git_commit_from_registry(source, "commit", &["a".into()]).unwrap();
+        approve_with_message(store, source, id, "commit")
+    }
+    #[cfg(unix)]
+    fn approve_with_message(
+        store: &OperationStore,
+        source: &GitCommitSnapshotSource<'_>,
+        id: &str,
+        message: &str,
+    ) -> (PreparedCommit, u64) {
+        let p = prepare_git_commit_from_registry(source, message, &["a".into()]).unwrap();
         let resource = git_commit_resource_id(source).unwrap();
         let root = source
             .registry
@@ -1064,5 +1140,120 @@ mod tests {
             );
             assert_eq!(fs::read(root.join("operations.json")).unwrap(), before);
         });
+    }
+    #[cfg(unix)]
+    #[test]
+    fn authenticated_object_and_tree_readback_settles_real_fixture_only_at_current_head() {
+        let (dir, registry, id) = fixture();
+        let data = tempfile::tempdir().unwrap();
+        let store = OperationStore::open(data.path().join("operations")).unwrap();
+        let leases = ResourceLeases::default();
+        let grants = [DirectoryGrant {
+            directory_id: &id,
+            access: Access::ReadWrite,
+            explicit_personal: false,
+        }];
+        let source = GitCommitSnapshotSource {
+            registry: &registry,
+            directory_id: &id,
+            system_access: true,
+            grants: &grants,
+            internal_roots: &[],
+        };
+        let program = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+            .map(|p| p.join("git"))
+            .find(|p| p.is_absolute() && p.is_file())
+            .unwrap();
+        let git = |args: &[&str], index: Option<&std::path::Path>| {
+            let mut command = Command::new(&program);
+            command
+                .current_dir(dir.path())
+                .args([
+                    "-c",
+                    "user.name=WEX",
+                    "-c",
+                    "user.email=wex@example.invalid",
+                    "-c",
+                    "commit.gpgSign=false",
+                    "-c",
+                    "core.hooksPath=",
+                ])
+                .args(args);
+            if let Some(index) = index {
+                command.env("GIT_INDEX_FILE", index);
+            }
+            let output = command.output().unwrap();
+            assert!(
+                output.status.success(),
+                "Git fixture failed: {:?}",
+                output.stderr
+            );
+            String::from_utf8(output.stdout).unwrap().trim().to_owned()
+        };
+        let parent = git(&["rev-parse", "HEAD"], None);
+        let old_tree = git(&["rev-parse", "HEAD^{tree}"], None);
+        let real_index_before = fs::read(dir.path().join(".git/index")).unwrap();
+        fs::write(dir.path().join("a"), "approved bytes").unwrap();
+        // Test-only writer fixture prepares an independent index/tree BEFORE
+        // creating the candidate commit. Production still has no Git writer.
+        let isolated_index = data.path().join("isolated-index");
+        git(&["read-tree", &parent], Some(&isolated_index));
+        git(&["add", "--", "a"], Some(&isolated_index));
+        let expected_tree = git(&["write-tree"], Some(&isolated_index));
+        let (prepared, revision) = approve_with_message(&store, &source, "op", "commit\n");
+        let admission = begin_git_commit(
+            &store,
+            &leases,
+            GitCommitBegin {
+                expected_store_revision: revision,
+                operation_id: "op",
+                attempt_id: "attempt",
+                checks: checks(),
+                source: &source,
+                prepared,
+            },
+        )
+        .unwrap();
+        let oid = git(
+            &["commit-tree", &expected_tree, "-p", &parent, "-m", "commit"],
+            None,
+        );
+        // A valid object not installed at the branch cannot become success.
+        assert_eq!(
+            read_and_settle_git_commit(&store, &admission, &source, &program, &expected_tree, &oid)
+                .unwrap_err()
+                .code,
+            "GIT_EVIDENCE_REJECTED"
+        );
+        git(&["update-ref", "refs/heads/work", &oid, &parent], None);
+        // Do not accept the candidate's tree in place of independent expectation.
+        assert_eq!(
+            read_and_settle_git_commit(&store, &admission, &source, &program, &old_tree, &oid)
+                .unwrap_err()
+                .code,
+            "GIT_EVIDENCE_REJECTED"
+        );
+        assert!(matches!(
+            store.load().unwrap().ledger.records[0].state,
+            OperationState::InFlight { .. }
+        ));
+        let receipt =
+            read_and_settle_git_commit(&store, &admission, &source, &program, &expected_tree, &oid)
+                .unwrap();
+        assert_eq!(receipt.commit_oid(), oid);
+        assert!(matches!(
+            store.load().unwrap().ledger.records[0].state,
+            OperationState::Succeeded { .. }
+        ));
+        assert_eq!(
+            fs::read(dir.path().join(".git/index")).unwrap(),
+            real_index_before
+        );
+        assert!(leases
+            .is_busy(&format!(
+                "repository:{}",
+                admission.committed.dispatch.intent.resource_id
+            ))
+            .unwrap());
     }
 }
