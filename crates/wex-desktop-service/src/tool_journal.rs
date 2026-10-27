@@ -77,6 +77,7 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         Err(_) => return Err(error()),
     };
     let mut attempts: BTreeMap<String, ToolReceiptMarker> = BTreeMap::new();
+    let mut identities: BTreeMap<String, (String, Option<String>, Option<String>, Option<crate::ToolPolicySetting>)> = BTreeMap::new();
     let mut observed_in_flight = std::collections::BTreeSet::new();
     for entry in entries {
         let entry = entry.map_err(|_| error())?;
@@ -93,6 +94,18 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         validate(&marker)?;
         if entry.file_name().to_str()
             != Some(format!("{}_{}.json", marker.attempt_id, marker.state).as_str())
+        {
+            return Err(error());
+        }
+        let identity = (
+            marker.operation_id.clone(),
+            marker.conversation_id.clone(),
+            marker.turn_id.clone(),
+            marker.policy.clone(),
+        );
+        if identities
+            .insert(marker.attempt_id.clone(), identity.clone())
+            .is_some_and(|previous| previous != identity)
         {
             return Err(error());
         }
@@ -144,6 +157,19 @@ mod tests {
             turn_id: Some("turn_1".into()),
             policy: None,
         }
+    }
+
+    #[test]
+    fn attempt_identity_cannot_be_reused_across_conversations() {
+        let dir = tempfile::tempdir().unwrap();
+        append_tool_marker(dir.path(), &marker("in_flight")).unwrap();
+        let mut foreign = marker("succeeded");
+        foreign.conversation_id = Some("chat_2".into());
+        append_tool_marker(dir.path(), &foreign).unwrap();
+        assert_eq!(
+            read_tool_markers(dir.path(), "chat_1").unwrap_err().code,
+            "TOOL_JOURNAL_ERROR"
+        );
     }
 
     #[test]
