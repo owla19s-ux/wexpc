@@ -1,2 +1,2 @@
-Verify Issue #84 revision checks inside the transaction for move_context, bind_project_context and bind_conversation_context.
-Run workspace fmt, strict Clippy and tests, including stale/restart/invalid target/failed write/clear binding regressions.
+Verify Issue #84 final organization revision batch after exact rustfmt corrections from Linux run 40532375022 and resolving the duplicate sibling React key observed in frontend run 40532375056.
+Check revision/draft preservation, storage rollback, and current Host command signatures in this lane's existing gated workflow.

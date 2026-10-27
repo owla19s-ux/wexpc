@@ -28,7 +28,8 @@ fn context_can_be_ungrouped_and_move_without_changing_identity_or_resources() {
         .unwrap();
     app.move_context(revision(&app), &c.id, &work.id, Some(group.id.clone()))
         .unwrap();
-    app.move_context(revision(&app), &c.id, &work.id, None).unwrap();
+    app.move_context(revision(&app), &c.id, &work.id, None)
+        .unwrap();
     drop(app);
     let app = DesktopService::open(&path).unwrap();
     let s = app.snapshot().unwrap();
@@ -54,14 +55,18 @@ fn invalid_group_move_rolls_back_and_context_is_not_required_to_be_a_project() {
         .unwrap();
     let before = app.snapshot().unwrap();
     assert_eq!(
-        app.move_context(revision(&app), &c.id, &a.id, Some(g.id)).unwrap_err().code,
+        app.move_context(revision(&app), &c.id, &a.id, Some(g.id))
+            .unwrap_err()
+            .code,
         "INVALID_PLACEMENT"
     );
     let after = app.snapshot().unwrap();
     assert_eq!(before.revision, after.revision);
     assert_eq!(after.placements[0].space_id, a.id);
     assert!(after.projects.is_empty());
-    assert!(app.bind_project_context(revision(&app), "missing", Some(c.id)).is_err());
+    assert!(app
+        .bind_project_context(revision(&app), "missing", Some(c.id))
+        .is_err());
 }
 
 #[test]
@@ -138,7 +143,8 @@ fn independent_conversation_can_bind_context_without_a_project() {
         Some(c.id.as_str())
     );
     assert!(state.conversations[0].project_id.is_none());
-    app.bind_conversation_context(revision(&app), &conv.id, None).unwrap();
+    app.bind_conversation_context(revision(&app), &conv.id, None)
+        .unwrap();
     assert!(app.snapshot().unwrap().conversations[0]
         .context_id
         .is_none());

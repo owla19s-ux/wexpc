@@ -175,8 +175,12 @@ fn clearing_bindings_requires_the_current_revision_and_preserves_sources() {
     let mut app = DesktopService::memory().unwrap();
     let fixture = fixture(&mut app);
     let revision = app.snapshot().unwrap().revision;
-    app.bind_project_context(revision, &fixture.project.id, Some(fixture.first.id.clone()))
-        .unwrap();
+    app.bind_project_context(
+        revision,
+        &fixture.project.id,
+        Some(fixture.first.id.clone()),
+    )
+    .unwrap();
     let revision = app.snapshot().unwrap().revision;
     app.bind_conversation_context(
         revision,

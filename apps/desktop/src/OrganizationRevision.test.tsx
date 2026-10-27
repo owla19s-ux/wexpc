@@ -43,7 +43,7 @@ function snapshot(revision = 5): Snapshot {
 }
 
 const run: Run = async action => { try { await action(); } catch { /* App reports errors. */ } };
-afterEach(() => { cleanup(); ipc.mockReset(); });
+afterEach(() => { cleanup(); ipc.mockReset(); vi.restoreAllMocks(); });
 
 it('sends the revision where a move draft began even if another snapshot arrives', async () => {
   ipc.mockResolvedValue(undefined);
@@ -102,6 +102,7 @@ it('retains a failed project selection after refresh without replaying it', asyn
 });
 
 it('passes the displayed conversation revision through the real App binding control', async () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
   ipc.mockImplementation(async (name: string) => {
     if (name === 'snapshot') return snapshot();
     if (name === 'bind_conversation_context') return;
@@ -114,6 +115,7 @@ it('passes the displayed conversation revision through the real App binding cont
   await waitFor(() => expect(ipc).toHaveBeenCalledWith('bind_conversation_context', {
     revision: 5, conversationId: 'chat', contextId: 'b',
   }));
+  expect(errors.mock.calls.filter(([message]) => String(message).includes('same key'))).toEqual([]);
 });
 
 it('blocks synthetic move submission when the authoritative snapshot is stale', () => {
