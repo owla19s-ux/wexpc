@@ -1,6 +1,7 @@
 use crate::*;
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::{
+    collections::BTreeMap,
     fs::{File, OpenOptions},
     path::Path,
     time::Duration,
@@ -111,7 +112,16 @@ impl DesktopStore {
             .revision
             .checked_add(1)
             .ok_or_else(|| storage("revision"))?;
-        let body = serde_json::to_string(&s).map_err(storage)?;
+        // Typed snapshots intentionally omit legacy collections. Preserve unknown
+        // top-level data without exposing it as current trusted execution facts.
+        // RawValue keeps opaque numbers and nested JSON from being normalized.
+        let mut persisted: BTreeMap<String, Box<serde_json::value::RawValue>> =
+            serde_json::from_str(&body).map_err(storage)?;
+        let current = serde_json::to_string(&s).map_err(storage)?;
+        let updated: BTreeMap<String, Box<serde_json::value::RawValue>> =
+            serde_json::from_str(&current).map_err(storage)?;
+        persisted.extend(updated);
+        let body = serde_json::to_string(&persisted).map_err(storage)?;
         tx.execute("UPDATE desktop_state SET body=?1 WHERE id=1", params![body])
             .map_err(storage)?;
         tx.commit().map_err(storage)?;
