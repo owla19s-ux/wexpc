@@ -412,6 +412,7 @@ fn review_and_read(
         &attempt_id,
         &operation_id,
         "in_flight",
+        Some(&intent.intent_digest),
         None,
         Some(&policy),
     )?;
@@ -435,6 +436,7 @@ fn review_and_read(
         } else {
             "failed"
         },
+        Some(&intent.intent_digest),
         receipt_digest.as_deref(),
         Some(&policy),
     )?;
@@ -586,6 +588,7 @@ fn review_local_command(
         "in_flight",
         Some(&intent.intent_digest),
         None,
+        None,
     )?;
     let cargo_task = match call.name.as_str() {
         "cargo_test" => Some(wex_desktop_service::TerminalTask::CargoTest),
@@ -660,6 +663,7 @@ fn review_local_command(
             &attempt_id,
             &operation_id,
             status,
+            Some(&intent.intent_digest),
             evidence_hash.as_deref(),
             None,
         )?;
@@ -877,6 +881,7 @@ fn review_github(
         &operation_id,
         "in_flight",
         Some(&intent.intent_digest),
+        None,
         Some(&policy),
     )?;
     let outcome = if write {
@@ -925,6 +930,7 @@ fn review_github(
         &attempt_id,
         &operation_id,
         status,
+        Some(&intent.intent_digest),
         evidence_hash.as_deref(),
         Some(&policy),
     )?;
@@ -986,7 +992,8 @@ fn journal(
     attempt: &str,
     operation: &str,
     status: &str,
-    digest: Option<&str>,
+    intent_digest: Option<&str>,
+    content_digest: Option<&str>,
     policy: Option<&wex_desktop_service::ToolPolicySetting>,
 ) -> Result<()> {
     let root = app
@@ -1000,7 +1007,8 @@ fn journal(
             operation_id: operation.into(),
             attempt_id: attempt.into(),
             state: status.into(),
-            content_digest: digest.map(str::to_owned),
+            content_digest: content_digest.map(str::to_owned),
+            intent_digest: intent_digest.map(str::to_owned),
             conversation_id: Some(chat.conversation_id.clone()),
             turn_id: Some(chat.turn_id.clone()),
             policy: policy.cloned(),
@@ -1116,6 +1124,7 @@ fn review_saved_read(
         &attempt_id,
         &operation_id,
         if body.is_ok() { "succeeded" } else { "failed" },
+        Some(&intent.intent_digest),
         digest.as_deref(),
         Some(&policy),
     )?;
@@ -1256,6 +1265,7 @@ fn review_saved_create(
         &attempt_id,
         &operation_id,
         if body.is_ok() { "succeeded" } else { "unknown" },
+        Some(&intent.intent_digest),
         digest.as_deref(),
         Some(&policy),
     )?;
