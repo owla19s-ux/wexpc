@@ -271,4 +271,44 @@ mod tests {
         drop(lease);
         assert!(other.acquire("agent_b", &scopes(&["shared"])).is_ok());
     }
+
+    #[test]
+    fn competing_threads_cannot_hold_overlapping_scopes_together() {
+        use std::sync::{mpsc, Barrier};
+        use std::thread;
+
+        let registry = ResourceLeases::default();
+        let start = Arc::new(Barrier::new(3));
+        let (result_tx, result_rx) = mpsc::channel();
+        let mut releases = Vec::new();
+        let mut workers = Vec::new();
+
+        for scope in ["src", "src/main.rs"] {
+            let registry = registry.clone();
+            let start = Arc::clone(&start);
+            let result_tx = result_tx.clone();
+            let (release_tx, release_rx) = mpsc::channel::<()>();
+            releases.push(release_tx);
+            workers.push(thread::spawn(move || {
+                start.wait();
+                let lease = registry.acquire("worker", &[scope.to_owned()]);
+                result_tx.send(lease.is_ok()).unwrap();
+                if let Ok(_held) = lease {
+                    release_rx.recv().unwrap();
+                }
+            }));
+        }
+        drop(result_tx);
+        start.wait();
+        let winners = u8::from(result_rx.recv().unwrap())
+            + u8::from(result_rx.recv().unwrap());
+        assert_eq!(winners, 1);
+        for release in releases {
+            let _ = release.send(());
+        }
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert!(!registry.is_busy("src/main.rs").unwrap());
+    }
 }
