@@ -25,3 +25,10 @@
 ## 下一条施工链
 
 已定位并登记 [#83](https://github.com/owla19s-ux/wexpc/issues/83) Task/Dispatch → Host Operation/可信证据接线缺口，以及 [#84](https://github.com/owla19s-ux/wexpc/issues/84) 组织移动/Context 重新绑定缺少修订检查。下一施工先复现并回收现有组织编辑保护，再按当前权限/回执契约接执行证据链；不将旧结构整份覆盖新模型。SQLite 损坏旧数据、事务失败和新历史保真回归已通过，但不代表全部存储故障完成验收。每批重新查 HEAD、相关源码、PR/分支与 Actions；本页快照不能代替实时查询。
+
+## 2026-10-27 #84 完成验收与 #83 施工接续
+
+- main 代码基线 `2b5c45b4a039102ef307573d0fdee8e35d8b9faf`；组织修订保护由 `b8554b5` 和 `2b5c45b` 接通 UI → IPC → Rust/SQLite，并新增 `organization_revision.rs` 与前端回归。
+- 同一 HEAD 的 GitHub Actions 三条 **success**：Linux [40532589710](https://github.com/owla19s-ux/wexpc/actions/runs/40532589710)（fmt、严格 Clippy、workspace tests）；Windows [40532590691](https://github.com/owla19s-ux/wexpc/actions/runs/40532590691)（workspace、Windows 资源/存储契约、Host check）；frontend [40532589377](https://github.com/owla19s-ux/wexpc/actions/runs/40532589377)（npm test/build）。不等于 Windows 安装或真实 UI 手工验收。
+- [Issue #84](https://github.com/owla19s-ux/wexpc/issues/84) 已按本次源码与三平台验证证据关闭。早期 `b8554b5` Linux fmt 失败已被后续 HEAD 修复；不要继续引用旧失败作为最新结论。CircleCI 独立 error 不应覆盖上述 GitHub Actions 成功事实。
+- 下一施工聚焦 [Issue #83](https://github.com/owla19s-ux/wexpc/issues/83)：当前 `apps/desktop/src-tauri/src/tool_approvals.rs` 仍由普通聊天工具回合直接执行，`wex-core/src/task_operation.rs` 是未接 Host 持久生命周期的内存投影。应先接真实 attempt/operation/receipt 身份与持久关联，普通对话 task_id 保持可空；权限与 UNKNOWN 必须由 Host 执行时再校验。不得将领域测试当作已实现派工。
