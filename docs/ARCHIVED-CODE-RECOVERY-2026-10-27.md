@@ -1,6 +1,6 @@
 # WEXPC 归档成果回收：第一轮代码差异审计
 
-状态：**进行中；尚未开始回填业务代码**。工程 D 域的代码收敛记录，不修改已确认的 0.1.1 产品基线。当前比较目标：`main`，归档来源：`refs/tags/archive/wexpc-20261027/**`；最终以回收时最新 `main` 提交再次校验。
+状态：**进行中；安全/幂等首组已完成源码对照和主线 Linux 回归，其他归档项仍待核查**。工程 D 域的代码收敛记录，不修改已确认的 0.1.1 产品基线。当前比较目标：`main`，归档来源：`refs/tags/archive/wexpc-20261027/**`；最终以回收时最新 `main` 提交再次校验。
 
 ## 审计原则
 
@@ -39,3 +39,24 @@
 ## 当前验证
 
 本轮仅通过 GitHub 连接器读取 43 个归档标签、对比上述源码和文件差异并写入审计记录。Rust/Host/前端/Windows 测试均 **NOT_RUN**；未修改生产代码、未触发 Actions，不能声称归档代码已全部回收。
+
+## 第二轮：安全/幂等与调度租约实测闭环（2026-10-27）
+
+工程起点 `ccf8cc5a67bf5ee56ee681ad58a4a2644842da45`。不整支合并历史代码，不改变 0.1.1 范围。
+
+| 归档来源与固定 SHA | 当前源码证据 | 本轮结论 |
+| --- | --- | --- |
+| `fix/dispatch-parent-child-leases-20261026` / `891400f8e37b48961e272dde2bf36ae492ca8a71` | `wex-core/src/dispatch_leases.rs` 的非测试生产部分在去除注释及空白后 token 序列相同；主线另有独立 registry、旧 generation 释放保护、真实竞争线程测试；`dispatch.rs` 有 reserve 父子冲突及无关范围可领取的接线测试 | B → 此租约生产模块已覆盖且 Linux 验证通过；不需复制旧文件。该结论不等于持久 Dispatcher、跨进程/外部 Agent 或文件系统锁验收 |
+| `fix/api-final-round-dispatch-guard-20261025` / `769ef2c52878036cd881f0191fa7b39981d3f55e` | 现行 `connectors/tool_round.rs` 在 checkpoint/dispatch 前执行 `ensure_followup_budget`；最终轮提案不执行、最终轮文本消费回执、pending 保存失败不派发，以及恢复 ID 去重测试均通过 | B：此最终轮安全属性已回收并验证；不覆盖新版恢复与去重代码 |
+| `fix/pc-git-fsmonitor-exec-fence-20261025` / `ff86a54818bbb3aa9924c3675583415e70e7abe2` | 现行 `git_dispatch.rs` 保留 `-c core.fsmonitor=false`、diff 的 `--no-ext-diff --no-textconv`，并增加继承/显式 GIT_* 环境清除；真实 Git 仓库重定向隔离测试通过 | B：旧防线已保留，新增环境隔离有运行证据。此次未新增真实恶意 fsmonitor hook 专项，不能以环境隔离测试冒称该专项已执行 |
+| `test/pc-tool-id-reuse-20261025-2232` / `d3765e30b63e55659ba93ea44ce940abab68d9ce` | 主线 `tests/tool_call_id_reuse.rs` 四项与 `tool_resume.rs` 恢复 ID、同批重复 ID、历史重复 ID 拒绝测试通过；均检查派发前拒绝 | B：此 ID/断点回归组已运行；不代表真实第三方服务或全部恢复故障已验收 |
+
+### 失败 → 修复 → 复测的真实证据
+
+- 首次验证 [#40527579681](https://github.com/owla19s-ux/wexpc/actions/runs/40527579681)，HEAD `b279bf8997717a82578be22109ca5ec19c3203b1`：fmt FAIL；两个新增测试文件的四处换行不符合 rustfmt，Clippy/测试未执行，不能计为通过。
+- 修复提交 `c1ff8d9e83c920fb3a531926e5dc6aa47039f805` 仅修正 `crates/wex-core/src/dispatch.rs`、`dispatch_leases.rs` 的格式并更新 Linux 请求；没有修改生产行为、授权或数据结构。
+- Linux [#40527701505](https://github.com/owla19s-ux/wexpc/actions/runs/40527701505)，Job `122271653337`，HEAD `c1ff8d9e83c920fb3a531926e5dc6aa47039f805`，Ubuntu 24.04 x86_64 / Rust 1.99.1：`cargo fmt --all -- --check` PASS；`cargo clippy --workspace --all-targets --locked -- -D warnings` PASS；`cargo test --workspace --locked` **624 passed / 0 failed / 0 ignored**（日志各 test result 汇总）。
+- 前端 [#40527806229](https://github.com/owla19s-ux/wexpc/actions/runs/40527806229)，Job `122272026118`，HEAD `4f3e5494ea9702bf507ccceb1eff635c9ba25cc4`，Node 22：`npm ci` PASS；`npm test` **16 文件 / 78 测试通过**；`npm run build` PASS。覆盖先前 main 已有的发布 epoch=0 不得显示已核实派工的修复。与上述 Linux HEAD 的差别仅为前端请求文件，源码相同；仍分别保留两个实际 SHA。
+- NOT_RUN：本批 Tauri Host 专用编译/测试、Windows 构建/测试、真实 API/GitHub 产品调用、桌面窗口、安装及实机。workspace 不包含独立 Host 的完整验收。
+
+剩余优先项：旧组织 revision/可信执行回执、SQLite 迁移失败与损坏数据、撤权和 Host/UI 调用链继续逐项回收。保留全部归档标签与独立范围冲突原型；本轮没有删除远端分支，不声称全部归档成果已集成。
