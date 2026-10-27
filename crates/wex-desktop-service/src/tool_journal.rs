@@ -184,6 +184,19 @@ mod tests {
     }
 
     #[test]
+    fn terminal_receipt_must_match_the_pre_dispatch_intent_digest() {
+        let dir = tempfile::tempdir().unwrap();
+        append_tool_marker(dir.path(), &marker("in_flight")).unwrap();
+        let mut terminal = marker("succeeded");
+        terminal.intent_digest = Some("b".repeat(64));
+        append_tool_marker(dir.path(), &terminal).unwrap();
+        assert_eq!(
+            read_tool_markers(dir.path(), "chat_1").unwrap_err().code,
+            "TOOL_JOURNAL_ERROR"
+        );
+    }
+
+    #[test]
     fn terminal_receipt_requires_durable_pre_dispatch_marker() {
         let dir = tempfile::tempdir().unwrap();
         append_tool_marker(dir.path(), &marker("succeeded")).unwrap();
