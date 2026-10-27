@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Delete third verified merged branch batch
+      - name: Verify equivalent task index before deleting one divergent branch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,26 +26,16 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'feat/pc-api-desktop-integration-20261025' \
-            'feat/pc-desktop-foundation-2026-10-24' \
-            'feat/pc-desktop-task-core-integration-20261025' \
-            'feat/ui-scoped-settings-20261026-1639' \
-            'fix/api-protocol-boundaries-20261025' \
-            'fix/api-text-completion-role-terminal-20261025' \
-            'fix/p1-git-environment-fence-20261026' \
-            'fix/pc-github-postwrite-readback-20261025' \
-            'fix/pc-task-link-reassignment-20261025' \
-            'fix/ui-await-latest-snapshot-20261026-1232' \
-            'fix/ui-dispatch-recheck-pending-20261026-1130' \
-            'fix/ui-project-chat-navigation-20261025' \
-            'fix/ui-reconcile-failed-mutations-20261026-1025' \
-            'fix/ui-snapshot-freshness-20261026-0825' \
-            'fix/ui-tool-result-after-request-20261025' \
-            'fix/ui-verified-connection-creation-20261026' \
-            'ui-api-connection-freshness-20261026'; do
+            'feat/task-operation-bidirectional-index-20261026'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
-            git merge-base --is-ancestor "$sha" origin/main || { echo "SKIP unmerged: $branch"; continue; }
+            [[ "$sha" == "47b0da609e196a6f7ffc357d725d9093ca573a4c" ]] || { echo "SKIP unexpected head: $branch"; continue; }
+            # Single ahead commit changes only task_operation.rs; its changes
+            # versus main are formatting-only. Recheck the source via git.
+            git diff -w --exit-code "$sha" origin/main -- crates/wex-core/src/task_operation.rs || {
+              echo "SKIP substantive source differences: $branch"
+              continue
+            }
             current="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
             [[ "$current" == "$sha" ]] || { echo "SKIP changed: $branch"; continue; }
             if gh api "repos/$repo/pulls?state=open&per_page=100" --jq '.[].head.ref' | grep -Fxq "$branch"; then
