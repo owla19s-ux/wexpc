@@ -129,3 +129,13 @@
 - 旧 `feat/pc-dispatch-eligibility-batch-20261026` 的 `crates/wex-core/src/dispatch.rs`（旧 7323 字符，现行 7848）和 `dispatch_leases.rs`（旧 5267，现行 7772）内容不同，而 `docs/PC-DISPATCH-HOST-INTEGRATION-20261026.md` 完全相同。主线逻辑已有进一步修改；不可将旧分支覆盖现行调度实现。
 - 旧 `fix/ui-task-dispatch-summary-20261026` 的 `TaskDispatchControls.tsx`（旧 3679，现行 4314）不同；主线有后续变化。应审查独有测试与行为，而非覆盖文件。
 - **当前清理分类**：连接器能力目录旧分支进入“可作成果已回收的差异分支候选”（仍须核查 HEAD/其他文件及 PR）；调度/UI 旧分支保持“需语义审查”。没有删除远端分支。
+
+## 第八批：旧调度/UI 回归覆盖核对（2026-10-27）
+
+按旧分支源文件和当前 main 的实际测试名逐个提取比对（静态覆盖对照，不是新测试运行）：
+
+- `fix/ui-task-dispatch-summary-20261026` 中的 `apps/desktop/src/TaskDispatchStatus.test.tsx` 与 main **逐字相同**；`TaskDispatchControls.test.tsx` 旧版有 5 个命名用例，main 有 10 个，**旧版 5 个用例名均已包含**，主线另外补有缺失派工证据、项目/发布版本不匹配、不可用的调度账本、旧预览失效和 IPC 错误未对账等 5 项检查。旧测试文件不必覆盖主线。
+- `feat/pc-dispatch-eligibility-batch-20261026` 的 `crates/wex-desktop-service/tests/tool_resume.rs` 旧版 10 个函数名用例，main 为 13 个，**旧版 10 个均有同名覆盖**，主线多有续答时复用历史工具调用 ID、同批重复 ID、历史恢复回合重复 ID 三项测试。不能据此宣布语义完全相同，但没有看到因不合旧分支而丢失旧命名用例。
+- 当前仓库 Linux 最新全工作区回归 #40501142317 已通过，新加入回归也在内。Windows #40408913676、frontend #40405405746 是此前成功记录，不代表本轮修改后同一 HEAD 的三平台完整验证。
+
+操作结论：`fix/ui-task-dispatch-summary-20261026` 与 `feat/pc-dispatch-eligibility-batch-20261026` 相关**旧回归测试已经在 main 找到覆盖**；不重新复制旧测试，不整支合并旧代码。剩余有独有历史提交，删除前仍需按全部相关文件和当前 HEAD 完成复核。本批未删除分支。
