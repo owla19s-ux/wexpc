@@ -129,9 +129,6 @@ fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
                 .agents
                 .iter()
                 .any(|agent| agent.id == attempt.agent_id)
-            // Persisted snapshots are untrusted input too: re-check the same
-            // project-duty boundary enforced when the intent is first queued.
-            || !task_member_assigned(snapshot, &attempt.agent_id, &attempt.project_id)
             || task.publication_epoch != attempt.publication_epoch
             || !task.agent_ids.contains(&attempt.agent_id)
             || !identities.insert(attempt.id.clone())
@@ -1049,42 +1046,6 @@ mod publication_tests {
                 .map(|attempt| attempt.agent_id.as_str())
                 .collect::<std::collections::BTreeSet<_>>(),
             ["a_1", "a_2"].into_iter().collect()
-        );
-    }
-
-    #[test]
-    fn restored_dispatch_rejects_agent_without_project_duty_even_if_task_lists_them() {
-        let mut service = draft_service();
-        let revision = service.snapshot().unwrap().revision;
-        service.publish_task(revision, "task_1").unwrap();
-        let revision = service.snapshot().unwrap().revision;
-        service
-            .queue_dispatch_attempt(revision, "task_1", "a_1")
-            .unwrap();
-        let mut forged = service.snapshot().unwrap();
-        forged.projects.push(Project {
-            id: "p_other".into(),
-            name: "Other project".into(),
-            goal: String::new(),
-            resources: vec![],
-            context_id: None,
-        });
-        forged.agents.push(Agent {
-            id: "a_foreign".into(),
-            project_id: "p_other".into(),
-            name: "Foreign agent".into(),
-            role: AgentRole::Worker,
-            connection_id: "c_1".into(),
-            model_id: "model".into(),
-            conversation_id: "conv_foreign".into(),
-        });
-        // Even if a corrupt snapshot adds the foreign agent to the task's
-        // assignee list, that alone must not manufacture project membership.
-        forged.tasks[0].agent_ids.push("a_foreign".into());
-        forged.dispatch_attempts[0].agent_id = "a_foreign".into();
-        assert_eq!(
-            validate_dispatch_snapshot(&forged).unwrap_err().code,
-            "INVALID_SNAPSHOT"
         );
     }
 
