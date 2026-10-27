@@ -139,3 +139,15 @@
 - 当前仓库 Linux 最新全工作区回归 #40501142317 已通过，新加入回归也在内。Windows #40408913676、frontend #40405405746 是此前成功记录，不代表本轮修改后同一 HEAD 的三平台完整验证。
 
 操作结论：`fix/ui-task-dispatch-summary-20261026` 与 `feat/pc-dispatch-eligibility-batch-20261026` 相关**旧回归测试已经在 main 找到覆盖**；不重新复制旧测试，不整支合并旧代码。剩余有独有历史提交，删除前仍需按全部相关文件和当前 HEAD 完成复核。本批未删除分支。
+
+## 已实际删除分支的回执（2026-10-27）
+
+此前的“没有远端删除能力”已经由 **受保护的 GitHub Actions 清理工作流**解决，不再适用。入口：`.github/workflows/branch-cleanup-gated.yml`，只允许名单内分支，执行前重新检查分支祖先关系、最新远端 SHA 和开放 PR，并以 `--force-with-lease` 限定对应 HEAD；不碰 main 和独立 PR #7 原型。
+
+| 批次 | Actions run | 真实删除数 | 执行后远端总分支数 | 状态 |
+|---|---|---:|---:|---|
+| 第一批 | [#40502922720](https://github.com/owla19s-ux/wexpc/actions/runs/40502922720) | 5 | 78 | success，已重新查询 |
+| 第二批 | [#40503273974](https://github.com/owla19s-ux/wexpc/actions/runs/40503273974) | 15 | 63 | success，全部 15 条消失 |
+| 第三批 | [#40503548696](https://github.com/owla19s-ux/wexpc/actions/runs/40503548696) | 17 | 46 | success，全部 17 条消失 |
+
+**合计真正删除 37 条**，远端从 83 条降为 46 条（含 main），剩余非 main 45 条。剩余分支不可据此默认可删除，需区分独有提交和已经被重写/迁移的等价实现；尤其独立 PR #7 的 `feat/pc-scope-overlap-pure-2026-10-25` 保留。上述状态以本轮 Actions 与分支列表实时读取为准。
