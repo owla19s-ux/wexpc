@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Delete second verified merged branch batch
+      - name: Delete third verified merged branch batch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,21 +26,23 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'integration/dispatch-core-rebase-20261026' \
-            'integration/p1-lease-scope-fix-20261027' \
-            'integration/pc-git-terminal-consistency-20261025-1723' \
-            'integration/pc-local-policy-resume-20261025' \
-            'integration/pc-local-reply-recovery-20261025-1930' \
-            'integration/pc-tool-ui-api-combined-20261025-1925' \
-            'integration/ui-github-revoke-recovery-20261025' \
-            'integration/ui-task-duty-revision-20261025' \
-            'review/process-legacy-capture-status-20261026' \
-            'test/p1-git-ambient-env-regression-20261026' \
-            'work/durable-evidence-batches-20261026' \
-            'work/process-cancel-20261026' \
-            'feat/api-protocol-proposal' \
-            'feat/p1-git-commit-preflight-20261026' \
-            'feat/pc-agent-task-state'; do
+            'feat/pc-api-desktop-integration-20261025' \
+            'feat/pc-desktop-foundation-2026-10-24' \
+            'feat/pc-desktop-task-core-integration-20261025' \
+            'feat/ui-scoped-settings-20261026-1639' \
+            'fix/api-protocol-boundaries-20261025' \
+            'fix/api-text-completion-role-terminal-20261025' \
+            'fix/p1-git-environment-fence-20261026' \
+            'fix/pc-github-postwrite-readback-20261025' \
+            'fix/pc-task-link-reassignment-20261025' \
+            'fix/ui-await-latest-snapshot-20261026-1232' \
+            'fix/ui-dispatch-recheck-pending-20261026-1130' \
+            'fix/ui-project-chat-navigation-20261025' \
+            'fix/ui-reconcile-failed-mutations-20261026-1025' \
+            'fix/ui-snapshot-freshness-20261026-0825' \
+            'fix/ui-tool-result-after-request-20261025' \
+            'fix/ui-verified-connection-creation-20261026' \
+            'ui-api-connection-freshness-20261026'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
             git merge-base --is-ancestor "$sha" origin/main || { echo "SKIP unmerged: $branch"; continue; }
