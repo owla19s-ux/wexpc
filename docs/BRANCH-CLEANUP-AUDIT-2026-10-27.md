@@ -175,3 +175,10 @@
 - `fix/pc-sqlite-v5-upgrade-fence-20261025`：旧 `sqlite.rs` 的六个函数名在 main 均出现；main 还新增 `newly_created_store_uses_schema_eight` 和 `previous_schemas_upgrade_without_replacing_desktop_snapshot`。主线已升级至 schema 8 的测试语义，不能由旧 v5 文件回退覆盖。
 
 此三项已具备“旧测试核查及迁移线索”，**仍不据此将非祖先的分支自动判为可删除**；需结合源码关键语义/最新主线回归证据完成最终等价确认。最近 Linux 严格检查成功 #40501142317。
+
+## 第十一批：现行职责与历史边界复核（2026-10-27）
+
+- `fix/pc-terminal-drain-20261025` 的同步收集逻辑在目前主线已拆分为 `connectors/process_capture.rs`。主线有超限继续排空、恰好等于上限不误判、暂时无输出仍等待、取消/释放管道等测试，不能用旧文件覆盖当前执行链。
+- `feat/task-operation-bidirectional-index-20261026` 的主要双向查询、历史任务重新分派保护、错误成员和重复链接拒绝等测试仍在主线。主线 `task_operation.rs` 共 415 行，旧分支 412 行；因非逐字相同，尚不宣称全部实现语义等价。
+- `fix/pc-sqlite-v5-upgrade-fence-20261025` 旧 v5 升级路径被现行 schema 8 和跨旧版本升级验证覆盖，但需要最终保留此历史迁移路径验收证据。
+- 三者均是成果迁移线索，不满足祖先关系删除条件；目前未放宽清理工作流安全限制，也没有删除这三条分支。
