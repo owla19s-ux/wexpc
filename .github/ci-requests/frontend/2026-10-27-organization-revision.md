@@ -1,2 +1,2 @@
-RED: reproduce missing revision on move/project/conversation context commands, and loss of failed UI drafts after authoritative refresh. Issue #84.
-Production is unchanged. Run existing frontend tests and build; inspect expected boundary/DOM assertion failures before fixing.
+GREEN after five real UI assertion failures in run 40531651942. Commands carry frozen edit revision; failed choices remain visible across refresh without automatic replay.
+Run frontend tests and TypeScript/production build. Also cover stale snapshot synthetic submission and duplicate pending move submissions.

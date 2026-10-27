@@ -84,10 +84,11 @@ fn update_project(
 #[tauri::command]
 fn bind_conversation_context(
     state: State<'_, Shared>,
+    revision: u64,
     conversation_id: String,
     context_id: Option<String>,
 ) -> Result<()> {
-    locked(&state)?.bind_conversation_context(&conversation_id, context_id)
+    locked(&state)?.bind_conversation_context(revision, &conversation_id, context_id)
 }
 
 #[tauri::command]
@@ -127,19 +128,21 @@ fn create_context(
 #[tauri::command]
 fn move_context(
     state: State<'_, Shared>,
+    revision: u64,
     context_id: String,
     space_id: String,
     group_id: Option<String>,
 ) -> Result<()> {
-    locked(&state)?.move_context(&context_id, &space_id, group_id)
+    locked(&state)?.move_context(revision, &context_id, &space_id, group_id)
 }
 #[tauri::command]
 fn bind_project_context(
     state: State<'_, Shared>,
+    revision: u64,
     project_id: String,
     context_id: Option<String>,
 ) -> Result<()> {
-    locked(&state)?.bind_project_context(&project_id, context_id)
+    locked(&state)?.bind_project_context(revision, &project_id, context_id)
 }
 
 #[tauri::command]

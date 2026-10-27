@@ -96,10 +96,12 @@ impl DesktopService {
     }
     pub fn bind_conversation_context(
         &mut self,
+        revision: u64,
         conversation_id: &str,
         context_id: Option<String>,
     ) -> Result<()> {
         self.mutate(|s| {
+            check_revision(s, revision)?;
             if context_id
                 .as_ref()
                 .is_some_and(|id| !s.contexts.iter().any(|c| &c.id == id))
@@ -171,11 +173,13 @@ impl DesktopService {
     }
     pub fn move_context(
         &mut self,
+        revision: u64,
         context_id: &str,
         space_id: &str,
         group_id: Option<String>,
     ) -> Result<()> {
         self.mutate(|s| {
+            check_revision(s, revision)?;
             validate_placement(s, space_id, group_id.as_deref())?;
             if !s.contexts.iter().any(|c| c.id == context_id) {
                 return Err(invalid("上下文不存在"));
@@ -192,10 +196,12 @@ impl DesktopService {
     }
     pub fn bind_project_context(
         &mut self,
+        revision: u64,
         project_id: &str,
         context_id: Option<String>,
     ) -> Result<()> {
         self.mutate(|s| {
+            check_revision(s, revision)?;
             if context_id
                 .as_ref()
                 .is_some_and(|id| !s.contexts.iter().any(|c| &c.id == id))

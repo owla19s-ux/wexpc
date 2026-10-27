@@ -95,6 +95,10 @@ it('retains a failed project selection after refresh without replaying it', asyn
     run={run} openChat={() => {}} />);
   expect((screen.getByRole('combobox', { name: '关联上下文' }) as HTMLSelectElement).value).toBe('b');
   expect(ipc).toHaveBeenCalledTimes(1);
+  fireEvent.change(screen.getByRole('combobox', { name: '关联上下文' }), { target: { value: 'a' } });
+  await waitFor(() => expect(ipc).toHaveBeenLastCalledWith('bind_project_context', {
+    revision: 5, projectId: 'p', contextId: 'a',
+  }));
 });
 
 it('passes the displayed conversation revision through the real App binding control', async () => {
@@ -110,4 +114,22 @@ it('passes the displayed conversation revision through the real App binding cont
   await waitFor(() => expect(ipc).toHaveBeenCalledWith('bind_conversation_context', {
     revision: 5, conversationId: 'chat', contextId: 'b',
   }));
+});
+
+it('blocks synthetic move submission when the authoritative snapshot is stale', () => {
+  render(<Organization data={snapshot()} snapshotFresh={false} run={run} />);
+  fireEvent.submit(screen.getByRole('button', { name: '保存位置' }).closest('form')!);
+  expect(ipc).not.toHaveBeenCalled();
+});
+
+it('allows only one move request while the previous response is pending', async () => {
+  let finish!: () => void;
+  ipc.mockImplementation(() => new Promise<void>(resolve => { finish = resolve; }));
+  render(<Organization data={snapshot()} run={run} />);
+  const form = screen.getByRole('button', { name: '保存位置' }).closest('form')!;
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(ipc).toHaveBeenCalledTimes(1);
+  finish();
+  await waitFor(() => expect((screen.getByRole('button', { name: '保存位置' }) as HTMLButtonElement).disabled).toBe(false));
 });
