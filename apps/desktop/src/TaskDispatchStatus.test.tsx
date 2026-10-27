@@ -37,6 +37,8 @@ it('does not infer that no dispatch exists when evidence is absent', () => {
   expect(screen.getByText('已发布（派工记录尚未核实）')).toBeTruthy();
   view.rerender(<TaskDispatchStatus task={{ ...task, publication_epoch: undefined }} attempts={[]} />);
   expect(screen.getByText('已发布（发布版本未知，需核查）')).toBeTruthy();
+  view.rerender(<TaskDispatchStatus task={{ ...task, publication_epoch: 0 }} attempts={[]} />);
+  expect(screen.getByText('已发布（发布版本未知，需核查）')).toBeTruthy();
 });
 
 it('keeps draft status separate from any stale dispatch evidence', () => {
