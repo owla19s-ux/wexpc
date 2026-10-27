@@ -99,7 +99,10 @@ fn newly_settled_call_id_cannot_be_reused_in_next_model_step() {
                 Ok(proposal(&["fresh_call"]))
             } else {
                 assert_eq!(messages.len(), 4);
-                assert_eq!(messages.last().unwrap().tool_call_id.as_deref(), Some("fresh_call"));
+                assert_eq!(
+                    messages.last().unwrap().tool_call_id.as_deref(),
+                    Some("fresh_call")
+                );
                 Ok(proposal(&["fresh_call"]))
             }
         },
@@ -136,7 +139,10 @@ fn failed_pending_checkpoint_rejects_dispatch_and_model_continuation() {
         |messages, pending| {
             assert_eq!(messages.len(), 3);
             assert!(pending);
-            Err(wex_desktop_service::ServiceError::new("STORAGE_ERROR", "failed before dispatch"))
+            Err(wex_desktop_service::ServiceError::new(
+                "STORAGE_ERROR",
+                "failed before dispatch",
+            ))
         },
     )
     .unwrap_err();
