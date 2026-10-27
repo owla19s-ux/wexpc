@@ -93,3 +93,17 @@
 ### 清理原则更新
 
 已合入候选可以进入下一步远端 SHA/PR 状态确认；独有提交仅证明 Git 历史不同，不能直接证明当前 main 缺功能。优先做源码/测试对照而非整个历史分支合并。尚未执行远端删除。
+
+## 第四批专项：高差异分支对照（2026-10-27）
+
+直接比较 `main...branch` 后，对高差异分支核对实际文件存在性：
+
+| 分支 | ahead/behind | 本批处理结论 |
+| --- | --- | --- |
+| `fix/pc-organization-revision-20261025` | 72/536 | 旧分支独有 `application/execution_receipts.rs`，main 当前没有该文件；但旧文件直接引用旧版 `DesktopService`、`ExecutionReceipt`、`snapshot.execution_receipts` 和 Agent/Task 关联模型，与 main 现行职责/结构不同，**禁止直接复制进入现行模块**，须单独核对当前任务回执闭环是否包含其安全属性与测试断言 |
+| `feat/connector-capability-catalog-extraction-20261026` | 13/204 | 旧分支新增 `src-tauri/src/tool_catalog.rs`，main 已有该文件；下一步按逻辑和用例对照，而非整支合并 |
+| `feat/pc-dispatch-eligibility-batch-20261026` | 10/323 | `wex-core/src/dispatch.rs`、`dispatch_leases.rs` 和 Host 集成文档 main 均已存在；需对比当前调度门禁和冲突恢复语义 |
+| `fix/ui-task-dispatch-summary-20261026` | 8/173 | `TaskDispatchControls.tsx`、`TaskDispatchStatus.tsx` 已存在 main，旧分支新增并不证明主线缺 UI，须按测试/行为差异审查 |
+| `feat/pc-scope-overlap-pure-2026-10-25` | 39/536 | PR #7 的 `prototypes/scope-guard/**` 是独立原型，继续保留待明确验收和采用决定，不自动转入生产调度层 |
+
+注意：旧 `execution_receipts.rs` 的可读代码包含对任务成员绑定、调用 ID 去重、成功/失败回执的测试；这些是可用的**审查检查点**，但不是可直接复用的现行实现。此批没有将旧源码直接合并到 main，也没有删分支。现行 Windows 自动化最新成功 #40408913676；它不能证明旧原型已兼容现行接口。
