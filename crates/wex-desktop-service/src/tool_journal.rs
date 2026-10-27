@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+type AttemptIdentity = (String, Option<String>, Option<String>, Option<crate::ToolPolicySetting>);
+
 pub struct ToolReceiptMarker {
     pub operation_id: String,
     pub attempt_id: String,
@@ -77,7 +79,7 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         Err(_) => return Err(error()),
     };
     let mut attempts: BTreeMap<String, ToolReceiptMarker> = BTreeMap::new();
-    let mut identities: BTreeMap<String, (String, Option<String>, Option<String>, Option<crate::ToolPolicySetting>)> = BTreeMap::new();
+    let mut identities: BTreeMap<String, AttemptIdentity> = BTreeMap::new();
     let mut observed_in_flight = std::collections::BTreeSet::new();
     for entry in entries {
         let entry = entry.map_err(|_| error())?;
