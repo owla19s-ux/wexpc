@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Archive and delete equivalent adversarial acceptance branch
+      - name: Archive and delete equivalent saved-results isolation branch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,12 +26,12 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'review/api-pc-01-adversarial-acceptance-2026-10-25'; do
+            'fix/ui-saved-results-context-isolation-20261026'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
             case "$branch" in
-              review/api-pc-01-adversarial-acceptance-2026-10-25)
-                expected="3712ad96713a29f11cd50798aa297e5742bf167e" ;;
+              fix/ui-saved-results-context-isolation-20261026)
+                expected="8dabb02ee5f943ea329dced810aedd28fb887e0d" ;;
               *) exit 1 ;;
             esac
             [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
