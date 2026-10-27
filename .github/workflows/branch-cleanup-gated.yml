@@ -58,7 +58,7 @@ jobs:
           set -euo pipefail
           [[ "$GITHUB_REPOSITORY" == "owla19s-ux/wexpc" && "$GITHUB_REF" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-          open_prs="$(gh api 'repos/owla19s-ux/wexpc/pulls?state=open&per_page=100' --jq '.[].head.ref')"
+          open_prs="$(gh pr list --repo owla19s-ux/wexpc --state open --limit 100 --json headRefName --jq '.[].headRefName')"
           deleted=0
           skipped=0
           while read -r branch pinned; do
