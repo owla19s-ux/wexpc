@@ -77,6 +77,7 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         Err(_) => return Err(error()),
     };
     let mut attempts: BTreeMap<String, ToolReceiptMarker> = BTreeMap::new();
+    let mut observed_in_flight = std::collections::BTreeSet::new();
     for entry in entries {
         let entry = entry.map_err(|_| error())?;
         if entry.path().extension().is_none_or(|ext| ext != "json") {
@@ -99,6 +100,9 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         if marker.conversation_id.as_deref() != Some(conversation) {
             continue;
         }
+        if marker.state == "in_flight" {
+            observed_in_flight.insert(marker.attempt_id.clone());
+        }
         if let Some(previous) = attempts.get(&marker.attempt_id) {
             if previous.operation_id != marker.operation_id
                 || previous.turn_id != marker.turn_id
@@ -115,5 +119,50 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         }
         attempts.insert(marker.attempt_id.clone(), marker);
     }
+    // A terminal marker without its pre-dispatch fence cannot prove that the
+    // operation followed the journal protocol. Fail closed instead of treating
+    // a lone success/failure file as trustworthy execution history.
+    if attempts.values().any(|marker| {
+        marker.state != "in_flight" && !observed_in_flight.contains(&marker.attempt_id)
+    }) {
+        return Err(error());
+    }
     Ok(attempts.into_values().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn marker(state: &str) -> ToolReceiptMarker {
+        ToolReceiptMarker {
+            operation_id: "op_1".into(),
+            attempt_id: "attempt_1".into(),
+            state: state.into(),
+            content_digest: None,
+            conversation_id: Some("chat_1".into()),
+            turn_id: Some("turn_1".into()),
+            policy: None,
+        }
+    }
+
+    #[test]
+    fn terminal_receipt_requires_durable_pre_dispatch_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        append_tool_marker(dir.path(), &marker("succeeded")).unwrap();
+        assert_eq!(
+            read_tool_markers(dir.path(), "chat_1").unwrap_err().code,
+            "TOOL_JOURNAL_ERROR"
+        );
+    }
+
+    #[test]
+    fn terminal_receipt_is_accepted_when_pre_dispatch_marker_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        append_tool_marker(dir.path(), &marker("in_flight")).unwrap();
+        append_tool_marker(dir.path(), &marker("succeeded")).unwrap();
+        let markers = read_tool_markers(dir.path(), "chat_1").unwrap();
+        assert_eq!(markers.len(), 1);
+        assert_eq!(markers[0].state, "succeeded");
+    }
 }
