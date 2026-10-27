@@ -3,7 +3,7 @@ import type { DispatchAttempt, Task } from './types';
 export function taskDispatchLabel(task: Task, attempts?: DispatchAttempt[]): string {
   if (task.status === 'draft') return '草案';
   // Old snapshots and interrupted reads must not be presented as "not dispatched".
-  if (task.publication_epoch == null) return '已发布（发布版本未知，需核查）';
+  if (task.publication_epoch == null || task.publication_epoch <= 0) return '已发布（发布版本未知，需核查）';
   if (!attempts) return '已发布（派工记录尚未核实）';
 
   const current = attempts.filter(attempt =>
