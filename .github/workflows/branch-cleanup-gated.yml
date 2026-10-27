@@ -1,61 +1,90 @@
-name: WEXPC safe merged branch cleanup
+name: WEXPC archive-and-prune legacy branches
 on:
   push:
     branches: [main]
     paths:
       - '.github/ci-requests/branch-cleanup/**'
-  workflow_dispatch:
 permissions:
   contents: write
 jobs:
-  delete-confirmed-merged:
+  archive-before-delete:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Archive and delete equivalent local-create receipt branch
+      - name: Preserve pinned branch commits as remote tags before pruning
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          PINNED_BRANCHES: |
+            circleci-project-setup 463457cf711ac75646b9c768750f4db23e74cd36
+            docs/architecture-dedup-review-v0-6-20261026 c92a0a3f96b49704f377b5e78d88d68de5dec9c9
+            docs/architecture-reference-alignment-20261025 7ce2c718c0eac32445dc497eb28ec05bd4605507
+            docs/lightweight-host-architecture-v01-20261026 272c9b2f6de2281a1600edd38cce0465665b80d1
+            docs/pc-011-concurrent-agents-emulator 2126227d77d24e06fe73f3dff6879269e8946d85
+            docs/pc-011-light-project-multi-agent 8fdcffa2adede2b270959641f69066acf227702d
+            docs/pc-product-baseline-2026-10-24 863e13a65e5c7d43075ae90f2ee98c992913bac1
+            docs/pc-user-lifecycle-20261025 d1ea5c9a47bbeb9fe66821a9855f356012c5f432
+            docs/unified-connectivity-semantics-20261025 c181704ffd5aed2d7e3926ae31b09bed06d6c346
+            feat/desktop-task-publication-20261026 40ea767e22c6e9ca764a3d682fd6017022f9a934
+            feat/pc-dispatch-eligibility-batch-20261026 3c3f7a11bc34b12b9f8c9d28eda0b85606b54a33
+            fix/api-final-round-dispatch-guard-20261025 769ef2c52878036cd881f0191fa7b39981d3f55e
+            fix/dispatch-parent-child-leases-20261026 891400f8e37b48961e272dde2bf36ae492ca8a71
+            fix/pc-cross-project-task-eligibility-20261025 a305ac73ff82ddbae2fcadbafe9d3898c1d4a15b
+            fix/pc-git-fsmonitor-exec-fence-20261025 ff86a54818bbb3aa9924c3675583415e70e7abe2
+            fix/pc-organization-revision-20261025 73cf1fc828213bdc3cc913a87dafd2c224b9b69f
+            fix/pc-sqlite-v5-upgrade-fence-20261025 fd1e172b03e778dc88cec83889f9dce406a36733
+            fix/pc-terminal-drain-20261025 b6cde1c48ad699f988d7c2a5cbabc4d12d3dbaf1
+            fix/pc-tool-chain-verified-20261025 ff455b84f725daea698b0e3e4939d9493aa6f21c
+            fix/ui-github-credential-revoke-20261025 d0068d2aa5c831353c9d00c7f62dc2d3e07f1b8e
+            fix/ui-github-status-verified-20261026 13ebc662b9ae9067e31a74df37cac79e714a77a4
+            fix/ui-process-request-evidence-20261026 5f9cb1265d33e04228f35bba4762152332b3b286
+            fix/ui-snapshot-freshness-20261026 8af0315ff847426e970e8cba49b32a8fbe9e9789
+            fix/ui-task-dispatch-summary-20261026 c5dc2e612e0c0c64ce09c3fc3af9e13c0fa53ae0
+            fix/ui-task-duty-selection-20261025 4ac4b2f78bad38f7730f9e86ada44fede2835b89
+            fix/ui-task-editor-reload-20261025 b9b7ebac68095c92967cbf601ab8e86e5eccff50
+            fix/ui-task-footer-evidence-20261026-0723 2a9fb0cb8261905918512cfcce5225bd6f21a039
+            integration/pc-api-tool-reply-recovery-20261025-1932 a587a4cb1d298ebc34a167b989cce2fe3160b952
+            integration/ui-tool-resume-continue-20261025-2030 70696ddb406a98388ff31998ed1e80074fac1502
+            review/process-poll-stale-state-20261026 abd2f721bd26f79a5d7888eb0fdda9159c23fc96
+            test/pc-resume-success-no-replay-20261025 fc5f7b240939edfe7e04468dca05886ef440a5cd
+            test/pc-tool-id-reuse-20261025-2232 d3765e30b63e55659ba93ea44ce940abab68d9ce
+            test/tool-catalog-github-visibility-20261026-2144 9418d27944c3758b39170b3c2a08b550af6cf469
+            ui/dispatch-agent-selection-20261026-0429 a76f8f677f0b67f729193f565771b8f1a8ee27de
         run: |
           set -euo pipefail
-          repo="owla19s-ux/wexpc"
-          [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
+          [[ "$GITHUB_REPOSITORY" == "owla19s-ux/wexpc" && "$GITHUB_REF" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
-          for branch in \
-            'fix/ui-local-create-receipt-20261025'; do
-            [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
-            sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
-            case "$branch" in
-              fix/ui-local-create-receipt-20261025)
-                expected="b3faa28a2dffbdfdbf0a64d879aca559c079b121" ;;
-              *) exit 1 ;;
-            esac
-            [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
-            base="$(git merge-base "$sha" origin/main)"
-            mapfile -t changed < <(git diff --name-only "$base" "$sha")
-            [[ "${#changed[@]}" -gt 0 ]] || { echo "SKIP empty diff $branch"; continue; }
-            identical=true
-            for file in "${changed[@]}"; do
-              old_blob="$(git rev-parse "$sha:$file" 2>/dev/null)" || { identical=false; break; }
-              new_blob="$(git rev-parse "origin/main:$file" 2>/dev/null)" || { identical=false; break; }
-              [[ "$old_blob" == "$new_blob" ]] || { identical=false; break; }
-            done
-            [[ "$identical" == true ]] || { echo "SKIP content mismatch $branch"; continue; }
-            current="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
-            [[ "$current" == "$sha" ]] || { echo "SKIP changed: $branch"; continue; }
-            if gh api "repos/$repo/pulls?state=open&per_page=100" --jq '.[].head.ref' | grep -Fxq "$branch"; then
-              echo "SKIP open PR: $branch"
-              continue
+          open_prs="$(gh api 'repos/owla19s-ux/wexpc/pulls?state=open&per_page=100' --jq '.[].head.ref')"
+          deleted=0
+          skipped=0
+          while read -r branch pinned; do
+            [[ -n "$branch" ]] || continue
+            if [[ "$branch" == "main" || "$branch" == "feat/pc-scope-overlap-pure-2026-10-25" ]]; then
+              echo "PROTECTED $branch"; ((skipped+=1)); continue
             fi
-            echo "Deleting confirmed merged branch $branch @ $sha"
-            archive_ref="refs/tags/archive/wexpc-20261027/$branch"
-            [[ -z "$(git ls-remote origin "$archive_ref")" ]] || { echo "SKIP archive already exists: $archive_ref"; continue; }
-            git push origin "$sha:$archive_ref"
-            archived="$(git ls-remote origin "$archive_ref" | cut -f1)"
-            [[ "$archived" == "$sha" ]] || { echo "ERROR archive unavailable"; exit 1; }
-            git push --force-with-lease="refs/heads/$branch:$sha" origin ":refs/heads/$branch"
-          done
+            if grep -Fxq "$branch" <<< "$open_prs"; then
+              echo "OPEN_PR $branch"; ((skipped+=1)); continue
+            fi
+            current="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+            if [[ "$current" != "$pinned" ]]; then
+              echo "CHANGED_OR_MISSING $branch"; ((skipped+=1)); continue
+            fi
+            tag="refs/tags/archive/wexpc-20261027/$branch"
+            previous="$(git ls-remote origin "$tag" | cut -f1)"
+            if [[ -n "$previous" && "$previous" != "$pinned" ]]; then
+              echo "ARCHIVE_CONFLICT $branch"; ((skipped+=1)); continue
+            fi
+            if [[ -z "$previous" ]]; then
+              git push origin "$pinned:$tag"
+            fi
+            archived="$(git ls-remote origin "$tag" | cut -f1)"
+            [[ "$archived" == "$pinned" ]] || { echo "ARCHIVE_FAILED $branch"; exit 1; }
+            git push --force-with-lease="refs/heads/$branch:$pinned" origin ":refs/heads/$branch"
+            echo "ARCHIVED_AND_DELETED $branch $pinned"
+            ((deleted+=1))
+          done <<< "$PINNED_BRANCHES"
+          echo "Deleted $deleted; skipped $skipped; protected scope prototype unchanged."
