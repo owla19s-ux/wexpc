@@ -158,15 +158,13 @@ impl TaskOperationIndex {
                     .record_evidence(&link.task_id, evidence_ref)
                     .map_err(LinkError::Task)?;
             }
+            // A failed operation is evidence about this attempt, not a terminal
+            // decision for the task. The task may need repair, another attempt,
+            // reassignment, or review; only the task-level workflow decides that.
             OperationState::Failed { evidence_ref, .. } => {
                 if status != TaskStatus::Completed {
                     tasks
                         .record_evidence(&link.task_id, evidence_ref)
-                        .map_err(LinkError::Task)?;
-                }
-                if status == TaskStatus::Running {
-                    tasks
-                        .transition(&link.task_id, TaskStatus::Failed, None)
                         .map_err(LinkError::Task)?;
                 }
             }
@@ -274,7 +272,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_receipt_is_recorded_once_and_marks_running_task_failed() {
+    fn failed_receipt_is_recorded_once_without_terminalizing_running_task() {
         let (mut tasks, mut ledger) = setup();
         let index = TaskOperationIndex::restore(vec![link()], &tasks, &ledger).unwrap();
         ledger
@@ -288,7 +286,7 @@ mod tests {
             .unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
         index.reconcile("op_1", &mut tasks, &ledger).unwrap();
-        assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Failed);
+        assert_eq!(tasks.get("task_1").unwrap().status, TaskStatus::Running);
         assert_eq!(
             tasks.get("task_1").unwrap().evidence_refs,
             vec!["error_log_1"]
