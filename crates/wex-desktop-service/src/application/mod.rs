@@ -348,7 +348,11 @@ impl DesktopService {
         }
         self.mutate(|s| {
             project_exists(s, &input.project_id)?;
-            if input.agent_ids.iter().collect::<std::collections::BTreeSet<_>>().len()
+            if input
+                .agent_ids
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
                 != input.agent_ids.len()
                 || input
                     .agent_ids
@@ -644,7 +648,11 @@ impl DesktopService {
                 ));
             }
             if task.project_id != input.project_id
-                || input.agent_ids.iter().collect::<std::collections::BTreeSet<_>>().len()
+                || input
+                    .agent_ids
+                    .iter()
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len()
                     != input.agent_ids.len()
                 || input
                     .agent_ids
