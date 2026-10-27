@@ -242,17 +242,14 @@ mod tests {
         let child = vec!["src/main.rs".to_owned()];
         let sibling = vec!["tests/main.rs".to_owned()];
 
-        let held = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &parent)
-            .unwrap();
+        let held = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &parent).unwrap();
         assert!(matches!(
             reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &child),
             Err(DispatchStartError::Lease(LeaseError::Busy))
         ));
-        let independent = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &sibling)
-            .unwrap();
+        let independent = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &sibling).unwrap();
         drop(held);
-        let next = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &child)
-            .unwrap();
+        let next = reserve(&board, &leases, "task_1", "pc", "agent_a", 2, &child).unwrap();
         drop(independent);
         drop(next);
         assert_eq!(leases.is_busy("src/main.rs"), Ok(false));

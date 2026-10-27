@@ -1,3 +1,3 @@
-Validate the current main dispatch/lease regression batch (source ccf8cc5a67bf5ee56ee681ad58a4a2644842da45).
-Run workspace rustfmt, strict Clippy and workspace tests using the existing gated Linux workflow.
-No Windows, frontend, cleanup or release workflows requested.
+Retest dispatch/lease regressions after applying the exact rustfmt diff from failed run 40527579681.
+Run cargo fmt --all -- --check, strict workspace Clippy, and workspace tests.
+Only formatting changes in dispatch.rs and dispatch_leases.rs; no runtime or permission changes.

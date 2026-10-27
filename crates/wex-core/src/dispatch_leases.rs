@@ -300,8 +300,7 @@ mod tests {
         }
         drop(result_tx);
         start.wait();
-        let winners = u8::from(result_rx.recv().unwrap())
-            + u8::from(result_rx.recv().unwrap());
+        let winners = u8::from(result_rx.recv().unwrap()) + u8::from(result_rx.recv().unwrap());
         assert_eq!(winners, 1);
         for release in releases {
             let _ = release.send(());
