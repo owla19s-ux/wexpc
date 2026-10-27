@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Archive and delete two byte-identical recovered branches
+      - name: Archive and delete one byte-identical recovered branch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,15 +26,12 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'feat/connector-capability-catalog-extraction-20261026' \
-            'docs/connection-architecture-review-2026-10-26'; do
+            'fix/ui-task-journal-revision-reload-20261025'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
             case "$branch" in
-              feat/connector-capability-catalog-extraction-20261026)
-                expected="34b1cdf77ea074d8099fdc11de967a98b6b142af" ;;
-              docs/connection-architecture-review-2026-10-26)
-                expected="e2bf54b22c92d5bd115d1b958cc297a6ed23cf0a" ;;
+              fix/ui-task-journal-revision-reload-20261025)
+                expected="29f38447cc854ce575b5c295ef46df611985fc8c" ;;
               *) exit 1 ;;
             esac
             [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
