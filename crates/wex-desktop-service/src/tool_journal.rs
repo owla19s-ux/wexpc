@@ -80,7 +80,6 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
     };
     let mut attempts: BTreeMap<String, ToolReceiptMarker> = BTreeMap::new();
     let mut identities: BTreeMap<String, AttemptIdentity> = BTreeMap::new();
-    let mut identities: BTreeMap<String, AttemptIdentity> = BTreeMap::new();
     let mut observed_in_flight = std::collections::BTreeSet::new();
     for entry in entries {
         let entry = entry.map_err(|_| error())?;
@@ -97,18 +96,6 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
         validate(&marker)?;
         if entry.file_name().to_str()
             != Some(format!("{}_{}.json", marker.attempt_id, marker.state).as_str())
-        {
-            return Err(error());
-        }
-        let identity = (
-            marker.operation_id.clone(),
-            marker.conversation_id.clone(),
-            marker.turn_id.clone(),
-            marker.policy.clone(),
-        );
-        if identities
-            .insert(marker.attempt_id.clone(), identity.clone())
-            .is_some_and(|previous| previous != identity)
         {
             return Err(error());
         }
