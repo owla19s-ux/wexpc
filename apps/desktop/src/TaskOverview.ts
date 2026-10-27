@@ -11,7 +11,7 @@ export function taskFooterSummary(data: Pick<Snapshot, 'tasks' | 'dispatch_attem
   const counts = { unverified: 0, unqueued: 0, pending: 0, claimed: 0, unknown: 0 };
 
   for (const task of published) {
-    if (task.publication_epoch == null || !data.dispatch_attempts) {
+    if (task.publication_epoch == null || task.publication_epoch <= 0 || !data.dispatch_attempts) {
       counts.unverified++;
       continue;
     }
