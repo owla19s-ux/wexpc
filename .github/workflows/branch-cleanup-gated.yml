@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Archive and delete recovered connection-contract review branch
+      - name: Archive and delete two equivalent API mock branches
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,12 +26,15 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'docs/connection-contract-review-20261026'; do
+            'feat/pc-chat-stream-preview-20261025' \
+            'test/api-tool-transport-mock-20261025'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
             case "$branch" in
-              docs/connection-contract-review-20261026)
-                expected="3730b8dab7d084053d4c07ebfb7331d362aef782" ;;
+              feat/pc-chat-stream-preview-20261025)
+                expected="2703e233347ead8dc0fbaee986a4b98da028a987" ;;
+              test/api-tool-transport-mock-20261025)
+                expected="7b3762d8cb16ccf173e1cc9a491ae9d266895fd3" ;;
               *) exit 1 ;;
             esac
             [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
