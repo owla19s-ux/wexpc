@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Archive and delete equivalent saved-results isolation branch
+      - name: Archive and delete equivalent local-create receipt branch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,12 +26,12 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'fix/ui-saved-results-context-isolation-20261026'; do
+            'fix/ui-local-create-receipt-20261025'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
             case "$branch" in
-              fix/ui-saved-results-context-isolation-20261026)
-                expected="8dabb02ee5f943ea329dced810aedd28fb887e0d" ;;
+              fix/ui-local-create-receipt-20261025)
+                expected="b3faa28a2dffbdfdbf0a64d879aca559c079b121" ;;
               *) exit 1 ;;
             esac
             [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
