@@ -167,3 +167,11 @@
 以上五个文件在旧分支和当前 main **均非逐字一致**。其中主线测试更丰富不等于可未经核对删除独立提交。对具备等价实现证据的分支，需要留存差异判定/测试引用并对指定 HEAD 做安全检查；对未完成的独立设计或 PR #7 须保留。
 
 本轮没有尝试扩大自动删除规则，也没有删除剩余 45 条。下一阶段以主线现有更高版本的安全测试/实现核查独有内容；如果希望全部远端非 main 分支清零，必须逐条确立“成果已保留、独立工作已处理完毕”的可验证清理依据。
+
+## 第十批：单文件历史分支的实际测试迁移核查（2026-10-27）
+
+- `fix/pc-terminal-drain-20261025`：旧 `terminal_dispatch.rs` 的输出耗尽/截断相关测试在现行 `terminal_dispatch.rs` 中不再出现；但 `connectors/process_capture.rs` 中确实存在同名 `oversized_output_is_drained_without_unbounded_retention` 与 `exact_limit_and_short_output_are_not_truncated`。这属于实现职责迁移而非单纯删除测试，不能用旧文件覆盖新版。旧 `collect` 与 `collect_bounded_output` 为辅助函数名而非独立验收结论。
+- `feat/task-operation-bidirectional-index-20261026`：旧与 main 的 `task_operation.rs` 均提取到 19 个函数名，旧版函数名全部出现在 main，包括 `task_for_operation`、`operations_for_task`、`linked_operations_can_be_queried_both_ways_without_granting_execution` 等；文件仍不同，尚非字节等价结论。
+- `fix/pc-sqlite-v5-upgrade-fence-20261025`：旧 `sqlite.rs` 的六个函数名在 main 均出现；main 还新增 `newly_created_store_uses_schema_eight` 和 `previous_schemas_upgrade_without_replacing_desktop_snapshot`。主线已升级至 schema 8 的测试语义，不能由旧 v5 文件回退覆盖。
+
+此三项已具备“旧测试核查及迁移线索”，**仍不据此将非祖先的分支自动判为可删除**；需结合源码关键语义/最新主线回归证据完成最终等价确认。最近 Linux 严格检查成功 #40501142317。
