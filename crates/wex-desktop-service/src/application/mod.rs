@@ -959,7 +959,41 @@ mod publication_tests {
 
     #[test]
     fn one_published_task_can_queue_distinct_assignees_but_not_duplicate_one() {
-        let mut service = draft_service();
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("desktop.sqlite");
+        let mut service = DesktopService::open(&path).unwrap();
+        service
+            .mutate(|snapshot| {
+                snapshot.projects.push(Project {
+                    id: "p_1".into(),
+                    name: "Project".into(),
+                    goal: String::new(),
+                    resources: vec![],
+                    context_id: None,
+                });
+                snapshot.agents.push(Agent {
+                    id: "a_1".into(),
+                    project_id: "p_1".into(),
+                    name: "Worker".into(),
+                    role: AgentRole::Worker,
+                    connection_id: "c_1".into(),
+                    model_id: "model".into(),
+                    conversation_id: "conv_1".into(),
+                });
+                snapshot.tasks.push(Task {
+                    id: "task_1".into(),
+                    project_id: "p_1".into(),
+                    title: "Implement".into(),
+                    goal: "Make change".into(),
+                    scope: vec!["src".into()],
+                    acceptance: "Tests pass".into(),
+                    agent_ids: vec!["a_1".into()],
+                    status: TaskStatus::Draft,
+                    publication_epoch: 0,
+                });
+                Ok(())
+            })
+            .unwrap();
         service
             .mutate(|snapshot| {
                 snapshot.agents.push(Agent {
@@ -997,6 +1031,22 @@ mod publication_tests {
             "DUPLICATE_DISPATCH"
         );
         assert_eq!(service.snapshot().unwrap().dispatch_attempts.len(), 2);
+        drop(service);
+
+        // Startup revalidates the persisted queue; both distinct assignees
+        // must survive recovery without weakening duplicate protection.
+        let restored = DesktopService::open(&path).unwrap();
+        let restored_state = restored.snapshot().unwrap();
+        assert_eq!(restored_state.dispatch_attempts.len(), 2);
+        validate_dispatch_snapshot(&restored_state).unwrap();
+        assert_eq!(
+            restored_state
+                .dispatch_attempts
+                .iter()
+                .map(|attempt| attempt.agent_id.as_str())
+                .collect::<std::collections::BTreeSet<_>>(),
+            ["a_1", "a_2"].into_iter().collect()
+        );
     }
 
     #[test]
