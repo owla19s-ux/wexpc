@@ -84,3 +84,62 @@ fn duplicate_ids_within_new_batch_are_rejected_without_side_effects() {
     assert_eq!(error.code, "TOOL_CALL_ID_REUSED");
     assert_eq!((dispatches, checkpoints), (0, 0));
 }
+
+#[test]
+fn newly_settled_call_id_cannot_be_reused_in_next_model_step() {
+    let mut model_steps = 0;
+    let mut dispatches = 0;
+    let mut phases = vec![];
+    let error = drive_tool_rounds_from_history(
+        settled_history(),
+        |messages| {
+            model_steps += 1;
+            if model_steps == 1 {
+                assert_eq!(messages.len(), 2);
+                Ok(proposal(&["fresh_call"]))
+            } else {
+                assert_eq!(messages.len(), 4);
+                assert_eq!(messages.last().unwrap().tool_call_id.as_deref(), Some("fresh_call"));
+                Ok(proposal(&["fresh_call"]))
+            }
+        },
+        |calls| {
+            dispatches += 1;
+            Ok(vec![(calls[0].id.clone(), "recorded result".into())])
+        },
+        |messages, pending| {
+            phases.push((messages.len(), pending));
+            Ok(())
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "TOOL_CALL_ID_REUSED");
+    assert_eq!(model_steps, 2);
+    assert_eq!(dispatches, 1);
+    assert_eq!(phases, vec![(3, true), (4, false)]);
+}
+
+#[test]
+fn failed_pending_checkpoint_rejects_dispatch_and_model_continuation() {
+    let mut dispatches = 0;
+    let mut model_steps = 0;
+    let error = drive_tool_rounds_from_history(
+        settled_history(),
+        |_| {
+            model_steps += 1;
+            Ok(proposal(&["uncommitted_call"]))
+        },
+        |_| {
+            dispatches += 1;
+            Ok(vec![])
+        },
+        |messages, pending| {
+            assert_eq!(messages.len(), 3);
+            assert!(pending);
+            Err(wex_desktop_service::ServiceError::new("STORAGE_ERROR", "failed before dispatch"))
+        },
+    )
+    .unwrap_err();
+    assert_eq!(error.code, "STORAGE_ERROR");
+    assert_eq!((model_steps, dispatches), (1, 0));
+}
