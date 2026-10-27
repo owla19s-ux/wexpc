@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Archive and delete one byte-identical recovered branch
+      - name: Archive and delete recovered connection-contract review branch
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,12 +26,12 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'fix/ui-task-journal-revision-reload-20261025'; do
+            'docs/connection-contract-review-20261026'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
             case "$branch" in
-              fix/ui-task-journal-revision-reload-20261025)
-                expected="29f38447cc854ce575b5c295ef46df611985fc8c" ;;
+              docs/connection-contract-review-20261026)
+                expected="3730b8dab7d084053d4c07ebfb7331d362aef782" ;;
               *) exit 1 ;;
             esac
             [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
