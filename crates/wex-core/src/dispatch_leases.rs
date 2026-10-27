@@ -227,6 +227,39 @@ mod tests {
     }
 
     #[test]
+    fn independent_registry_instances_do_not_share_ownership() {
+        // Safety boundary: in-memory leases are not a cross-process lock.
+        // The Host must not infer durable or multi-process exclusion from them.
+        let first = ResourceLeases::default();
+        let second = ResourceLeases::default();
+        let _held = first.acquire("a", &scopes(&["shared"])).unwrap();
+        assert_eq!(first.is_busy("shared"), Ok(true));
+        assert_eq!(second.is_busy("shared"), Ok(false));
+    }
+
+    #[test]
+    fn lease_drop_cannot_release_a_different_generation() {
+        let registry = ResourceLeases::default();
+        let first = registry.acquire("agent", &scopes(&["shared"])).unwrap();
+        let stale_generation = first.generation;
+        drop(first);
+        let current = registry.acquire("agent", &scopes(&["shared"])).unwrap();
+        assert!(current.generation > stale_generation);
+        // Simulate a delayed stale lease being dropped after a new generation
+        // acquired the same scope. Only the current generation may release it.
+        let stale = ResourceLease {
+            state: Arc::clone(&registry.state),
+            scopes: scopes(&["shared"]),
+            owner: "agent".to_owned(),
+            generation: stale_generation,
+        };
+        drop(stale);
+        assert_eq!(registry.is_busy("shared"), Ok(true));
+        drop(current);
+        assert_eq!(registry.is_busy("shared"), Ok(false));
+    }
+
+    #[test]
     fn cloned_registries_share_the_same_lock_state() {
         let registry = ResourceLeases::default();
         let other = registry.clone();
