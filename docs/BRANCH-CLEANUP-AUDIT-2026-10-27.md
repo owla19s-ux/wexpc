@@ -107,3 +107,17 @@
 | `feat/pc-scope-overlap-pure-2026-10-25` | 39/536 | PR #7 的 `prototypes/scope-guard/**` 是独立原型，继续保留待明确验收和采用决定，不自动转入生产调度层 |
 
 注意：旧 `execution_receipts.rs` 的可读代码包含对任务成员绑定、调用 ID 去重、成功/失败回执的测试；这些是可用的**审查检查点**，但不是可直接复用的现行实现。此批没有将旧源码直接合并到 main，也没有删分支。现行 Windows 自动化最新成功 #40408913676；它不能证明旧原型已兼容现行接口。
+
+## 第五批：执行回执语义对照（2026-10-27）
+
+检查来源：旧 `fix/pc-organization-revision-20261025` 的 `application/execution_receipts.rs`，以及最新 main 的 `application/mod.rs`、`application/task_records.rs`、`application/tool_reply.rs`、`application/execution_policy.rs`。
+
+| 旧约束 | 目前 main 证据 | 结论 |
+| --- | --- | --- |
+| 成员必须属于任务且已被分派 | `task_member_assigned`、派工记录版本验证以及 `claim_dispatch_attempt` 的成员绑定复核 | 派工路径有约束，但不是旧 ExecutorOutcome 直存接口的一比一替代 |
+| 调用标识不能重复登记 | 现行派工依据任务和 `publication_epoch` 去重，并校验 dispatch_attempt id；旧版对 `invocation_id` 去重 | **标识层次不同**：派工去重不直接证明外部工具调用 ID 的统一去重 |
+| 失败回执仍要保留、不得称为成功 | 现行 `dispatch_attempts` 的 InFlight/OutcomeUnknown 冷恢复失败封闭；`task_records.rs` 明确只接收用户来源的任务记录 | 已有不确定执行保护，但不能以用户任务记录取代可信执行回执 |
+| 回执关联操作前任务快照、revision、agent、tool | 现行派工存 task、project、agent、epoch、status、recorded_revision；工具执行证据需继续对照 Core ledger/Host 工具层 | 字段结构与旧版不同，不能宣布完全覆盖 |
+| 不允许外部模型伪造可信执行结果 | 旧接口 `ExecutorOutcome` 是 `pub(super)` 的受限结构；主线工具回执需继续查 Host 实际调用链而非仅应用服务 | **待专门验收** |
+
+处置决定：旧 `execution_receipts.rs` 与当前数据结构不兼容，**不直接迁入 main**；对旧分支保持“待语义证据确认”，不因为 72 条独有提交而直接合并。后续针对 Core ledger、工具回执、主 AI 续答分别采集现行测试文件/调用路径证据，再决定是否要新增最小回归测试。该表是结构化静态核查，不是新运行的测试或安全验收。
