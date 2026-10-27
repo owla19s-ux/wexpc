@@ -121,3 +121,11 @@
 | 不允许外部模型伪造可信执行结果 | 旧接口 `ExecutorOutcome` 是 `pub(super)` 的受限结构；主线工具回执需继续查 Host 实际调用链而非仅应用服务 | **待专门验收** |
 
 处置决定：旧 `execution_receipts.rs` 与当前数据结构不兼容，**不直接迁入 main**；对旧分支保持“待语义证据确认”，不因为 72 条独有提交而直接合并。后续针对 Core ledger、工具回执、主 AI 续答分别采集现行测试文件/调用路径证据，再决定是否要新增最小回归测试。该表是结构化静态核查，不是新运行的测试或安全验收。
+
+## 第七批：现行连接器/调度源文件逐一校验（2026-10-27）
+
+- 新增工具回执回归测试已在 Linux Actions #40501142317 通过：格式、严格 Clippy、工作区测试全部 Success。对应 CI HEAD `c84803879601357dcc9066caaaa5a9d983cbaf24`。
+- 旧 `feat/connector-capability-catalog-extraction-20261026` 的 `apps/desktop/src-tauri/src/tool_catalog.rs`、`main.rs`、`tool_approvals.rs` **逐字节对照均与当前 main 相同**。该分支 `ahead_by>0` 是 Git 提交历史差异，不能认定功能缺失；此三文件不需重新复制或合并。其他上下游行为仍依赖已有自动化与后续验收。
+- 旧 `feat/pc-dispatch-eligibility-batch-20261026` 的 `crates/wex-core/src/dispatch.rs`（旧 7323 字符，现行 7848）和 `dispatch_leases.rs`（旧 5267，现行 7772）内容不同，而 `docs/PC-DISPATCH-HOST-INTEGRATION-20261026.md` 完全相同。主线逻辑已有进一步修改；不可将旧分支覆盖现行调度实现。
+- 旧 `fix/ui-task-dispatch-summary-20261026` 的 `TaskDispatchControls.tsx`（旧 3679，现行 4314）不同；主线有后续变化。应审查独有测试与行为，而非覆盖文件。
+- **当前清理分类**：连接器能力目录旧分支进入“可作成果已回收的差异分支候选”（仍须核查 HEAD/其他文件及 PR）；调度/UI 旧分支保持“需语义审查”。没有删除远端分支。
