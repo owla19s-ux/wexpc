@@ -32,10 +32,9 @@ jobs:
             [[ "$sha" == "47b0da609e196a6f7ffc357d725d9093ca573a4c" ]] || { echo "SKIP unexpected head: $branch"; continue; }
             # Single ahead commit changes only task_operation.rs; its changes
             # versus main are formatting-only. Recheck the source via git.
-            git diff -w --exit-code "$sha" origin/main -- crates/wex-core/src/task_operation.rs || {
-              echo "SKIP substantive source differences: $branch"
-              continue
-            }
+            old_source="$(git show "$sha:crates/wex-core/src/task_operation.rs" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1)"
+            main_source="$(git show "origin/main:crates/wex-core/src/task_operation.rs" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1)"
+            [[ "$old_source" == "$main_source" ]] || { echo "SKIP non-format changes: $branch"; continue; }
             current="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
             [[ "$current" == "$sha" ]] || { echo "SKIP changed: $branch"; continue; }
             if gh api "repos/$repo/pulls?state=open&per_page=100" --jq '.[].head.ref' | grep -Fxq "$branch"; then
