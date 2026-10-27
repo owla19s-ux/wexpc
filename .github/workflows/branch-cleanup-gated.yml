@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: true
-      - name: Verify equivalent task index before deleting one divergent branch
+      - name: Archive and delete two byte-identical recovered branches
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -26,15 +26,28 @@ jobs:
           [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
           git fetch origin '+refs/heads/*:refs/remotes/origin/*'
           for branch in \
-            'feat/task-operation-bidirectional-index-20261026'; do
+            'feat/connector-capability-catalog-extraction-20261026' \
+            'docs/connection-architecture-review-2026-10-26'; do
             [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
             sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
-            [[ "$sha" == "47b0da609e196a6f7ffc357d725d9093ca573a4c" ]] || { echo "SKIP unexpected head: $branch"; continue; }
-            # Single ahead commit changes only task_operation.rs; its changes
-            # versus main are formatting-only. Recheck the source via git.
-            old_source="$(git show "$sha:crates/wex-core/src/task_operation.rs" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1)"
-            main_source="$(git show "origin/main:crates/wex-core/src/task_operation.rs" | tr -d '[:space:]' | sha256sum | cut -d' ' -f1)"
-            [[ "$old_source" == "$main_source" ]] || { echo "SKIP non-format changes: $branch"; continue; }
+            case "$branch" in
+              feat/connector-capability-catalog-extraction-20261026)
+                expected="34b1cdf77ea074d8099fdc11de967a98b6b142af" ;;
+              docs/connection-architecture-review-2026-10-26)
+                expected="e2bf54b22c92d5bd115d1b958cc297a6ed23cf0a" ;;
+              *) exit 1 ;;
+            esac
+            [[ "$sha" == "$expected" ]] || { echo "SKIP changed head $branch"; continue; }
+            base="$(git merge-base "$sha" origin/main)"
+            mapfile -t changed < <(git diff --name-only "$base" "$sha")
+            [[ "${#changed[@]}" -gt 0 ]] || { echo "SKIP empty diff $branch"; continue; }
+            identical=true
+            for file in "${changed[@]}"; do
+              old_blob="$(git rev-parse "$sha:$file" 2>/dev/null)" || { identical=false; break; }
+              new_blob="$(git rev-parse "origin/main:$file" 2>/dev/null)" || { identical=false; break; }
+              [[ "$old_blob" == "$new_blob" ]] || { identical=false; break; }
+            done
+            [[ "$identical" == true ]] || { echo "SKIP content mismatch $branch"; continue; }
             current="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
             [[ "$current" == "$sha" ]] || { echo "SKIP changed: $branch"; continue; }
             if gh api "repos/$repo/pulls?state=open&per_page=100" --jq '.[].head.ref' | grep -Fxq "$branch"; then
@@ -42,5 +55,10 @@ jobs:
               continue
             fi
             echo "Deleting confirmed merged branch $branch @ $sha"
+            archive_ref="refs/tags/archive/wexpc-20261027/$branch"
+            [[ -z "$(git ls-remote origin "$archive_ref")" ]] || { echo "SKIP archive already exists: $archive_ref"; continue; }
+            git push origin "$sha:$archive_ref"
+            archived="$(git ls-remote origin "$archive_ref" | cut -f1)"
+            [[ "$archived" == "$sha" ]] || { echo "ERROR archive unavailable"; exit 1; }
             git push --force-with-lease="refs/heads/$branch:$sha" origin ":refs/heads/$branch"
           done
