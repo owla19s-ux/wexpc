@@ -33,6 +33,12 @@ it('does not mislabel published tasks as drafts when dispatch evidence is missin
   expect(text).toContain('发布/登记不代表实际施工');
 });
 
+it('does not treat a zero publication epoch as verified dispatch evidence', () => {
+  const text = taskFooterSummary(state([{ ...published, publication_epoch: 0 }], []));
+  expect(text).toContain('1 个派工证据未核实');
+  expect(text).not.toContain('尚未登记派工');
+});
+
 it('distinguishes unqueued, pending, and claimed without claiming execution', () => {
   expect(taskFooterSummary(state([published], []))).toContain('1 个尚未登记派工');
   expect(taskFooterSummary(state([published], [attempt('pending')]))).toContain('1 个待领取');
