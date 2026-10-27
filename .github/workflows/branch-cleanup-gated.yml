@@ -1,9 +1,6 @@
 name: WEXPC archive-and-prune legacy branches
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/ci-requests/branch-cleanup/**'
+  workflow_dispatch:
 permissions:
   contents: write
 jobs:
