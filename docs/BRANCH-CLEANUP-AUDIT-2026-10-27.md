@@ -72,3 +72,24 @@
 - `docs/architecture-reference-alignment-20261025`、`docs/connection-architecture-review-2026-10-26`、`docs/pc-011-concurrent-agents-emulator`、`docs/pc-011-light-project-multi-agent`、`docs/pc-user-lifecycle-20261025`、`docs/unified-connectivity-semantics-20261025`：仍有独有提交，待确认是否属于新变更或旧文字。
 
 此清单是逐批审计中间结果，不是全部 82 条分支的最终清理许可。本批未删除任何远端分支。
+
+## 第三批审计：feat/fix/UI/CircleCI（2026-10-27）
+
+使用 `compare_commits(main, head)` 逐条检查剩余 43 条 feat/fix 和 3 条其他命名空间，审计仅用于筛选，不能代替内容差异及远端 SHA 二次核对。
+
+### 新增明确已合入候选（ahead_by = 0）
+`feat/api-protocol-proposal`、`feat/p1-git-commit-preflight-20261026`、`feat/pc-agent-task-state`、`feat/pc-api-desktop-integration-20261025`、`feat/pc-desktop-foundation-2026-10-24`、`feat/pc-desktop-task-core-integration-20261025`、`feat/ui-scoped-settings-20261026-1639`、`fix/api-protocol-boundaries-20261025`、`fix/api-text-completion-role-terminal-20261025`、`fix/p1-git-environment-fence-20261026`、`fix/pc-github-postwrite-readback-20261025`、`fix/pc-task-link-reassignment-20261025`、`fix/ui-await-latest-snapshot-20261026-1232`、`fix/ui-dispatch-recheck-pending-20261026-1130`、`fix/ui-project-chat-navigation-20261025`、`fix/ui-reconcile-failed-mutations-20261026-1025`、`fix/ui-snapshot-freshness-20261026-0825`、`fix/ui-tool-result-after-request-20261025`、`fix/ui-verified-connection-creation-20261026`、`ui-api-connection-freshness-20261026`。
+
+### 仍有独有提交的重点分支
+
+- `feat/connector-capability-catalog-extraction-20261026` ahead 13；`feat/pc-dispatch-eligibility-batch-20261026` ahead 10；`fix/dispatch-parent-child-leases-20261026` ahead 7。这些触及核心能力/调度，不可整支盲目合并。
+- `fix/pc-organization-revision-20261025` ahead 72，存在历史分叉；须检查与当前正式服务/事务回执是否重叠，避免用旧链路覆盖新链路。
+- `fix/ui-task-dispatch-summary-20261026` ahead 8；`fix/ui-task-footer-evidence-20261026-0723` ahead 4；`ui/dispatch-agent-selection-20261026-0429` ahead 5；这些涉及 UI 文件和交互测试，应同当前 main 差异核对。
+- `fix/ui-github-credential-revoke-20261025` ahead 6；`fix/ui-github-status-verified-20261026` ahead 3；`fix/ui-local-create-receipt-20261025` ahead 6；`fix/ui-snapshot-freshness-20261026` ahead 8；需要确认是否均被新实现替代。
+- 其余仍有独有提交：`feat/desktop-task-publication-20261026` (1)、`feat/pc-chat-stream-preview-20261025` (1)、`feat/task-operation-bidirectional-index-20261026` (1)、`fix/api-final-round-dispatch-guard-20261025` (3)、`fix/pc-cross-project-task-eligibility-20261025` (3)、`fix/pc-git-fsmonitor-exec-fence-20261025` (3)、`fix/pc-sqlite-v5-upgrade-fence-20261025` (1)、`fix/pc-terminal-drain-20261025` (1)、`fix/pc-tool-chain-verified-20261025` (2)、`fix/ui-process-request-evidence-20261026` (3)、`fix/ui-saved-results-context-isolation-20261026` (3)、`fix/ui-task-duty-selection-20261025` (2)、`fix/ui-task-editor-reload-20261025` (3)、`fix/ui-task-journal-revision-reload-20261025` (1)。
+- `circleci-project-setup` ahead 1，只有独立 `.circleci/config.yml`，第二平台 CI 仍属候选；不擅自启用。
+- PR #7 的 `feat/pc-scope-overlap-pure-2026-10-25` 仍保留并单独审查。
+
+### 清理原则更新
+
+已合入候选可以进入下一步远端 SHA/PR 状态确认；独有提交仅证明 Git 历史不同，不能直接证明当前 main 缺功能。优先做源码/测试对照而非整个历史分支合并。尚未执行远端删除。
