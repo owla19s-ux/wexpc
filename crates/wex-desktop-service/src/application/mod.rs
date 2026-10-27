@@ -1157,26 +1157,65 @@ mod publication_tests {
 
     #[test]
     fn historical_dispatch_survives_member_duty_changes_at_restart() {
-        let mut service = draft_service();
-        let revision = service.snapshot().unwrap().revision;
-        service.publish_task(revision, "task_1").unwrap();
-        let revision = service.snapshot().unwrap().revision;
-        service
-            .queue_dispatch_attempt(revision, "task_1", "a_1")
-            .unwrap();
-        service
-            .mutate(|snapshot| {
-                snapshot.agents[0].project_id = "another_project".into();
-                Ok(())
-            })
-            .unwrap();
-        let persisted = service.snapshot().unwrap();
-        // Restoring history does not grant current authority. Claim must
-        // separately enforce today's project duty and assignment.
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("desktop.sqlite");
+        let attempt_id = {
+            let mut service = DesktopService::open(&db).unwrap();
+            service
+                .mutate(|snapshot| {
+                    snapshot.projects.push(Project {
+                        id: "p_1".into(),
+                        name: "Project".into(),
+                        goal: String::new(),
+                        resources: vec![],
+                        context_id: None,
+                    });
+                    snapshot.agents.push(Agent {
+                        id: "a_1".into(),
+                        project_id: "p_1".into(),
+                        name: "Worker".into(),
+                        role: AgentRole::Worker,
+                        connection_id: "c_1".into(),
+                        model_id: "model".into(),
+                        conversation_id: "conv_1".into(),
+                    });
+                    snapshot.tasks.push(Task {
+                        id: "task_1".into(),
+                        project_id: "p_1".into(),
+                        title: "Implement".into(),
+                        goal: "Make change".into(),
+                        scope: vec!["src".into()],
+                        acceptance: "Tests pass".into(),
+                        agent_ids: vec!["a_1".into()],
+                        status: TaskStatus::Draft,
+                        publication_epoch: 0,
+                    });
+                    Ok(())
+                })
+                .unwrap();
+            let revision = service.snapshot().unwrap().revision;
+            service.publish_task(revision, "task_1").unwrap();
+            let revision = service.snapshot().unwrap().revision;
+            let attempt = service
+                .queue_dispatch_attempt(revision, "task_1", "a_1")
+                .unwrap();
+            service
+                .mutate(|snapshot| {
+                    snapshot.agents[0].project_id = "another_project".into();
+                    Ok(())
+                })
+                .unwrap();
+            attempt.id
+        };
+
+        // A real SQLite reopen must preserve the historical record while
+        // refusing to treat the old membership as current authority.
+        let mut restored = DesktopService::open(&db).unwrap();
+        let persisted = restored.snapshot().unwrap();
         assert!(validate_dispatch_snapshot(&persisted).is_ok());
         assert_eq!(
-            service
-                .claim_dispatch_attempt(persisted.revision, &persisted.dispatch_attempts[0].id)
+            restored
+                .claim_dispatch_attempt(persisted.revision, &attempt_id)
                 .unwrap_err()
                 .code,
             "DISPATCH_REFUSED"
