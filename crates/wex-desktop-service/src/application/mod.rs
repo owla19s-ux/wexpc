@@ -109,6 +109,8 @@ fn task_member_assigned(s: &DesktopSnapshot, agent_id: &str, project_id: &str) -
 /// Validate persisted dispatch facts before permitting a Host to observe them.
 fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
     let mut identities = std::collections::BTreeSet::new();
+    // One published task may be assigned to several agents. Deduplicate the
+    // dispatch intent per publication + agent, not per publication alone.
     let mut publications = std::collections::BTreeSet::new();
     for attempt in &snapshot.dispatch_attempts {
         let task = snapshot
@@ -130,7 +132,11 @@ fn validate_dispatch_snapshot(snapshot: &DesktopSnapshot) -> Result<()> {
             || task.publication_epoch != attempt.publication_epoch
             || !task.agent_ids.contains(&attempt.agent_id)
             || !identities.insert(attempt.id.clone())
-            || !publications.insert((attempt.task_id.clone(), attempt.publication_epoch))
+            || !publications.insert((
+                attempt.task_id.clone(),
+                attempt.publication_epoch,
+                attempt.agent_id.clone(),
+            ))
         {
             return Err(ServiceError::new(
                 "INVALID_SNAPSHOT",
@@ -534,11 +540,13 @@ impl DesktopService {
                 ));
             }
             if s.dispatch_attempts.iter().any(|a| {
-                a.task_id == ticket.task_id && a.publication_epoch == ticket.assignment_epoch
+                a.task_id == ticket.task_id
+                    && a.publication_epoch == ticket.assignment_epoch
+                    && a.agent_id == ticket.agent_id
             }) {
                 return Err(ServiceError::new(
                     "DUPLICATE_DISPATCH",
-                    "该发布版本已有派工尝试，不能重复登记",
+                    "该发布版本已为此成员登记派工尝试，不能重复登记",
                 ));
             }
             let attempt = DispatchAttempt {
@@ -947,6 +955,48 @@ mod publication_tests {
             "DUPLICATE_DISPATCH"
         );
         assert_eq!(service.snapshot().unwrap().revision, saved.revision);
+    }
+
+    #[test]
+    fn one_published_task_can_queue_distinct_assignees_but_not_duplicate_one() {
+        let mut service = draft_service();
+        service
+            .mutate(|snapshot| {
+                snapshot.agents.push(Agent {
+                    id: "a_2".into(),
+                    project_id: "p_1".into(),
+                    name: "Reviewer".into(),
+                    role: AgentRole::Reviewer,
+                    connection_id: "c_1".into(),
+                    model_id: "model".into(),
+                    conversation_id: "conv_2".into(),
+                });
+                snapshot.tasks[0].agent_ids.push("a_2".into());
+                Ok(())
+            })
+            .unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        service.publish_task(revision, "task_1").unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        let first = service
+            .queue_dispatch_attempt(revision, "task_1", "a_1")
+            .unwrap();
+        let revision = service.snapshot().unwrap().revision;
+        let second = service
+            .queue_dispatch_attempt(revision, "task_1", "a_2")
+            .unwrap();
+        assert_ne!(first.id, second.id);
+        assert_eq!(first.publication_epoch, second.publication_epoch);
+        let saved = service.snapshot().unwrap();
+        assert_eq!(saved.dispatch_attempts.len(), 2);
+        assert_eq!(
+            service
+                .queue_dispatch_attempt(saved.revision, "task_1", "a_1")
+                .unwrap_err()
+                .code,
+            "DUPLICATE_DISPATCH"
+        );
+        assert_eq!(service.snapshot().unwrap().dispatch_attempts.len(), 2);
     }
 
     #[test]
