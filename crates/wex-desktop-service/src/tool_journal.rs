@@ -4,13 +4,16 @@ use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, fs, path::Path};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-type AttemptIdentity = (String, Option<String>, Option<String>, Option<crate::ToolPolicySetting>);
+type AttemptIdentity = (String, Option<String>, Option<String>, Option<String>, Option<crate::ToolPolicySetting>);
 
 pub struct ToolReceiptMarker {
     pub operation_id: String,
     pub attempt_id: String,
     pub state: String,
     pub content_digest: Option<String>,
+    /// Stable digest of the approved operation intent, unchanged across states.
+    #[serde(default)]
+    pub intent_digest: Option<String>,
     #[serde(default)]
     pub conversation_id: Option<String>,
     #[serde(default)]
@@ -40,6 +43,10 @@ fn validate(marker: &ToolReceiptMarker) -> Result<()> {
         )
         || marker
             .content_digest
+            .as_ref()
+            .is_some_and(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
+        || marker
+            .intent_digest
             .as_ref()
             .is_some_and(|s| s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()))
         || marker
@@ -103,6 +110,7 @@ pub fn read_tool_markers(root: &Path, conversation: &str) -> Result<Vec<ToolRece
             marker.operation_id.clone(),
             marker.conversation_id.clone(),
             marker.turn_id.clone(),
+            marker.intent_digest.clone(),
             marker.policy.clone(),
         );
         if identities
@@ -155,6 +163,7 @@ mod tests {
             attempt_id: "attempt_1".into(),
             state: state.into(),
             content_digest: None,
+            intent_digest: Some("a".repeat(64)),
             conversation_id: Some("chat_1".into()),
             turn_id: Some("turn_1".into()),
             policy: None,
