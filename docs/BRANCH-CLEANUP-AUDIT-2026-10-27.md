@@ -151,3 +151,19 @@
 | 第三批 | [#40503548696](https://github.com/owla19s-ux/wexpc/actions/runs/40503548696) | 17 | 46 | success，全部 17 条消失 |
 
 **合计真正删除 37 条**，远端从 83 条降为 46 条（含 main），剩余非 main 45 条。剩余分支不可据此默认可删除，需区分独有提交和已经被重写/迁移的等价实现；尤其独立 PR #7 的 `feat/pc-scope-overlap-pure-2026-10-25` 保留。上述状态以本轮 Actions 与分支列表实时读取为准。
+
+## 第九批：实际删除 37 条后剩余 45 条再核查（2026-10-27）
+
+实时查询 GitHub 远端分支 46 条（main + 45），并按最新 main 对所有 45 条调用 `compare_commits`：**45/45 都有 ahead_by > 0**。因此没有任何剩余分支能再通过现有“仅删除已完全合入 main 的分支”安全条件；不得通过关闭 PR、文件同名或单纯 ahead 历史差异绕开该检查。第一至三批已删除 37 条的结果不变。
+
+第一组复核了五条单文件差异分支：
+
+- `feat/desktop-task-publication-20261026` → `crates/wex-desktop-service/src/infrastructure/sqlite.rs`
+- `feat/task-operation-bidirectional-index-20261026` → `crates/wex-core/src/task_operation.rs`
+- `fix/pc-terminal-drain-20261025` → `crates/wex-desktop-service/src/connectors/terminal_dispatch.rs`
+- `test/pc-tool-id-reuse-20261025-2232` → `crates/wex-desktop-service/tests/tool_call_id_reuse.rs`
+- `fix/pc-sqlite-v5-upgrade-fence-20261025` → `crates/wex-desktop-service/src/infrastructure/sqlite.rs`
+
+以上五个文件在旧分支和当前 main **均非逐字一致**。其中主线测试更丰富不等于可未经核对删除独立提交。对具备等价实现证据的分支，需要留存差异判定/测试引用并对指定 HEAD 做安全检查；对未完成的独立设计或 PR #7 须保留。
+
+本轮没有尝试扩大自动删除规则，也没有删除剩余 45 条。下一阶段以主线现有更高版本的安全测试/实现核查独有内容；如果希望全部远端非 main 分支清零，必须逐条确立“成果已保留、独立工作已处理完毕”的可验证清理依据。
