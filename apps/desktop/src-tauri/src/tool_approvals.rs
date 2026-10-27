@@ -1110,6 +1110,7 @@ fn review_saved_read(
         &operation_id,
         "in_flight",
         Some(&intent.intent_digest),
+        None,
         Some(&policy),
     )?;
     // The store checks its revision and live grant under the same lock as I/O.
