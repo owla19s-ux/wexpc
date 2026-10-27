@@ -41,7 +41,11 @@ fn seed_legacy_fields(path: &Path, version: u32) -> Value {
 }
 
 fn assert_legacy_fields(expected: &Value, actual: &Value) {
-    for key in ["execution_receipts", "agent_work_reports", "legacy_extension"] {
+    for key in [
+        "execution_receipts",
+        "agent_work_reports",
+        "legacy_extension",
+    ] {
         assert_eq!(actual.get(key), expected.get(key), "{key} was erased");
     }
 }
@@ -135,4 +139,25 @@ fn failed_write_rolls_back_and_retry_preserves_legacy_history() {
     assert_legacy_fields(&original, &actual);
     assert_eq!(actual["revision"], json!(revision + 1));
     assert_eq!(actual["projects"].as_array().unwrap().len(), 1);
+}
+
+#[test]
+fn opaque_numbers_are_preserved_without_float_rounding() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("precise.sqlite");
+    drop(DesktopService::open(&path).unwrap());
+    let mut raw = raw_snapshot(&path);
+    assert_eq!(raw.pop(), Some('}'));
+    raw.push_str(",\"legacy_precise\":123456789012345678901234567890}");
+    let db = Connection::open(&path).unwrap();
+    db.execute("UPDATE desktop_state SET body=?1 WHERE id=1", [&raw])
+        .unwrap();
+    drop(db);
+    let mut app = DesktopService::open(&path).unwrap();
+    app.create_project("Keep exact history".into(), String::new(), vec![])
+        .unwrap();
+    assert!(
+        raw_snapshot(&path).contains("\"legacy_precise\":123456789012345678901234567890"),
+        "opaque legacy numbers must not be erased or rounded"
+    );
 }
