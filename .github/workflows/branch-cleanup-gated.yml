@@ -1,0 +1,45 @@
+name: WEXPC safe merged branch cleanup
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/ci-requests/branch-cleanup/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  delete-confirmed-merged:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Delete first verified merged branches only
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="owla19s-ux/wexpc"
+          [[ "${GITHUB_REPOSITORY}" == "$repo" && "${GITHUB_REF}" == "refs/heads/main" ]] || exit 1
+          git fetch origin '+refs/heads/*:refs/remotes/origin/*'
+          for branch in \
+            'integration/tool-catalog-main-20261027' \
+            'work/process-chain-20261026' \
+            'work/process-pipe-cleanup-20261026' \
+            'integration/process-evidence-ui-20261026' \
+            'integration/task-dispatch-ui-20261026'; do
+            [[ "$branch" != "main" && "$branch" != "feat/pc-scope-overlap-pure-2026-10-25" ]] || exit 1
+            sha="$(git rev-parse --verify "refs/remotes/origin/$branch")"
+            git merge-base --is-ancestor "$sha" origin/main || { echo "SKIP unmerged: $branch"; continue; }
+            current="$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)"
+            [[ "$current" == "$sha" ]] || { echo "SKIP changed: $branch"; continue; }
+            if gh api "repos/$repo/pulls?state=open&per_page=100" --jq '.[].head.ref' | grep -Fxq "$branch"; then
+              echo "SKIP open PR: $branch"
+              continue
+            fi
+            echo "Deleting confirmed merged branch $branch @ $sha"
+            git push --force-with-lease="refs/heads/$branch:$sha" origin ":refs/heads/$branch"
+          done
